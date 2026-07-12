@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>holdonquietly</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
+    <!-- App version. BUMP THIS before publishing a new release, and tag the
+         GitHub release "v<this>" (e.g. v1.0.1). The in-app auto-updater compares
+         this against the latest GitHub release. -->
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Embedded so a LONE .exe still carries the code + logo (no loose files
+         needed next to it). Also copied to output for dev convenience. -->
+    <EmbeddedResource Include="preload.js"><LogicalName>preload.js</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="logo.png"><LogicalName>logo.png</LogicalName></EmbeddedResource>
+    <None Include="extensions\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>extensions\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+</Project>

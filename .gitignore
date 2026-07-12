@@ -1,0 +1,28 @@
+# ── Build output ────────────────────────────────────────────────────────────
+bin/
+obj/
+dist/
+*.user
+*.suo
+*.cache
+.vs/
+
+# ── Bundled third-party ad-blocker (uBlock Origin, GPLv3) ───────────────────
+# Not redistributed here — it's an optional local component. See README.
+extensions/
+
+# ── Server-side infra (runs on the VPS, not part of the desktop app) ────────
+backend/
+
+# ── Internal dev notes (operational details) ───────────────────────────────
+HANDOFF.md
+
+# ── Local runtime / staged auto-update artifacts ───────────────────────────
+holdonquietly.new.exe
+holdonquietly.new.exe.part
+hoq-update.cmd
+*.log
+
+# ── Local-only secrets/config (never commit) ───────────────────────────────
+secrets.local
+*.local.json
