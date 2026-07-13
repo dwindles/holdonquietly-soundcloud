@@ -311,6 +311,65 @@ class Program
         catch { }
     }
 
+    // Post the current track to a Discord webhook. The URL is read from a LOCAL
+    // config file (%LocalAppData%\SoundCloudApp\webhook.txt) — never embedded in
+    // the app/repo — so the public build can't be abused to spam a channel. The
+    // POST is host-side because Discord webhook endpoints don't send CORS headers.
+    static string WebhookPath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SoundCloudApp", "webhook.txt");
+
+    static async Task PostWebhook(string json)
+    {
+        try
+        {
+            string wh = File.Exists(WebhookPath()) ? File.ReadAllText(WebhookPath()).Trim() : "";
+            if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http")) return;
+
+            var r = JsonDocument.Parse(json).RootElement;
+            string title = Prop(r, "title"), artist = Prop(r, "artist"), cover = Prop(r, "cover"),
+                   url = Prop(r, "url"), name = Prop(r, "name"), avatar = Prop(r, "avatar"), length = Prop(r, "length");
+            if (string.IsNullOrEmpty(title)) return;
+
+            int color = 0xff5500;
+            if (r.TryGetProperty("color", out var cc) && cc.ValueKind == JsonValueKind.Number) color = cc.GetInt32();
+
+            var author = new Dictionary<string, object>
+            {
+                ["name"] = string.IsNullOrEmpty(name) ? "Now playing" : (name + " shared a track"),
+            };
+            if (!string.IsNullOrEmpty(avatar)) author["icon_url"] = avatar;
+
+            var embed = new Dictionary<string, object>
+            {
+                ["author"] = author,
+                ["title"] = title,
+                ["color"] = color,
+                ["timestamp"] = DateTime.UtcNow.ToString("o"),
+                ["footer"] = new Dictionary<string, object> { ["text"] = "via holdonquietly" },
+            };
+            if (!string.IsNullOrEmpty(url)) embed["url"] = url;
+            if (!string.IsNullOrEmpty(artist)) embed["description"] = "by **" + artist + "**";
+            if (!string.IsNullOrEmpty(cover)) embed["thumbnail"] = new Dictionary<string, object> { ["url"] = cover };
+
+            var fields = new List<object>();
+            if (!string.IsNullOrEmpty(length))
+                fields.Add(new Dictionary<string, object> { ["name"] = "Length", ["value"] = length, ["inline"] = true });
+            if (!string.IsNullOrEmpty(url))
+                fields.Add(new Dictionary<string, object> { ["name"] = "Listen", ["value"] = "[Open in SoundCloud](" + url + ")", ["inline"] = true });
+            if (fields.Count > 0) embed["fields"] = fields;
+
+            var payload = new Dictionary<string, object>
+            {
+                ["username"] = string.IsNullOrEmpty(name) ? "holdonquietly" : name,
+                ["embeds"] = new[] { embed },
+            };
+            if (!string.IsNullOrEmpty(avatar)) payload["avatar_url"] = avatar;
+            await http.PostAsync(wh, new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+        }
+        catch { }
+    }
+
     // Poll everyone's presence and hand it to the page to render the friends feed.
     static async Task FriendsLoop()
     {
@@ -507,6 +566,7 @@ class Program
             return;
         }
         if (m != null && m.StartsWith("saveimg:")) { await SaveImage(m.Substring(8)); return; }
+        if (m != null && m.StartsWith("webhook:")) { await PostWebhook(m.Substring(8)); return; }
         if (m != null && m.StartsWith("acct:save:")) { await AcctSave(m.Substring(10)); return; }
         if (m != null && m.StartsWith("acct:switch:")) { await AcctSwitch(m.Substring(12)); return; }
         if (m != null && m.StartsWith("acct:remove:")) { AcctRemove(m.Substring(12)); return; }

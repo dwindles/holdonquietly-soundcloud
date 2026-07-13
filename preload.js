@@ -215,6 +215,42 @@ const BASE_CSS = `
 
   /* ---- Accent recolor (driven by the palette) ---- */
   :root { accent-color: var(--sc-accent, #ff5500) !important; }
+
+  /* MUI-based pages (Artist Studio, Insights, track table, checkout) drive all
+     their "primary" color off --mui-palette-primary-main (SoundCloud orange).
+     Repoint it at the accent so buttons, chips, tab indicators, meters, progress
+     rings AND the insights chart bars/fills all recolor in one shot. */
+  :root, .mui-theme-light, .mui-theme-dark {
+    --mui-palette-primary-main: var(--sc-accent, #ff5500) !important;
+    --mui-palette-primary-dark: color-mix(in srgb, var(--sc-accent, #ff5500) 78%, #000) !important;
+    --mui-palette-primary-light: color-mix(in srgb, var(--sc-accent, #ff5500) 72%, #fff) !important;
+    --mui-palette-primary-mainChannel: var(--sc-accent, #ff5500) !important;
+    --mui-palette-Chip-defaultBorder: color-mix(in srgb, var(--sc-accent, #ff5500) 40%, transparent) !important;
+  }
+  /* MUI contained-primary buttons + primary chips: force accent fill (some inline
+     styles win over the var, so back it with a direct rule at higher specificity). */
+  .MuiButton-containedPrimary, .MuiChip-filledPrimary,
+  button.MuiButton-containedPrimary, .MuiChip-colorPrimary.MuiChip-filled {
+    background-color: var(--sc-accent, #ff5500) !important;
+    background-image: none !important;
+  }
+  .MuiTabs-indicator { background-color: var(--sc-accent, #ff5500) !important; }
+
+  /* Upload / track-edit tag input tokens (the "Pop" pills) → accent tint. */
+  .tagInput__token, .tokenInput__token {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent) !important;
+    color: #fff !important;
+  }
+  .tagInput__input, .tokenInput__input { color: #fff !important; }
+  /* Auto-tagger suggestion panel: kill SC's opaque light box, use our frosted glass. */
+  .autoTagger__content, .autoTagger {
+    background: rgba(255,255,255,0.05) !important;
+    background-image: none !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 12px !important;
+  }
+  .autoTagger__title { color: #fff !important; }
   .sc-button-cta, .sc-button-primary, .sc-classic .sc-button-cta,
   .g-branded-box .sc-button-cta, button.sc-button-cta,
   .sc-button-small.sc-button-cta, .sc-button-medium.sc-button-cta,
@@ -2716,6 +2752,143 @@ function rpcTick() {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// "Share to Discord" — a floating button that posts the current track to a
+// Discord webhook. The webhook URL is read HOST-SIDE from a local config file
+// (%LocalAppData%\SoundCloudApp\webhook.txt), never embedded in the page/repo,
+// and the POST is done by the C# host (Discord webhooks don't send CORS headers,
+// so a page fetch would be blocked). Our own element → safe to build/mutate.
+// ---------------------------------------------------------------------------
+// Who is sharing: the display name set in the hub (falls back to the SoundCloud
+// username), plus their SoundCloud avatar (a public sndcdn URL Discord can load).
+// Pull an image URL from an element (inline style, computed bg, or <img> src).
+function _bgUrl(el) {
+  if (!el) return '';
+  if (el.tagName === 'IMG') return el.getAttribute('src') || el.src || '';
+  const raw = (el.getAttribute && el.getAttribute('style')) || '';
+  let m = raw.match(/url\(["']?(.*?)["']?\)/);
+  if (m && m[1]) return m[1];
+  m = (getComputedStyle(el).backgroundImage || '').match(/url\(["']?(.*?)["']?\)/);
+  return (m && m[1]) ? m[1] : '';
+}
+
+// Find the logged-in user's avatar in the header (SoundCloud changes classes, so
+// try several selectors, then fall back to scanning the header for a SoundCloud
+// avatar URL — those are public i*.sndcdn.com/avatars-... images Discord can load).
+function findUserAvatar() {
+  const btn = document.querySelector(
+    '.header__userNavButton, .userNav__usernameButton, .header a[href="/you"], .header a[href^="/you/"], .header [class*="userNav" i]'
+  );
+  if (btn) {
+    const inner = btn.querySelector('img, .sc-artwork, [style*="url("], .image__full, span');
+    const u = _bgUrl(inner) || _bgUrl(btn);
+    if (u) return u;
+  }
+  const header = document.querySelector('.header') || document.body;
+  const img = header.querySelector('img[src*="avatars-"], img[src*="sndcdn"]');
+  if (img) return img.getAttribute('src') || img.src || '';
+  const els = header.querySelectorAll('.sc-artwork, [style*="avatars-"], [style*="url("]');
+  for (const el of els) { const b = _bgUrl(el); if (/avatars-|sndcdn/i.test(b)) return b; }
+  return '';
+}
+
+function senderInfo() {
+  let name = (localStorage.getItem('hoqDiscord') || '').trim();
+  let sc = (localStorage.getItem('hoqSC') || '').trim();
+  if (!name && sc) name = sc.replace(/[/?#].*$/, '').replace(/\/+$/, '').split('/').pop() || '';
+  let avatar = findUserAvatar();
+  // Bump SoundCloud thumbs to a crisp size (only when it's a recognizably sized URL).
+  if (avatar && /(?:-|_)(?:t?\d+x\d+|badge|small|large|tiny|mini|original|crop)\.(?:jpe?g|png|webp|gif)/i.test(avatar)) {
+    avatar = avatar.replace(/(?:-|_)(?:t?\d+x\d+|badge|small|large|tiny|mini|original|crop)\./i, '-t200x200.');
+  }
+  return { name, avatar };
+}
+
+// The current accent (cover-matched) as a Discord embed color int.
+function accentInt() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--sc-accent').trim();
+  const m = v.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) return (+m[1] << 16) + (+m[2] << 8) + (+m[3]);
+  const h = v.match(/#([0-9a-f]{6})/i);
+  return h ? parseInt(h[1], 16) : null;
+}
+
+function shareCurrentSong() {
+  const np = currentNowPlaying();
+  const linkEl = document.querySelector('.playbackSoundBadge__titleLink');
+  let url = '';
+  if (linkEl) { const h = linkEl.getAttribute('href') || ''; url = h ? (h.startsWith('http') ? h : location.origin + h) : ''; }
+  const s = senderInfo();
+  const dur = playerProgress().dur;
+  const length = dur > 0 ? (Math.floor(dur / 60) + ':' + String(dur % 60).padStart(2, '0')) : '';
+  return { title: np.title, artist: np.artist, cover: np.cover, url, name: s.name, avatar: s.avatar, color: accentInt(), length };
+}
+
+// One share per track: once shared, the button locks to a "Shared" state and
+// only re-enables when the track changes. In-memory, so it also resets on app
+// restart (page reload re-injects preload).
+let _hoqLastShared = '';
+
+function startShareButton() {
+  if (document.getElementById('hoq-share')) return;
+  if (!document.getElementById('hoq-share-style')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-share-style';
+    st.textContent =
+      '#hoq-share{position:fixed;right:18px;bottom:96px;z-index:2147483500;display:flex;gap:8px;align-items:center;' +
+      'padding:10px 15px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);cursor:pointer;' +
+      'background:rgba(20,20,24,0.72);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);' +
+      'color:#fff;font:700 12.5px system-ui,sans-serif;box-shadow:0 8px 26px rgba(0,0,0,0.45);' +
+      'transition:transform .16s ease,background .16s ease,opacity .16s ease}' +
+      '#hoq-share:hover{transform:translateY(-2px);background:rgba(30,30,36,0.82)}' +
+      '#hoq-share svg{width:16px;height:16px;flex:0 0 auto}' +
+      '#hoq-share.done{background:var(--sc-accent,#ff5500);border-color:transparent;color:#fff;cursor:default;opacity:0.82}' +
+      '#hoq-share.done:hover{transform:none;background:var(--sc-accent,#ff5500)}';
+    document.head.appendChild(st);
+  }
+  const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>';
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const btn = document.createElement('button');
+  btn.id = 'hoq-share';
+
+  // Unique-per-track key: the track link, else title|artist.
+  const songKey = () => {
+    const linkEl = document.querySelector('.playbackSoundBadge__titleLink');
+    const h = linkEl ? (linkEl.getAttribute('href') || '') : '';
+    if (h) return h;
+    const np = currentNowPlaying();
+    return np.title ? (np.title + '|' + np.artist) : '';
+  };
+  // Paint the button for the current track's shared state (skips while a
+  // transient message like "Nothing playing" is showing).
+  const refresh = () => {
+    if (btn.dataset.msg) return;
+    const shared = songKey() && songKey() === _hoqLastShared;
+    btn.classList.toggle('done', !!shared);
+    btn.innerHTML = (shared ? CHECK : ICON) + '<span>' + (shared ? 'Shared' : 'Share to Discord') + '</span>';
+  };
+  const flash = (txt) => {
+    btn.dataset.msg = '1';
+    btn.innerHTML = ICON + '<span>' + txt + '</span>';
+    setTimeout(() => { delete btn.dataset.msg; refresh(); }, 1600);
+  };
+
+  btn.onclick = () => {
+    const k = songKey();
+    if (!k) { flash('Nothing playing'); return; }
+    if (k === _hoqLastShared) return; // already shared this track — locked until it changes / restart
+    const payload = shareCurrentSong();
+    scPost('DBG share name=' + (payload.name || '(none)') + ' avatar=' + (payload.avatar || '(none)'));
+    scPost('webhook:' + JSON.stringify(payload));
+    _hoqLastShared = k;
+    refresh(); // lock to "Shared" until the track changes
+  };
+
+  document.body.appendChild(btn);
+  refresh();
+  setInterval(refresh, 1000); // re-enables automatically when a new track starts
+}
+
 function hoqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); }
 
 // The C# host delivers everyone's presence here → render the friends feed.
@@ -3307,10 +3480,15 @@ function styleFansIframe() {
 // Boot
 // ---------------------------------------------------------------------------
 function boot() {
-  // Only run in the top frame — SoundCloud has iframes we don't want a titlebar in.
+  // Inject theming + apply the accent in EVERY frame. SoundCloud's Artist Studio /
+  // Insights are a separate "webi" (Next.js/MUI) app that renders in an iframe, so
+  // top-frame-only injection left those pages un-themed. CSS is cheap + its selectors
+  // simply don't match in unrelated frames, so this is safe. localStorage is shared
+  // for same-origin frames, so the saved accent carries over.
+  try { injectBaseCSS(); } catch (e) {}
+  try { applyAccent(readAccent()); } catch (e) {}
+  // The titlebar, interactions, panels and context menu are top-frame ONLY.
   if (window.top !== window) return;
-  injectBaseCSS();
-  applyAccent(readAccent());
   buildTitlebar();
   setupResize();
   applyCoverBgState(); // create #sc-bg + apply saved cover-background state
@@ -3340,6 +3518,7 @@ function boot() {
   applyFxClasses(); // apply saved CSS-gated optional effects
   startPlayerViz(); // bottom-player seek bar → flowing bouncy accent visualizer
   startOverlayScrollbar(); // custom floating accent scrollbar (no side gutter)
+  startShareButton(); // floating "Share to Discord" button → posts current track to webhook
   // Discord Rich Presence + live activity-card updates.
   setInterval(() => { try { rpcTick(); updateDiscordActivity(); } catch (e) {} }, 3000);
 }
