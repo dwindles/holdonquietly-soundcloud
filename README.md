@@ -78,4 +78,4 @@ SoundCloud's own audio ads are muted separately.
 Not affiliated with, endorsed by, or sponsored by SoundCloud. "SoundCloud" is a
 trademark of SoundCloud Ltd. This is an independent client that renders soundcloud.com.
 
-Made by **@devuandoru**.
+Made by **[dwindles](https://github.com/dwindles)**.
