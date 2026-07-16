@@ -1,85 +1,81 @@
-<h1 align="center">🎧 holdonquietly</h1>
+<h1><img src=".github/icons/star.svg" width="26" align="absmiddle" alt=""> holdonquietly</h1>
 
-<p align="center">
-  <b>A beautiful, fully-themed SoundCloud desktop client for Windows — SoundCloud, evolved.</b><br>
-  <sub>Native window · real DRM playback · live audio visualizer · custom themes · Discord Rich Presence · Last.fm scrobbling · auto-updating</sub>
-</p>
+A SoundCloud desktop client for Windows. Frameless, fully themed, and it plays the
+major-label tracks other wrappers choke on.
 
-<p align="center">
-  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0b0b0c">
-  <img alt="tech" src="https://img.shields.io/badge/built%20with-C%23%20%2B%20WebView2-512bd4">
-  <img alt="dotnet" src="https://img.shields.io/badge/.NET-9.0-512bd4">
-  <img alt="status" src="https://img.shields.io/badge/auto--update-enabled-ff5500">
-</p>
+It runs on WebView2 — Edge's engine ships a provisioned Widevine/PlayReady stack,
+which is the only reason DRM'd tracks decode here at all. Stock Electron can't.
 
 ---
 
-## What is holdonquietly?
+## <img src=".github/icons/planet.svg" width="18" align="absmiddle" alt=""> Install
 
-**holdonquietly** is a hand-crafted **desktop app for SoundCloud** — think of it as a *SoundCloud v2*. It wraps SoundCloud in a frameless, blurred-acrylic native Windows shell and layers on the features the website never had: a reactive audio visualizer, one-click cover-matched color themes, a custom waveform on every track, Discord Rich Presence, Last.fm scrobbling, a friends-listening feed, and more — all while playing **major-label / DRM-protected tracks that other desktop wrappers can't** (it runs on Microsoft's WebView2 engine, which ships a fully-provisioned Widevine/PlayReady stack).
+Download **`holdonquietly.exe`** from [Releases](../../releases/latest) and run it.
+One file. No installer, no dependencies — the .NET runtime is baked in. It updates
+itself from then on.
 
-> If you've ever wanted a real **SoundCloud desktop app** for Windows that looks and feels like a first-class music player instead of a browser tab — this is it.
+Requires the [Evergreen WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+(already present on Windows 11 and most Windows 10).
 
-## ✨ Features
+> <img src=".github/icons/caution.svg" width="15" align="absmiddle" alt=""> Unsigned indie build — SmartScreen will flag it on first run. **More info → Run anyway**, or right-click the exe → Properties → Unblock.
 
-- 🎨 **Cover-matched theming** — the whole UI recolors to the two dominant colors of the current track's artwork (or pick your own accent from a built-in palette).
-- 🌊 **Live audio visualizer** — the seek bar becomes a flowing glow-waveform that reacts to the real audio signal, and a custom bar-waveform renders over every track.
-- 🖼️ **Frameless acrylic UI** — blurred glass top/bottom bars, mac-style window controls, custom overlay scrollbar, 3D tilt on tiles and cover art.
-- 🔒 **Real DRM playback** — plays the monetized / major-label tracks that break on stock Electron wrappers.
-- 🟣 **Discord Rich Presence** — shows what you're listening to on your Discord profile, with real progress + cover art.
-- 📡 **Friends feed** — see what your friends on holdonquietly are playing right now.
-- 🎵 **Last.fm scrobbling** — scrobble everything you play, host-side (your credentials never touch the page).
-- 👥 **Multi-account switcher** — save and hot-swap multiple SoundCloud logins.
-- 🛡️ **Optional ad-blocking** — bundle a local blocker extension (see below).
-- 🔔 **Media integration** — hooks into the Windows "now playing" flyout.
-- ⬆️ **Silent auto-update** — the app checks GitHub Releases on launch, downloads new versions in the background, and installs them on restart.
+## <img src=".github/icons/biohazard.svg" width="18" align="absmiddle" alt=""> What it does
 
-## 🚀 Install
+- **Cover-matched theming** — the whole UI recolors to the two dominant colours of the
+  current artwork, or pin your own accent from the palette.
+- **Live visualizer** — the seek bar becomes a waveform driven by the real audio signal
+  (Web Audio, MSE sources only); custom bar-waveforms render over the track.
+- **DRM playback** — monetized / major-label tracks actually decode.
+- **Discord Rich Presence** — now-playing on your profile, real progress, cover art.
+- **Friends feed** — what other holdonquietly users are playing, live.
+- **Last.fm scrobbling** — done host-side; credentials never touch the page.
+- **Multi-account** — save and hot-swap SoundCloud sessions without logging out.
+- **Share to Discord** — push the current track to a webhook, once per track.
+- **Silent auto-update** — checks Releases on launch, swaps itself on restart.
+- **Ad-block** — optional, local (see below).
 
-1. Download the latest **`holdonquietly.exe`** from the [**Releases**](../../releases/latest) page.
-2. Run it. That's it — the single `.exe` is fully self-contained (the .NET runtime and all UI are embedded).
-3. From then on it **auto-updates itself** silently.
+## <img src=".github/icons/helix.svg" width="18" align="absmiddle" alt=""> How it's built
 
-> **Requirements:** Windows 10/11 with the [Evergreen WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (already preinstalled on Windows 11 and most Windows 10).
+Two files carry effectively the whole app.
 
-<sub>⚠️ Because the app is a new, unsigned indie build, Windows SmartScreen / Smart App Control may warn on first run. Choose **More info → Run anyway**, or right-click the exe → **Properties → Unblock**.</sub>
+| file | role |
+|---|---|
+| `Program.cs` | C# host. Frameless WPF window around WebView2, window controls, network ad-host blocking, cover colour extraction, Discord IPC, the friends/Last.fm bridges, webhook posting. |
+| `preload.js` | Everything page-side. Injected before SoundCloud's own scripts; builds the entire custom UI — themes, visualizer, waveforms, titlebar, panels. |
 
-## 🛠️ Build from source
+Plus `Updater.cs` (GitHub-Releases self-update), `LastFm.cs` (host-side scrobbler),
+`ShortcutHelper.cs` (Windows media identity).
+
+`preload.js` never mutates SoundCloud's React DOM — doing so tears the tree apart on
+the next reconcile. Icons are swapped with CSS `mask-image`; only our own injected
+elements get touched.
+
+### Build
 
 ```powershell
 git clone https://github.com/dwindles/holdonquietly-soundcloud.git
 cd holdonquietly-soundcloud
 dotnet build -c Release
-# run:
 bin\Release\net9.0-windows\holdonquietly.exe
 ```
 
-Produce a distributable single-file exe:
+Distributable single file:
 
 ```powershell
 dotnet publish SoundCloudWV2.csproj -c Release -r win-x64 --self-contained true `
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist
 ```
 
-## 🧱 How it's built
+## Ad-block
 
-Two files carry the whole app:
+The app loads an unpacked Chromium ad-blocker from `extensions/` beside the exe.
+It isn't vendored here — drop an [uBlock Origin](https://github.com/gorhill/uBlock)
+build into `extensions/holdonquietly-blocker/`. Without it everything still runs;
+SoundCloud's own audio ads are muted separately.
 
-| File | Role |
-|------|------|
-| `Program.cs` | The C# host — a frameless WPF window hosting **WebView2**, window controls, ad-host blocking, cover-color extraction, Discord IPC, the friends/Last.fm bridges, and the auto-updater. |
-| `preload.js` | Everything page-side — injected before SoundCloud's own scripts, it builds the entire custom UI (themes, visualizer, waveforms, titlebar, panels) **without ever mutating SoundCloud's React DOM**. |
+## Notes
 
-Plus `Updater.cs` (silent GitHub-Releases auto-update), `LastFm.cs` (host-side scrobbler), and `ShortcutHelper.cs` (Windows media identity).
+Not affiliated with, endorsed by, or sponsored by SoundCloud. "SoundCloud" is a
+trademark of SoundCloud Ltd. This is an independent client that renders soundcloud.com.
 
-## 🧩 Ad-blocking (optional)
-
-The app can load a local Chromium ad-block extension from an `extensions/` folder beside the exe. It's **not** included in this repo — grab [uBlock Origin](https://github.com/gorhill/uBlock) and drop its unpacked build into `extensions/holdonquietly-blocker/`. Without it the app runs fine (SoundCloud's own audio-ads are muted separately).
-
-## 📄 License & credits
-
-Made by **[@devuandoru](https://soundcloud.com/)**. Not affiliated with, endorsed by, or sponsored by SoundCloud — "SoundCloud" is a trademark of SoundCloud Ltd. This is an independent client that renders soundcloud.com. Bundled ad-block, if used, is uBlock Origin (GPLv3).
-
----
-
-<p align="center"><sub>SoundCloud desktop client · SoundCloud for Windows · SoundCloud player app · themed SoundCloud · SoundCloud v2</sub></p>
+Made by **@devuandoru**.
