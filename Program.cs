@@ -319,11 +319,40 @@ class Program
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SoundCloudApp", "webhook.txt");
 
+    // Remembered after the first good read. A momentary failure to read the file
+    // (AV scan, another process holding it, transient IO) used to drop the request
+    // silently and look exactly like "it worked for a second, then stopped".
+    static string _webhookCache = "";
+
+    static async Task<string> ReadWebhook()
+    {
+        for (int attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                string path = WebhookPath();
+                if (File.Exists(path))
+                {
+                    string t = File.ReadAllText(path).Trim();
+                    if (t.StartsWith("http")) { _webhookCache = t; return t; }
+                }
+            }
+            catch (Exception ex) { Log("webhook read attempt " + attempt + " failed: " + ex.Message); }
+            if (attempt == 1) await Task.Delay(150);
+        }
+        if (!string.IsNullOrEmpty(_webhookCache))
+        {
+            Log("webhook: file unreadable right now, using the URL cached this session");
+            return _webhookCache;
+        }
+        return "";
+    }
+
     static async Task PostWebhook(string json, bool play = false)
     {
         try
         {
-            string wh = File.Exists(WebhookPath()) ? File.ReadAllText(WebhookPath()).Trim() : "";
+            string wh = await ReadWebhook();
             if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http"))
             {
                 Log((play ? "playreq" : "share") + " ABORT: webhook not configured at " + WebhookPath());
