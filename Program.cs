@@ -319,7 +319,7 @@ class Program
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SoundCloudApp", "webhook.txt");
 
-    static async Task PostWebhook(string json)
+    static async Task PostWebhook(string json, bool play = false)
     {
         try
         {
@@ -336,7 +336,9 @@ class Program
 
             var author = new Dictionary<string, object>
             {
-                ["name"] = string.IsNullOrEmpty(name) ? "Now playing" : (name + " shared a track"),
+                ["name"] = string.IsNullOrEmpty(name)
+                    ? (play ? "Play request" : "Now playing")
+                    : (name + (play ? " wants to play this" : " shared a track")),
             };
             if (!string.IsNullOrEmpty(avatar)) author["icon_url"] = avatar;
 
@@ -346,7 +348,7 @@ class Program
                 ["title"] = title,
                 ["color"] = color,
                 ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["footer"] = new Dictionary<string, object> { ["text"] = "via holdonquietly" },
+                ["footer"] = new Dictionary<string, object> { ["text"] = play ? "hoq-play" : "via holdonquietly" },
             };
             if (!string.IsNullOrEmpty(url)) embed["url"] = url;
             if (!string.IsNullOrEmpty(artist)) embed["description"] = "by **" + artist + "**";
@@ -567,6 +569,7 @@ class Program
         }
         if (m != null && m.StartsWith("saveimg:")) { await SaveImage(m.Substring(8)); return; }
         if (m != null && m.StartsWith("webhook:")) { await PostWebhook(m.Substring(8)); return; }
+        if (m != null && m.StartsWith("playreq:")) { await PostWebhook(m.Substring(8), true); return; }
         if (m != null && m.StartsWith("acct:save:")) { await AcctSave(m.Substring(10)); return; }
         if (m != null && m.StartsWith("acct:switch:")) { await AcctSwitch(m.Substring(12)); return; }
         if (m != null && m.StartsWith("acct:remove:")) { AcctRemove(m.Substring(12)); return; }
@@ -580,6 +583,7 @@ class Program
                 string title = Prop(r, "title"), artist = Prop(r, "artist"), cover = Prop(r, "cover");
                 if (string.IsNullOrEmpty(title)) DiscordRpc.Clear();
                 else DiscordRpc.SetActivity(title, artist, cover, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
+                Log("RP <- title=\"" + title + "\" paused=" + PropB(r, "paused") + " pos=" + PropI(r, "pos"));
                 _ = PostPresence(Prop(r, "id"), Prop(r, "name"), Prop(r, "sc"), title, artist, cover);
                 LastFm.Track(title, artist, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
             }
@@ -700,10 +704,20 @@ static class DiscordRpc
             long nowS = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             ts = ",\"timestamps\":{\"start\":" + (nowS - pos) + ",\"end\":" + (nowS - pos + dur) + "}";
         }
+        // Bottom "album" line = the holdonquietly watermark (subtle branding under the track).
+        string largeText = "holdonquietly";
         string act = "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"" + Guid.NewGuid().ToString() +
             "\",\"args\":{\"pid\":" + Environment.ProcessId +
+            // name -> the track (Discord shows "Listening to <track>" when it honors
+            // the activity name; falls back to the app name otherwise). No large_text
+            // so there's no redundant "holdonquietly" album line — the cover's hover
+            // shows the track instead. small badge keeps the holdonquietly branding.
+            // NOTE: do NOT set a per-song "name" — Discord treats a changing activity
+            // name as a brand-new activity and rate-limits/caches it, which gets the
+            // presence stuck on the WRONG (previous) song. Keep name = the app (constant)
+            // so song changes are smooth UPDATES. The current song shows as details.
             ",\"activity\":{\"type\":2,\"details\":\"" + Esc(title) + "\"" + stateField + ts +
-            ",\"assets\":{\"large_image\":" + large + ",\"large_text\":\"holdonquietly\"," +
+            ",\"assets\":{\"large_image\":" + large + ",\"large_text\":\"" + Esc(largeText) + "\"," +
             "\"small_image\":\"logo\",\"small_text\":\"holdonquietly\"}}}}";
         lastActivity = act;
         Send(1, act);

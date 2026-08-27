@@ -119,6 +119,12 @@ function setupResize() {
 // ---------------------------------------------------------------------------
 // Base stylesheet (clutter removal + scrollbar + accent hooks + titlebar offset)
 // ---------------------------------------------------------------------------
+// The app logo, inlined. It used to load from the holdonquietly.app virtual
+// host, but soundcloud.com's CSP blocks that origin outright, so every place
+// the logo appeared (tab header, Discord embed, friends fallback cover, the
+// injected CSS mark) rendered as a broken image. data: URIs are permitted.
+const HOQ_LOGO = 'data:image/png;base64,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';
+
 const BASE_CSS = `
   /* Merged bar: the SoundCloud header IS the top bar (our window controls overlay
      its right side), so no separate titlebar strip to reserve room for. */
@@ -128,7 +134,13 @@ const BASE_CSS = `
   #sc-bg {
     position: fixed; inset: -80px; z-index: -2; display: none;
     background-size: cover; background-position: center;
-    filter: blur(100px) saturate(1.5) brightness(0.5); transform: scale(1.25);
+    /* brightness was 0.5, which crushed the art to near-black once the scrim
+       below was layered on top — the cover has to actually read as the page.
+       blur was 100px, which is past the point where an image is "blurred" and
+       into a flat colour field: no shape of the artwork survived it. 52px keeps
+       it soft but you can still tell what you're looking at — same reasoning as
+       the custom-background rule below. */
+    filter: blur(52px) saturate(1.5) brightness(0.66); transform: scale(1.18);
     transition: background-image .7s ease, opacity .5s ease; pointer-events: none;
   }
   html.sc-coverbg #sc-bg { display: block; }
@@ -143,8 +155,8 @@ const BASE_CSS = `
     content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
     /* radial vignette fades the cover-bg into dark at the edges (cleaner) */
     background:
-      radial-gradient(135% 95% at 50% 32%, rgba(10,10,12,0) 34%, rgba(10,10,12,0.55) 100%),
-      linear-gradient(180deg, rgba(10,10,12,0.3), rgba(10,10,12,0.6));
+      radial-gradient(135% 95% at 50% 32%, rgba(10,10,12,0) 38%, rgba(10,10,12,0.5) 100%),
+      linear-gradient(180deg, rgba(10,10,12,0.22), rgba(10,10,12,0.5));
   }
   /* Frosted translucent bars so the top + bottom blend with the cover bg.
      (Titlebar is a transparent overlay merged into the header now — keep it
@@ -220,12 +232,18 @@ const BASE_CSS = `
      their "primary" color off --mui-palette-primary-main (SoundCloud orange).
      Repoint it at the accent so buttons, chips, tab indicators, meters, progress
      rings AND the insights chart bars/fills all recolor in one shot. */
-  :root, .mui-theme-light, .mui-theme-dark {
+  :root, html, [data-mui-color-scheme], .mui-theme-light, .mui-theme-dark {
     --mui-palette-primary-main: var(--sc-accent, #ff5500) !important;
     --mui-palette-primary-dark: color-mix(in srgb, var(--sc-accent, #ff5500) 78%, #000) !important;
     --mui-palette-primary-light: color-mix(in srgb, var(--sc-accent, #ff5500) 72%, #fff) !important;
     --mui-palette-primary-mainChannel: var(--sc-accent, #ff5500) !important;
     --mui-palette-Chip-defaultBorder: color-mix(in srgb, var(--sc-accent, #ff5500) 40%, transparent) !important;
+    /* New MUI track page waveform: bars are one static tone (light=top, dark=bottom
+       of each bar) with a cursor line in contrastText. Repoint all three so the
+       whole waveform reads as an accent monochrome with vertical depth. */
+    --mui-palette-contrast-light: color-mix(in srgb, var(--sc-accent, #ff5500) 88%, #fff) !important;
+    --mui-palette-contrast-dark: color-mix(in srgb, var(--sc-accent, #ff5500) 44%, #000) !important;
+    --mui-palette-contrast-contrastText: #ffffff !important;
   }
   /* MUI contained-primary buttons + primary chips: force accent fill (some inline
      styles win over the var, so back it with a direct rule at higher specificity). */
@@ -235,6 +253,33 @@ const BASE_CSS = `
     background-image: none !important;
   }
   .MuiTabs-indicator { background-color: var(--sc-accent, #ff5500) !important; }
+  /* New track page: selected tab label (Fans "Top"/"First") → accent. */
+  .MuiTab-root.Mui-selected { color: var(--sc-accent, #ff5500) !important; }
+  /* Comment-position slider + any primary slider (track fill + thumb) → accent. */
+  .MuiSlider-colorPrimary .MuiSlider-track { background-color: var(--sc-accent, #ff5500) !important; border-color: var(--sc-accent, #ff5500) !important; }
+  .MuiSlider-colorPrimary .MuiSlider-thumb { color: var(--sc-accent, #ff5500) !important; }
+  /* Track-page timestamp "jump to" chips: accent tint on hover instead of grey. */
+  .MuiChip-clickable.MuiChip-colorSecondary:hover {
+    background-color: color-mix(in srgb, var(--sc-accent, #ff5500) 26%, transparent) !important;
+    color: var(--sc-accent, #ff5500) !important;
+  }
+  /* Related-track / playlist title links: accent on hover. */
+  a.MuiLink-underlineNone.MuiTypography-h4:hover { color: var(--sc-accent, #ff5500) !important; }
+
+  /* Promo / upsell banners ("Go everywhere: Distribute Now" etc.) → match the app:
+     recolor the hard-coded #F50 orange star to the accent, frost the bar, accent link. */
+  .banner__UiEvoIcon path[fill="#F50"], .banner__UiEvoIcon path[fill="#f50"] {
+    fill: var(--sc-accent, #ff5500) !important;
+  }
+  .banner.m-promotion, .banner.primary, .banner.m-promotion.primary {
+    background: rgba(20,20,24,0.5) !important; background-image: none !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 30%, rgba(255,255,255,0.09)) !important;
+    border-radius: 10px !important;
+    backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  }
+  .banner a, .targetedProUpsellBanner__link {
+    color: var(--sc-accent, #ff5500) !important; font-weight: 600;
+  }
 
   /* Upload / track-edit tag input tokens (the "Pop" pills) → accent tint. */
   .tagInput__token, .tokenInput__token {
@@ -400,7 +445,7 @@ const BASE_CSS = `
   }
   .header__logo .header__logoLink-iconOnly::before {
     content: '' !important; flex: none !important; width: 30px !important; height: 30px !important;
-    background: url("https://holdonquietly.app/logo.png") center/contain no-repeat !important;
+    background: url("${HOQ_LOGO}") center/contain no-repeat !important;
     filter: drop-shadow(0 0 4px rgba(90,160,255,0.3)) !important;
   }
 
@@ -670,6 +715,32 @@ const BASE_CSS = `
     color: var(--sc-accent, #ff5500) !important;
   }
   /* Rounded now-playing artwork thumbnail */
+  /* Now-playing title: the badge is content-sized, so the title link was pinned
+     to ~136px inside a 328px badge and truncated titles that had room to spare.
+     Let the badge take the slack in the bar and the title take the slack in the
+     badge. */
+  /* 430 is the balance point: the title roughly doubles its visible length while
+     the timeline keeps enough width for the seek-bar visualiser to read. */
+  .playControls__soundBadge { flex: 1 1 auto !important; max-width: 430px !important; min-width: 0 !important; }
+  .playbackSoundBadge { min-width: 0 !important; }
+  .playbackSoundBadge__titleContextContainer,
+  .playbackSoundBadge__title { min-width: 0 !important; flex: 1 1 auto !important; }
+  .playbackSoundBadge__titleLink { max-width: 100% !important; }
+  /* Still too long? Slide it on hover instead of stopping at an ellipsis. The
+     parent clips, the link itself slides — no DOM is touched, only styles, so
+     React keeps ownership of the markup. Distance is measured into --hoq-mq. */
+  .playbackSoundBadge__title { overflow: hidden !important; }
+  .playbackSoundBadge:hover .playbackSoundBadge__titleLink.hoq-mq {
+    width: max-content !important; max-width: none !important;
+    text-overflow: clip !important; will-change: transform;
+    animation: hoqMarquee var(--hoq-mq-dur, 8s) ease-in-out infinite alternate;
+  }
+  @keyframes hoqMarquee {
+    0%, 12% { transform: translateX(0); }
+    88%, 100% { transform: translateX(var(--hoq-mq, 0px)); }
+  }
+  html.hoq-no-anim .playbackSoundBadge__titleLink.hoq-mq { animation: none !important; }
+
   .playbackSoundBadge__avatar .image {
     border-radius: 6px !important; overflow: hidden !important;
   }
@@ -1515,12 +1586,396 @@ const BASE_CSS = `
   }
 `;
 
+// ---------------------------------------------------------------------------
+// NEW ("webi V2") track page. It renders inside a same-origin iframe
+// (soundcloud.com/n/<user>/<track>?v2_layout=true, class .webiIframeV2Layout)
+// and is built entirely from MUI components, so none of the BEM selectors above
+// reach it. Everything here is token-first: MUI reads its own CSS variables, so
+// repointing the tokens themes whole component families at once.
+// ---------------------------------------------------------------------------
+const MUI_CSS = `
+  /* --- design tokens -------------------------------------------------------
+     SoundCloud ships these as a near-white ramp (#FAFAFA, then 0.6 / 0.16
+     alphas). Repoint the whole ramp at the accent and every MUI surface that
+     consumes it follows: buttons, chips, tabs, sliders, the waveform. */
+  :root, html, [data-mui-color-scheme] {
+    --mui-palette-primary-main: var(--sc-accent, #ff5500) !important;
+    --mui-palette-primary-dark: color-mix(in srgb, var(--sc-accent, #ff5500) 78%, #000) !important;
+    --mui-palette-primary-light: color-mix(in srgb, var(--sc-accent, #ff5500) 72%, #fff) !important;
+    --mui-palette-primary-mainChannel: var(--sc-accent-ch, 255 85 0) !important;
+    --mui-palette-primary-contrastText: #fff !important;
+
+    /* The track waveform is an <svg> of <rect>s painted straight from these:
+         contrastText -> played bars (and the playhead line)
+         light        -> unplayed bars
+         dark         -> the mirrored reflection under the centre line
+       contrastTextChannel is consumed as rgba(var(--...) / .5) for the centre
+       rule, so it MUST be space-separated channels — a hex can't satisfy it
+       (applyAccent keeps --sc-accent-ch in sync). */
+    --mui-palette-contrast-contrastText: var(--sc-accent, #ff5500) !important;
+    --mui-palette-contrast-contrastTextChannel: var(--sc-accent-ch, 255 85 0) !important;
+    --mui-palette-contrast-light: color-mix(in srgb, var(--sc-accent, #ff5500) 52%, transparent) !important;
+    --mui-palette-contrast-dark: color-mix(in srgb, var(--sc-accent, #ff5500) 28%, transparent) !important;
+  }
+
+  /* Top-frame side of the same fix: the <iframe> element itself must not paint
+     an opaque box over #sc-bg either. */
+  .webiIframe, .webiIframeV2Layout { background: transparent !important; }
+
+  /* --- buttons ------------------------------------------------------------- */
+  .MuiButton-contained.MuiButton-colorPrimary {
+    background: var(--sc-accent-bg, #ff5500) !important;
+    background-color: var(--sc-accent, #ff5500) !important;
+    color: #fff !important;
+  }
+  .MuiButton-contained.MuiButton-colorPrimary:hover { filter: brightness(1.12); }
+  /* Hero play button: outlined + colorContrast. Fill it so it reads as the
+     primary action the way the old .sc-button-play did. */
+  .MuiButton-outlined.MuiButton-colorContrast {
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) !important;
+    color: var(--sc-accent, #ff5500) !important;
+  }
+  .MuiButton-outlined.MuiButton-colorContrast:hover {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 16%, transparent) !important;
+    border-color: var(--sc-accent, #ff5500) !important;
+  }
+  .MuiButton-text.MuiButton-colorPrimary { color: var(--sc-accent, #ff5500) !important; }
+
+  /* --- icon buttons (share / link / repost / add / more / like) ------------- */
+  .MuiIconButton-colorContrast {
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 26%, rgba(255,255,255,0.10)) !important;
+  }
+  .MuiIconButton-colorContrast:hover {
+    color: var(--sc-accent, #ff5500) !important;
+    border-color: var(--sc-accent, #ff5500) !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
+  }
+  .MuiIconButton-colorPrimary:hover { color: var(--sc-accent, #ff5500) !important; }
+
+  /* --- chips: comment timestamps + tag pills -------------------------------- */
+  .MuiChip-filled.MuiChip-colorSecondary {
+    background-color: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
+    color: var(--sc-accent, #ff5500) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 32%, transparent) !important;
+  }
+  .MuiChip-filled.MuiChip-colorSecondary:hover {
+    background-color: color-mix(in srgb, var(--sc-accent, #ff5500) 34%, transparent) !important;
+  }
+  .MuiChip-filled.MuiChip-colorSecondary .MuiChip-label,
+  .MuiChip-filled.MuiChip-colorSecondary .MuiTypography-root { color: inherit !important; }
+
+  /* --- tabs (Fans "Top" / "First") ------------------------------------------ */
+  .MuiTab-root.Mui-selected { color: var(--sc-accent, #ff5500) !important; }
+  .MuiTabs-indicator { background-color: var(--sc-accent, #ff5500) !important; }
+
+  /* --- sliders (comment-position handle over the waveform) ------------------ */
+  .MuiSlider-colorPrimary .MuiSlider-track {
+    background-color: var(--sc-accent, #ff5500) !important;
+    border-color: var(--sc-accent, #ff5500) !important;
+  }
+  .MuiSlider-colorPrimary .MuiSlider-thumb { color: var(--sc-accent, #ff5500) !important; }
+
+  /* --- links ---------------------------------------------------------------- */
+  .MuiLink-root:hover { color: var(--sc-accent, #ff5500) !important; }
+  /* Links inside track descriptions / comment bodies are plain <a>, not MuiLink,
+     so they keep MUI's default blue unless we claim them here. */
+  .MuiTypography-body a, .MuiTypography-body2 a, .MuiTypography-caption a[href] {
+    color: var(--sc-accent, #ff5500) !important;
+  }
+
+  /* --- comment box ---------------------------------------------------------- */
+  .MuiOutlinedInput-root .MuiOutlinedInput-notchedOutline {
+    border-color: rgba(255,255,255,0.10) !important;
+  }
+  .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline {
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important;
+  }
+  .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+    border-color: var(--sc-accent, #ff5500) !important; border-width: 1px !important;
+  }
+  .MuiInputBase-input { caret-color: var(--sc-accent, #ff5500) !important; }
+
+  /* --- surfaces: cards + dividers match the app's frosted look -------------- */
+  .MuiCard-root, .MuiPaper-contained {
+    background: rgba(255,255,255,0.035) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.07)) !important;
+    border-radius: 12px !important; background-image: none !important;
+  }
+  .MuiDivider-root { border-color: rgba(255,255,255,0.08) !important; }
+
+  /* --- per-row "Play in Discord" (addQueueButtons) --------------------------
+     Lives in both documents, so it is defined outside the .hoq-webi scope. */
+  .hoq-q {
+    position: absolute; top: 6px; right: 6px; z-index: 20;
+    width: 26px; height: 26px; padding: 0; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent);
+    background: rgba(16,16,20,0.72);
+    backdrop-filter: blur(10px) saturate(150%); -webkit-backdrop-filter: blur(10px) saturate(150%);
+    color: var(--sc-accent, #ff5500); cursor: pointer;
+    opacity: 0; transform: translateY(-3px);
+    transition: opacity .15s ease, transform .15s ease, background .15s ease;
+  }
+  *:hover > .hoq-q, .hoq-q:focus-visible { opacity: 1; transform: none; }
+  .hoq-q:hover { background: rgba(28,28,34,0.9); }
+  .hoq-q svg { width: 13px; height: 13px; }
+  .hoq-q.done {
+    background: var(--sc-accent, #ff5500); color: #fff; opacity: 1;
+    transform: none; border-color: transparent; cursor: default;
+  }
+
+  /* --- webi V2 frame only --------------------------------------------------
+     themeFrames() tags the iframe's document with .hoq-webi so these can't leak
+     into the top frame (which paints its own background and would go see-through). */
+
+  /* The iframe paints an opaque canvas over #sc-bg, which is why the cover
+     background never showed behind the new page. Make it see-through so the
+     frosted panels below have something to actually blur. */
+  html.hoq-webi, html.hoq-webi body,
+  html.hoq-webi #navigation-shell-right-side-container, html.hoq-webi #main {
+    background: transparent !important; background-image: none !important;
+  }
+
+  /* Panels pick up the same acrylic as the rest of the app. */
+  html.hoq-webi.sc-coverbg section[aria-label="Track header"],
+  html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiCard-root,
+  html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiPaper-contained {
+    background: rgba(12,12,14,0.42) !important;
+    backdrop-filter: blur(26px) saturate(1.35) !important;
+    -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
+    border-radius: 14px !important;
+  }
+  /* Inner wrappers ship their own solid fills that would sit on top of the blur. */
+  html.hoq-webi section[aria-label="Track header"] > .MuiStack-root,
+  html.hoq-webi section[aria-label="Track header"] .MuiStack-root > .MuiStack-root {
+    background: transparent !important; background-image: none !important;
+  }
+
+  /* --- waveform: SVG <rect>s, not the legacy <canvas> ----------------------
+     buildCustomWave() can't reach these (it reads canvas pixels), so instead of
+     replacing the bars we restyle them to read like .hoq-wave: capsule caps and
+     an accent glow. Keeping SC's own SVG means seeking and the comment markers
+     keep working. The glow goes on the parent <g>, not per-rect — there are 500+
+     rects and a filter on each one is a separate composite. */
+  html.hoq-webi [aria-label="Waveform"] rect {
+    rx: 1.2px; ry: 1.2px;
+    /* fill-box so the hover ripple's scaleY pivots on each bar's own centre */
+    transform-box: fill-box; transform-origin: center;
+    transition: transform .12s ease;
+  }
+  html.hoq-webi [aria-label="Waveform"] svg > g {
+    filter: drop-shadow(0 0 2.5px color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent));
+  }
+  html.hoq-no-wave [aria-label="Waveform"] rect { transform: none !important; }
+
+  /* --- hero play button: the same moulded accent lozenge as the legacy page --- */
+  html.hoq-webi section[aria-label="Track header"] .MuiButton-outlined.MuiButton-colorContrast {
+    background: linear-gradient(145deg, var(--sc-accent, #ff5500),
+                color-mix(in srgb, var(--sc-accent, #ff5500) 65%, #000)) !important;
+    border: 0 !important; border-radius: 16px !important; color: #fff !important;
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--sc-accent, #ff5500) 50%, transparent),
+                inset 0 1px 0 rgba(255,255,255,0.35) !important;
+    transition: transform .14s ease, box-shadow .14s ease !important;
+  }
+  html.hoq-webi section[aria-label="Track header"] .MuiButton-outlined.MuiButton-colorContrast:hover {
+    transform: scale(1.07) !important;
+    box-shadow: 0 14px 34px color-mix(in srgb, var(--sc-accent, #ff5500) 65%, transparent),
+                inset 0 1px 0 rgba(255,255,255,0.45) !important;
+  }
+
+  /* --- section headings: accent rule + glow, matching .sectionHead__title ----- */
+  html.hoq-webi h2.MuiTypography-h5 {
+    font-weight: 800 !important; letter-spacing: .2px !important; color: #fff !important;
+    padding-left: 13px !important; position: relative !important;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent);
+  }
+  html.hoq-webi h2.MuiTypography-h5::before {
+    content: '' !important; position: absolute !important; left: 0 !important;
+    top: 16% !important; bottom: 16% !important;
+    width: 4px !important; border-radius: 3px !important;
+    background: var(--sc-accent, #ff5500) !important;
+  }
+  html.hoq-no-glow h2.MuiTypography-h5 { text-shadow: none !important; }
+
+  /* --- sidebar: stat numbers + support heading carry the accent -------------- */
+  html.hoq-webi aside[aria-label="Track sidebar"] .MuiTypography-h2 {
+    color: var(--sc-accent, #ff5500) !important;
+  }
+
+  /* --- rows lift toward the cursor like the legacy sound badges -------------- */
+  html.hoq-webi [role="listitem"] {
+    border-radius: 12px !important;
+    transition: transform .14s ease, background-color .14s ease !important;
+  }
+  html.hoq-webi:not(.hoq-no-hover) [role="listitem"]:hover {
+    transform: translateY(-2px) !important;
+    background-color: color-mix(in srgb, var(--sc-accent, #ff5500) 10%, transparent) !important;
+  }
+
+  /* --- cover wash: bleed the artwork's colour into the hero, radially masked
+         so it fades out instead of ending on a hard rounded edge --------------- */
+  html.hoq-webi.sc-coverbg section[aria-label="Track header"] { position: relative !important; }
+  html.hoq-webi.sc-coverbg section[aria-label="Track header"]::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    border-radius: inherit;
+    background: radial-gradient(78% 78% at 50% 30%,
+      color-mix(in srgb, var(--sc-accent, #ff5500) 26%, transparent), transparent 70%);
+  }
+  html.hoq-webi section[aria-label="Track header"] > * { position: relative; z-index: 1; }
+
+  /* --- artwork: let the 3D tilt actually show ------------------------------
+     The wrapper chain clips and flattens by default, so the rotate would be
+     sheared off at the card edge. */
+     overflow:visible has to go on the GRANDparent — putting it on the frame that
+     holds the <img> is what let the artwork spill past its own rounded corners. */
+  html.hoq-webi section[aria-label="Track header"] .MuiBox-root:has(> .MuiBox-root > img[src*="artworks-"]) {
+    overflow: visible !important;
+  }
+  /* The frame itself keeps clipping; the shadow still paints outside it. */
+  html.hoq-webi section[aria-label="Track header"] .MuiBox-root:has(> img[src*="artworks-"]) {
+    overflow: hidden !important; border-radius: 12px;
+    transform-style: preserve-3d; will-change: transform;
+    box-shadow: 0 18px 44px rgba(0,0,0,0.55),
+                0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent);
+  }
+  html.hoq-webi section[aria-label="Track header"] img[src*="artworks-"] {
+    border-radius: 12px; cursor: pointer;
+  }
+`;
+
 function injectBaseCSS() {
   if (document.getElementById('sc-desktop-style')) return;
   const style = document.createElement('style');
   style.id = 'sc-desktop-style';
-  style.textContent = BASE_CSS;
+  style.textContent = BASE_CSS + MUI_CSS;
   (document.head || document.documentElement).appendChild(style);
+}
+
+// The legacy waveform's signature hover ripple, ported onto the SVG bars. Only
+// the bars inside the ripple window get written to — there are 500+ rects, so
+// transforming all of them every frame would be pure waste — and the previous
+// window is cleared as the cursor moves on. Bars come in top/bottom pairs, so
+// adjacent indices scale together, which is exactly the mirrored look we want.
+function attachWaveRipple(d) {
+  if (d.__hoqRipple) return;
+  d.__hoqRipple = true;
+  const view = d.defaultView || window;
+  const W = 0.08; // ripple reaches ~8% of the waveform either side of the cursor
+  let raf = 0, mx = -1, prev = null;
+  const run = () => {
+    raf = 0;
+    const svg = d.querySelector('[aria-label="Waveform"] svg');
+    if (!svg) return;
+    const rects = svg.querySelectorAll('rect');
+    const N = rects.length;
+    if (!N) return;
+    const clear = (r) => { if (r) for (let i = r[0]; i <= r[1] && i < N; i++) rects[i].style.transform = ''; };
+    if (mx < 0 || !effectOn('wave')) { clear(prev); prev = null; return; }
+    const lo = Math.max(0, Math.floor((mx - W) * N));
+    const hi = Math.min(N - 1, Math.ceil((mx + W) * N));
+    clear(prev);
+    for (let i = lo; i <= hi; i++) {
+      const boost = 1 - Math.min(1, Math.abs(i / N - mx) / W);
+      rects[i].style.transform = boost > 0 ? 'scaleY(' + (1 + boost * 0.5).toFixed(3) + ')' : '';
+    }
+    prev = [lo, hi];
+  };
+  const schedule = () => { if (!raf) raf = view.requestAnimationFrame(run); };
+  d.addEventListener('mousemove', (e) => {
+    const wf = d.querySelector('[aria-label="Waveform"]');
+    if (!wf) { if (mx !== -1) { mx = -1; schedule(); } return; }
+    const r = wf.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right &&
+                   e.clientY >= r.top && e.clientY <= r.bottom;
+    const nx = inside ? (e.clientX - r.left) / r.width : -1;
+    if (nx !== mx) { mx = nx; schedule(); }
+  }, { passive: true });
+  d.addEventListener('mouseleave', () => { mx = -1; schedule(); }, { passive: true });
+}
+
+// setupCoverTilt() only listens in the top frame and only knows the legacy
+// .fullHero__artwork, so the new page's cover sat there inert. Same 3D follow,
+// re-bound inside the frame and hung off the artwork's wrapper so the whole card
+// tilts rather than just the <img>.
+function attachCoverTilt(d) {
+  if (d.__hoqTilt) return;
+  d.__hoqTilt = true;
+  const view = d.defaultView || window;
+  let art = null, px = 0, py = 0, raf = 0;
+  const apply = () => {
+    raf = 0;
+    if (art) {
+      art.style.transform =
+        'perspective(1000px) rotateY(' + (px * 17).toFixed(2) + 'deg) rotateX(' +
+        (-py * 12).toFixed(2) + 'deg) scale(1.02)';
+    }
+  };
+  d.addEventListener('mousemove', (e) => {
+    if (!effectOn('tilt')) {
+      if (art) { art.style.transition = 'transform .4s ease'; art.style.transform = ''; art = null; }
+      return;
+    }
+    const img = e.target.closest && e.target.closest(
+      'section[aria-label="Track header"] img[fetchpriority="high"][crossorigin], ' +
+      'section[aria-label="Track header"] img[src*="artworks-"]');
+    const a = img ? img.parentElement : null;
+    if (a !== art) {
+      if (art) { art.style.transition = 'transform .4s ease'; art.style.transform = ''; }
+      art = a;
+      if (art) { art.style.transition = 'transform .1s ease'; art.style.willChange = 'transform'; }
+    }
+    if (!art) return;
+    const r = art.getBoundingClientRect();
+    px = (e.clientX - r.left) / r.width - 0.5;
+    py = (e.clientY - r.top) / r.height - 0.5;
+    if (!raf) raf = view.requestAnimationFrame(apply);
+  }, { passive: true });
+  d.addEventListener('mouseleave', () => {
+    if (art) { art.style.transition = 'transform .4s ease'; art.style.transform = ''; art = null; }
+  }, { passive: true });
+}
+
+// The webi V2 iframe does not reliably receive the injected preload, and even
+// when it does it reads the SAVED accent from localStorage — so cover-match
+// never reaches it. Pushing the stylesheet and the live accent vars in from the
+// top frame fixes both at once, and survives the iframe re-navigating.
+function themeFrames() {
+  if (window.top !== window) return;
+  const cs = getComputedStyle(document.documentElement);
+  const vars = ['--sc-accent', '--sc-accent-bg', '--sc-accent-ch', '--wave-color'];
+  document.querySelectorAll('iframe').forEach((f) => {
+    let d = null;
+    try { d = f.contentDocument; } catch (e) { return; } // cross-origin: not ours
+    if (!d || !d.documentElement) return;
+    try {
+      if (!d.getElementById('sc-desktop-style')) {
+        const st = d.createElement('style');
+        st.id = 'sc-desktop-style';
+        st.textContent = BASE_CSS + MUI_CSS;
+        (d.head || d.documentElement).appendChild(st);
+      }
+      vars.forEach((v) => {
+        const val = cs.getPropertyValue(v);
+        if (val) d.documentElement.style.setProperty(v, val.trim(), 'important');
+      });
+      // Mirror OUR html classes across. The frosted-glass rules are gated on
+      // .sc-coverbg and the optional effects on .hoq-*, and the iframe's own
+      // <html> never gets them — which is why the new page stayed unfrosted.
+      // Only our own tokens move; SoundCloud's classes on that element stay put.
+      const mine = [...document.documentElement.classList].filter((c) => /^(sc-|hoq-)/.test(c));
+      [...d.documentElement.classList].forEach((c) => {
+        if (/^(sc-|hoq-)/.test(c) && c !== 'hoq-webi' && !mine.includes(c)) {
+          d.documentElement.classList.remove(c);
+        }
+      });
+      mine.forEach((c) => d.documentElement.classList.add(c));
+      d.documentElement.classList.add('hoq-webi'); // scopes the frame-only rules
+      attachWaveRipple(d);
+      attachCoverTilt(d);
+      addQueueButtons(d);
+    } catch (e) {}
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1528,18 +1983,59 @@ function injectBaseCSS() {
 // ---------------------------------------------------------------------------
 const DEFAULT_ACCENT = { c1: '#ff5500', c2: '#ff8800', grad: false };
 
-// Elements already repainted (so we don't re-scan them every tick).
-const _seenOrange = new WeakSet();
-// Is a computed color SoundCloud-orange? (matches #ff5500/#ff3300/#ff7700-ish,
-// but not the red close button or ambers/yellows.)
+const ACCENT_VAR = 'var(--sc-accent, #ff5500)';
+
+// Elements already repainted (so we don't re-scan them every tick). NOT permanent:
+// SoundCloud is an SPA and its newer MUI surfaces resolve their theme tokens AFTER
+// hydration, so an element can turn orange long after we first walked past it. We
+// forget the whole cache on navigation, and forget individual elements when their
+// class/style changes (see the attribute observer below).
+let _seenOrange = new WeakSet();
+let _seenPath = location.pathname;
+
+// Is a computed value SoundCloud-orange? (matches #ff5500/#ff3300/#ff7700-ish, but
+// not the red close button, reds, or ambers/yellows.) Scans EVERY color in the
+// string, not just the first — gradients and box-shadows carry several.
+//   b <= 90 (was 30) picks up the newer MUI tokens and color-mix() results whose
+//   blue channel drifts up, while g - b > 35 is what keeps red out: SC orange has
+//   green well above blue (#ff5500 -> 85), the red close button does not
+//   (#ff5f57 -> 8).
 function isOrange(str) {
-  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(str || '');
-  if (!m) return false;
-  const r = +m[1], g = +m[2], b = +m[3];
-  return r >= 235 && g >= 30 && g <= 140 && b <= 30;
+  const re = /rgba?\((\d+),\s*(\d+),\s*(\d+)/g;
+  let m;
+  while ((m = re.exec(str || ''))) {
+    const r = +m[1], g = +m[2], b = +m[3];
+    if (r >= 235 && g >= 30 && g <= 140 && b <= 90 && g - b > 35) return true;
+  }
+  return false;
 }
+
+// Map one orange stop onto the accent while PRESERVING its lightness relative to
+// SoundCloud's base #ff5500. Without this a two-tone orange gradient collapses to
+// one flat accent and the badge/pill loses its depth.
+function accentStop(r, g, b, a) {
+  const lum = (rr, gg, bb) => (0.2126 * rr + 0.7152 * gg + 0.0722 * bb) / 255;
+  const d = lum(r, g, b) - lum(255, 85, 0);
+  let col = ACCENT_VAR;
+  if (d > 0.04) col = 'color-mix(in srgb, ' + ACCENT_VAR + ' ' + Math.max(35, Math.round(100 - d * 160)) + '%, #fff)';
+  else if (d < -0.04) col = 'color-mix(in srgb, ' + ACCENT_VAR + ' ' + Math.max(35, Math.round(100 + d * 160)) + '%, #000)';
+  // Keep any alpha the original stop carried (shadows lean on it heavily).
+  if (a != null && a < 1) col = 'color-mix(in srgb, ' + col + ' ' + Math.round(a * 100) + '%, transparent)';
+  return col;
+}
+
+// Swap only the orange stops of a gradient/shadow, keeping its shape intact.
+function accentize(value) {
+  return value.replace(/rgba?\(([^)]*)\)/g, (whole, inner) => {
+    if (!isOrange(whole)) return whole;
+    const p = inner.split(',').map((n) => parseFloat(n));
+    return accentStop(p[0], p[1], p[2], p.length > 3 ? p[3] : null);
+  });
+}
+
 // Repaint any orange badge/dot/text to the current accent.
 function recolorOrange() {
+  if (_seenPath !== location.pathname) { _seenPath = location.pathname; _seenOrange = new WeakSet(); }
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
@@ -1548,16 +2044,42 @@ function recolorOrange() {
     }
     _seenOrange.add(el);
     const cs = getComputedStyle(el);
-    if (isOrange(cs.backgroundColor)) {
-      el.style.setProperty('background-color', 'var(--sc-accent, #ff5500)', 'important');
+    let painted = false;
+    const paint = (prop, val) => { el.style.setProperty(prop, val, 'important'); painted = true; };
+    if (isOrange(cs.backgroundColor)) paint('background-color', ACCENT_VAR);
+    if (isOrange(cs.color)) paint('color', ACCENT_VAR);
+    if (isOrange(cs.borderTopColor)) paint('border-color', ACCENT_VAR);
+    // SVG icons: SoundCloud paints a lot of them with an inline fill="#f50", which
+    // no stylesheet rule of ours reaches without a bespoke per-icon selector.
+    if (isOrange(cs.fill)) paint('fill', ACCENT_VAR);
+    if (isOrange(cs.stroke)) paint('stroke', ACCENT_VAR);
+    // Gradients live in background-image, so background-color never sees them —
+    // this is what left the Go+ tier badge (.tierIndicator__*) orange.
+    if (cs.backgroundImage && cs.backgroundImage !== 'none' && isOrange(cs.backgroundImage)) {
+      paint('background-image', accentize(cs.backgroundImage));
     }
-    if (isOrange(cs.color)) {
-      el.style.setProperty('color', 'var(--sc-accent, #ff5500)', 'important');
-    }
-    if (isOrange(cs.borderTopColor)) {
-      el.style.setProperty('border-color', 'var(--sc-accent, #ff5500)', 'important');
-    }
+    if (isOrange(cs.boxShadow)) paint('box-shadow', accentize(cs.boxShadow));
+    if (painted) el.dataset.hoqPaint = '1';
   }
+}
+
+// Re-queue elements whose class/style changed so a late theme pass can't leave
+// orange behind. Our own repaint writes to style, so ignore those or an element
+// we just painted would loop back in forever. Top frame only — recolorOrange()
+// runs from removeClutter(), which boot() skips in subframes.
+if (window.top === window) {
+  try {
+    new MutationObserver((muts) => {
+      for (let i = 0; i < muts.length; i++) {
+        const t = muts[i].target;
+        if (!t || t.nodeType !== 1) continue;
+        if (muts[i].attributeName === 'style' && t.dataset && t.dataset.hoqPaint) continue;
+        _seenOrange.delete(t);
+      }
+    }).observe(document.documentElement, {
+      attributes: true, subtree: true, attributeFilter: ['class', 'style'],
+    });
+  } catch (e) {}
 }
 
 function readAccent() {
@@ -1590,7 +2112,11 @@ function applyAccent(a, dontSave) {
   const root = document.documentElement;
   root.style.setProperty('--sc-accent', a.c1);
   root.style.setProperty('--sc-accent-bg', bg);
+  // MUI's newer tokens are consumed as rgba(var(--...Channel) / alpha), which a
+  // hex value cannot satisfy — keep space-separated channels alongside.
+  try { root.style.setProperty('--sc-accent-ch', _hexToRgb(a.c1).join(' ')); } catch (e) {}
   if (!dontSave) localStorage.setItem('scAccent', JSON.stringify(a));
+  try { themeFrames(); } catch (e) {}
 }
 
 // The waveform's played color follows the CURRENTLY PLAYING song's cover (not the
@@ -1841,6 +2367,55 @@ function applyZoom(z) {
 // ---------------------------------------------------------------------------
 const _toHex = (c) => '#' + [c.r, c.g, c.b].map((x) => ('0' + Math.round(x).toString(16)).slice(-2)).join('');
 
+// HSL helpers (hexToHue above only ever needed the hue).
+function _hexToRgb(h) {
+  h = (h || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function _rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  return [h < 0 ? h + 360 : h, s, l];
+}
+function _hslToHex(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const seg = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h / 60) % 6];
+  return _toHex({ r: (seg[0] + m) * 255, g: (seg[1] + m) * 255, b: (seg[2] + m) * 255 });
+}
+
+// Greyscale artwork (pencil sketches, b&w photos) has no pixel that clears the
+// chroma gate above, so extraction falls back to the flat image average — that is
+// what washed the whole app grey and collapsed the gradient into one repeated
+// stop. Lift weak colors to a saturation floor so they still read as a tint, keep
+// the two stops apart so the gradient keeps its depth, and for genuinely
+// achromatic art fall back to the accent the user actually picked rather than
+// inventing a hue that isn't in the image.
+const COVER_MIN_SAT = 0.42, COVER_MIN_L = 0.34, COVER_MAX_L = 0.72;
+function normalizeCoverColors(c1, c2) {
+  const [h1, s1, l1] = _rgbToHsl(..._hexToRgb(c1));
+  if (s1 < 0.06) {
+    const saved = readAccent();
+    return { c1: saved.c1, c2: saved.c2, grad: saved.grad };
+  }
+  const clampL = (l) => Math.min(COVER_MAX_L, Math.max(COVER_MIN_L, l));
+  const a1 = _hslToHex(h1, Math.max(s1, COVER_MIN_SAT), clampL(l1));
+  const [h2, s2, l2] = _rgbToHsl(..._hexToRgb(c2 || c1));
+  let dh = Math.abs(h2 - h1);
+  if (dh > 180) dh = 360 - dh;
+  const a2 = (dh < 12 && Math.abs(l2 - l1) < 0.1)
+    ? _hslToHex(h1 + 28, Math.max(s1, COVER_MIN_SAT), clampL(l1 + 0.14))
+    : _hslToHex(h2, Math.max(s2, COVER_MIN_SAT * 0.8), clampL(l2));
+  return { c1: a1, c2: a2, grad: true };
+}
+
 function coverColors(url, cb) {
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -1880,6 +2455,44 @@ function coverColors(url, cb) {
   img.src = url;
 }
 
+// The cover of the track page you are LOOKING at, which is not necessarily the
+// one playing — opening a song should hand the whole app that song's colors even
+// before you hit play. On the new webi V2 page the hero artwork lives inside the
+// same-origin iframe, so we have to reach in for it; the legacy hero is a plain
+// background-image on a span.
+const NOT_A_TRACK = /^(you|discover|feed|search|stream|library|upload|settings|pages|tags|n|messages|notifications)$/i;
+function pageCoverUrl() {
+  const seg = location.pathname.split('/').filter(Boolean);
+  if (seg.length !== 2 || NOT_A_TRACK.test(seg[0]) || seg[1] === 'sets') return null;
+  const big = (u) => u.replace(/-t\d+x\d+\./, '-t500x500.').replace(/-large\./, '-t500x500.');
+  // Order matters: the track header also holds the commenter avatars pinned over
+  // the waveform and the comment-box avatar, and both sit BEFORE the artwork in
+  // DOM order. The artwork is the one SoundCloud marks high-priority and loads
+  // with crossorigin (it feeds their own colour sampling); "artworks-" in the
+  // path is the fallback tell.
+  const HERO = [
+    'section[aria-label="Track header"] img[fetchpriority="high"][crossorigin]',
+    'section[aria-label="Track header"] img[src*="artworks-"]',
+    'img[fetchpriority="high"][crossorigin][src*="sndcdn"]',
+  ];
+  for (const f of document.querySelectorAll('iframe')) {
+    let d = null;
+    try { d = f.contentDocument; } catch (e) { continue; } // cross-origin
+    if (!d) continue;
+    for (const sel of HERO) {
+      const img = d.querySelector(sel);
+      if (img && img.src) return big(img.src);
+    }
+  }
+  const hero = document.querySelector(
+    '.fullHero__artwork span, .fullListenHero .image__full span, .listenArtworkWall span');
+  if (hero) {
+    const m = (getComputedStyle(hero).backgroundImage || '').match(/url\(["']?(https?:[^"')]+)/);
+    if (m) return big(m[1]);
+  }
+  return null;
+}
+
 function currentCoverUrl() {
   const scope = document.querySelector('.playbackSoundBadge, .playControls');
   if (!scope) return null;
@@ -1894,9 +2507,10 @@ function currentCoverUrl() {
 
 // The C# host delivers colors here when JS can't read the pixels (CORS).
 window.__scCoverColors = function (c1, c2) {
-  setWaveHue(c1); // waveform always tracks the cover
+  const n = normalizeCoverColors(c1, c2);
+  setWaveHue(n.c1); // waveform always tracks the cover
   if (localStorage.getItem('scMatchCover') === '1') {
-    applyAccent({ c1: c1, c2: c2, grad: true }, true);
+    applyAccent(n, true);
   }
 };
 
@@ -1934,7 +2548,9 @@ let _lastCover = null;
 function matchTick() {
   const matchOn = localStorage.getItem('scMatchCover') === '1';
   const bgOn = localStorage.getItem('scCoverBg') === '1';
-  const url = currentCoverUrl();
+  // Viewing a track wins over what's playing, so opening a song immediately
+  // repaints the app in its colors; off a track page we fall back to now-playing.
+  const url = pageCoverUrl() || currentCoverUrl();
   if (!url || url === _lastCover) return;
   _lastCover = url;
   if (bgOn && !localStorage.getItem('scCustomBg')) {
@@ -1945,8 +2561,9 @@ function matchTick() {
   // match-cover mode is on. (CORS-tainted → C# host samples + calls __scCoverColors.)
   coverColors(url, (cols) => {
     if (cols) {
-      setWaveHue(cols.c1);
-      if (matchOn) applyAccent({ c1: cols.c1, c2: cols.c2, grad: true }, true);
+      const n = normalizeCoverColors(cols.c1, cols.c2);
+      setWaveHue(n.c1);
+      if (matchOn) applyAccent(n, true);
     } else {
       scPost('cover:' + url);
     }
@@ -2040,7 +2657,7 @@ function buildTitlebar() {
         background: rgba(14,14,18,0.55);
         backdrop-filter: blur(46px) saturate(1.5); -webkit-backdrop-filter: blur(46px) saturate(1.5);
         border: 1px solid rgba(255,255,255,0.10); border-radius: 16px;
-        padding: 14px; width: 470px; display: none;
+        padding: 12px 14px; width: 470px; display: none;
         max-height: calc(100vh - 66px); overflow-y: auto; overscroll-behavior: contain;
         scrollbar-width: thin !important;
         scrollbar-color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) transparent !important;
@@ -2052,7 +2669,7 @@ function buildTitlebar() {
       @keyframes scPalIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
       #sc-palette.open { display: block; }
       #sc-palette h4 {
-        margin: 2px 0 12px; font-size: 10.5px; font-weight: 700; color: #fff;
+        margin: 1px 0 8px; font-size: 10.5px; font-weight: 700; color: #fff;
         letter-spacing: 1.3px; text-transform: uppercase; display: flex; align-items: center; gap: 7px;
       }
       #sc-palette h4::before {
@@ -2061,7 +2678,7 @@ function buildTitlebar() {
       }
       #sc-palette .row {
         display: flex; align-items: center; justify-content: space-between;
-        margin: 4px 0; padding: 5px 9px; background: rgba(255,255,255,0.035);
+        margin: 3px 0; padding: 4px 9px; background: rgba(255,255,255,0.035);
         border: 1px solid rgba(255,255,255,0.05);
         border-radius: 8px; font-weight: 500; font-size: 11px;
       }
@@ -2106,13 +2723,16 @@ function buildTitlebar() {
       #sc-palette .sw:hover { transform: scale(1.18); }
       #sc-palette .sw.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--sc-accent, #ff5500); }
       #sc-palette .bgurl {
-        width: 100%; box-sizing: border-box; margin: 2px 0 8px; padding: 8px 10px;
+        width: 100%; box-sizing: border-box; margin: 3px 0 0; padding: 7px 10px;
         border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
         background: rgba(255,255,255,0.05); color: #e4e4e6; font-size: 12px; outline: none;
       }
       #sc-palette .bgurl:focus { border-color: var(--sc-accent, #ff5500); }
+      /* two buttons side-by-side (background + reset rows) to save vertical space */
+      #sc-palette .btn-2up { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+      #sc-palette .btn-2up button { width: 100% !important; margin: 0 !important; }
       #sc-palette button.bgpick, #sc-palette button.bgclear {
-        width: 100%; margin-top: 6px; padding: 8px; border-radius: 8px; cursor: pointer;
+        width: 100%; padding: 7px 8px; border-radius: 8px; cursor: pointer;
         font-size: 12px; font-weight: 600; border: 1px solid rgba(255,255,255,0.09);
         background: rgba(255,255,255,0.06); color: #ccc; transition: all .12s ease;
       }
@@ -2120,13 +2740,13 @@ function buildTitlebar() {
       #sc-palette button.bgclear { background: rgba(255,90,90,0.08); color: #ff9a9a; border-color: rgba(255,90,90,0.25); }
       #sc-palette button.bgclear:hover { background: rgba(255,90,90,0.18); color: #fff; }
       #sc-palette button.reset, #sc-palette button.fixblock {
-        width: 100%; margin-top: 10px; padding: 9px; border-radius: 9px; cursor: pointer;
+        width: 100%; padding: 8px; border-radius: 9px; cursor: pointer;
         font-size: 12px; font-weight: 600; transition: all .12s ease;
       }
       #sc-palette button.reset { background: rgba(255,255,255,0.06); color: #ccc; border: 1px solid rgba(255,255,255,0.09); }
       #sc-palette button.reset:hover { background: rgba(255,255,255,0.11); color: #fff; }
       #sc-palette button.fixblock {
-        margin-top: 8px; background: rgba(255,120,40,0.1); color: #ffb37a; border: 1px solid rgba(255,120,40,0.28);
+        background: rgba(255,120,40,0.1); color: #ffb37a; border: 1px solid rgba(255,120,40,0.28);
       }
       #sc-palette button.fixblock:hover { background: rgba(255,120,40,0.2); color: #fff; }
       #sc-palette .zoomctl { display: flex; align-items: center; gap: 8px; }
@@ -2140,7 +2760,7 @@ function buildTitlebar() {
       #sc-palette .gradctl { display: flex; align-items: center; gap: 10px; }
       #sc-palette .section-label {
         font-size: 9.5px; text-transform: uppercase; letter-spacing: 1.4px;
-        color: #7a7a7c; margin: 13px 2px 7px; font-weight: 700;
+        color: #7a7a7c; margin: 9px 2px 5px; font-weight: 700;
       }
       #sc-palette .section-label:first-of-type { margin-top: 4px; }
     </style>
@@ -2191,11 +2811,15 @@ function buildTitlebar() {
     </div>
     <div class="section-label">Background</div>
     <input type="text" id="sc-bgurl" class="bgurl" placeholder="Paste image / GIF URL…">
-    <button class="bgpick">Choose image / GIF</button>
-    <button class="bgclear">Clear background</button>
-    <div class="section-label" style="margin-top:14px">Reset</div>
-    <button class="reset">Reset to SoundCloud orange</button>
-    <button class="fixblock" title="Clears cookies / Cloudflare block state and reloads">Fix &quot;blocked&quot; / clear data</button>
+    <div class="btn-2up">
+      <button class="bgpick">Choose image</button>
+      <button class="bgclear">Clear bg</button>
+    </div>
+    <div class="section-label">Reset</div>
+    <div class="btn-2up">
+      <button class="reset">Reset color</button>
+      <button class="fixblock" title="Reset to SoundCloud orange · clears cookies / Cloudflare block state and reloads">Fix &quot;blocked&quot;</button>
+    </div>
   `;
   document.body.appendChild(panel);
 
@@ -2389,15 +3013,52 @@ function ensureDiscordPanel() {
   p.id = 'hoq-discord';
   p.innerHTML = `
     <style>
-      #hoq-discord { position: fixed; top: 50px; left: 0; right: 0; bottom: 0;
-        z-index: 2147482000; display: none; background: rgba(8,8,10,0.72);
-        backdrop-filter: blur(34px) saturate(1.3); padding: 44px 24px; overflow-y: auto;
+      /* A PAGE, not a modal: it fills the same region SoundCloud's own content
+         occupies — under the header, above the player — so the header stays
+         usable and the play controls are never covered. Offsets are measured
+         (hoqTabMetrics) because the titlebar is merged into the header and the
+         player can be hidden, so 50px/0 were wrong on both edges. */
+      #hoq-discord { position: fixed; top: var(--hoq-tab-top, 50px); left: 0; right: 0;
+        bottom: var(--hoq-tab-bottom, 0px);
+        /* No scrim and no backdrop blur: a scrim is what made this read as a
+           modal floating over the page. SoundCloud's own content is hidden while
+           the tab is active (rule below), so this sits on the app background
+           exactly like Home or Library does. */
+        z-index: 30; display: none; background: transparent;
+        padding: 30px 24px 48px; overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) transparent;
         font-family: Inter, -apple-system, Arial, sans-serif; }
+      #hoq-discord::-webkit-scrollbar { width: 10px; }
+      #hoq-discord::-webkit-scrollbar-thumb {
+        background: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent);
+        border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+      #hoq-discord::-webkit-scrollbar-track { background: transparent; }
       #hoq-discord.open { display: block; animation: hoqIn .18s ease; }
-      @keyframes hoqIn { from { opacity: 0; } to { opacity: 1; } }
-      #hoq-discord .hoq-dc-card { max-width: 540px; margin: 0 auto;
-        background: linear-gradient(180deg,#1b1b1f,#141417); border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 18px; padding: 22px; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+      /* Selected-tab styling so "hoq" reads as the current page, like Home/Feed. */
+      .hoq-dc-tab.hoq-active { color: #fff !important; position: relative; }
+      .hoq-dc-tab.hoq-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -6px;
+        height: 2px; border-radius: 2px; background: var(--sc-accent, #ff5500); }
+      @keyframes hoqIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+      /* Page-width, and on a wide window the sections flow in two columns like a
+         real settings page instead of one long 540px ribbon. */
+      /* Page content, not a dialog — no panel gradient, border or drop shadow.
+         The individual sections keep their own surfaces, same as SoundCloud's. */
+      #hoq-discord .hoq-dc-card { max-width: 940px; margin: 0 auto;
+        background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
+      /* While the tab is the current page, SoundCloud's content is not on screen
+         (this is what a route swap does); the header and player stay untouched. */
+      html.hoq-tab #content,
+      html.hoq-tab .l-listen-wrapper,
+      html.hoq-tab .webiIframe,
+      html.hoq-tab .l-collection,
+      html.hoq-tab .stream { display: none !important; }
+      @media (min-width: 900px) {
+        #hoq-discord .hoq-dc-card { padding: 28px 30px; }
+        #hoq-discord .hoq-dc-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0 26px; align-items: start; }
+        #hoq-discord .hoq-dc-body > .hoq-dc-sec.hoq-wide { grid-column: 1 / -1; }
+      }
       #hoq-discord .hoq-dc-top { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
       #hoq-discord .hoq-dc-logo { width: 30px; height: 30px; object-fit: contain;
         filter: drop-shadow(0 0 5px rgba(90,160,255,0.4)); }
@@ -2486,11 +3147,12 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-acct-new:hover { background: rgba(255,255,255,0.14); }
     </style>
     <div class="hoq-dc-card">
-      <div class="hoq-dc-top"><img class="hoq-dc-logo" src="https://holdonquietly.app/logo.png"><span>hoq</span><button class="hoq-dc-x">&#10005;</button></div>
-      <div class="hoq-dc-sec">
+      <div class="hoq-dc-top"><img class="hoq-dc-logo" src="${HOQ_LOGO}"><span>hoq</span><button class="hoq-dc-x">&#10005;</button></div>
+      <div class="hoq-dc-body">
+      <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Your listening activity</div>
         <div class="hoq-dc-presence">
-          <img class="hoq-dc-cover" src="https://holdonquietly.app/logo.png">
+          <img class="hoq-dc-cover" src="${HOQ_LOGO}">
           <div class="hoq-dc-ptext">
             <b>Listening to holdonquietly</b>
             <span class="hoq-dc-title">Nothing playing</span>
@@ -2531,20 +3193,21 @@ function ensureDiscordPanel() {
         <input class="hoq-dc-sc" placeholder="SoundCloud profile link  (e.g. soundcloud.com/you)">
         <input class="hoq-dc-name" placeholder="Discord name" style="margin-top:8px">
       </div>
-      <div class="hoq-dc-sec">
+      <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Friends listening</div>
         <div class="hoq-dc-friends"></div>
       </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Server</div>
         <div class="hoq-dc-embed" style="display:none">
-          <img class="hoq-dc-eicon" src="https://holdonquietly.app/logo.png">
+          <img class="hoq-dc-eicon" src="${HOQ_LOGO}">
           <div class="hoq-dc-etext">
             <div class="hoq-dc-ename">holdonquietly</div>
             <div class="hoq-dc-eonline"><span class="hoq-dc-dot"></span><span class="hoq-dc-count">—</span></div>
           </div>
         </div>
         <button class="hoq-dc-open">Open Discord server</button>
+      </div>
       </div>
     </div>`;
   document.body.appendChild(p);
@@ -2689,14 +3352,38 @@ function updateDiscordActivity() {
   p.querySelector('.hoq-dc-title').textContent = np.title || 'Nothing playing';
   p.querySelector('.hoq-dc-artist').textContent = np.artist || '';
   const cov = p.querySelector('.hoq-dc-cover');
-  cov.src = np.cover || 'https://holdonquietly.app/logo.png';
+  cov.src = np.cover || HOQ_LOGO;
+}
+
+// The tab occupies the same band SoundCloud's own content does — under the
+// header, above the player. Both edges are measured rather than assumed: the
+// titlebar is merged into the header (so it isn't 50px) and the player can be
+// absent (so the bottom isn't always 0), which is what made it sit wrong and
+// cover the play controls.
+function hoqTabMetrics() {
+  // Height is the only reliable signal here: SoundCloud leaves
+  // visibility:hidden on the .playControls wrapper and turns a child visible, so
+  // testing visibility measured the player as absent and let the tab run over it.
+  const vis = (el) =>
+    !!el && getComputedStyle(el).display !== 'none' &&
+    el.getBoundingClientRect().height > 0;
+  const hdr = document.querySelector('.header, .l-fixed-top');
+  const ply = document.querySelector('.playControls');
+  const top = vis(hdr) ? Math.round(hdr.getBoundingClientRect().bottom) : 50;
+  const bot = vis(ply) ? Math.round(ply.getBoundingClientRect().height) : 0;
+  const r = document.documentElement.style;
+  r.setProperty('--hoq-tab-top', Math.max(0, top) + 'px');
+  r.setProperty('--hoq-tab-bottom', Math.max(0, bot) + 'px');
 }
 
 function closeDiscord() {
   const p = document.getElementById('hoq-discord');
+  const wasOpen = !!(p && p.classList.contains('open'));
   if (p) p.classList.remove('open');
+  document.documentElement.classList.remove('hoq-tab');
   const tab = document.querySelector('.hoq-dc-tab');
   if (tab) tab.classList.remove('sc-selected', 'hoq-active');
+  void wasOpen;
 }
 
 function toggleDiscord() {
@@ -2705,15 +3392,35 @@ function toggleDiscord() {
   p.classList.toggle('open', opening);
   const tab = document.querySelector('.hoq-dc-tab');
   if (tab) tab.classList.toggle('hoq-active', opening);
+  document.documentElement.classList.toggle('hoq-tab', opening);
   if (opening) {
-    // Close the panel + clear active state as soon as you click any other nav tab.
-    document.querySelectorAll('.header__navMenuItem:not(.hoq-dc-tab)').forEach((a) =>
-      a.addEventListener('click', closeDiscord, { once: true }));
+    hoqTabMetrics();
+    // Deliberately NO pushState/hash here. Writing '#hoq' made SoundCloud's own
+    // router react and rewrite history state, which fired popstate and closed the
+    // tab a moment after it opened. The tab is client-side only.
     scPost('dcwidget');       // refresh the server embed
     scPost('lastfm:status');  // refresh Last.fm state
     scPost('acct:list');      // refresh saved accounts
   }
   updateDiscordActivity();
+}
+
+// One delegated listener instead of per-nav-item {once:true} handlers — React
+// re-renders the header constantly, and those bindings died with it, which left
+// the tab stuck open over whatever page you'd navigated to.
+if (window.top === window) {
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest('#hoq-discord') || t.closest('.hoq-dc-tab')) return;
+    if (t.closest('.header__navMenuItem, .header__logo, .headerSearch, a[href^="/"]')) closeDiscord();
+  }, true);
+  // Any real navigation should drop the tab, whichever way it was triggered.
+  window.addEventListener('popstate', () => closeDiscord());
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDiscord(); });
+  window.addEventListener('resize', () => {
+    if (document.documentElement.classList.contains('hoq-tab')) hoqTabMetrics();
+  });
 }
 
 function myId() {
@@ -2731,8 +3438,34 @@ function playerProgress() {
   };
   const btn = document.querySelector('.playControls__play');
   const title = (btn && btn.getAttribute('title') || '').trim();
-  const paused = !btn || /^play/i.test(title) || btn.classList.contains('sc-ico-play');
+  // SoundCloud marks the active state with a `playing` class and flips the title
+  // between "Play current" / "Pause current". Read the CLASS first: the title is
+  // user-facing English, so matching /^play/i reported "paused" the whole time on
+  // any non-English UI — and this flag drives the visualizer, Discord Rich
+  // Presence and Last.fm scrobbling, not just the waveform.
+  const paused = !btn ? true
+    : btn.classList.contains('playing') ? false
+    : /^pause/i.test(title) ? false
+    : (/^play/i.test(title) || btn.classList.contains('sc-ico-play'));
   return { pos: parseT('.playbackTimeline__timePassed'), dur: parseT('.playbackTimeline__duration'), paused };
+}
+
+// Measure how far a too-long now-playing title has to slide so the hover marquee
+// travels exactly the overflow and no further. Read-only on SoundCloud's DOM —
+// only a class and two custom properties, no children touched (rule 1).
+function tuneNowPlayingMarquee() {
+  const link = document.querySelector('.playbackSoundBadge__titleLink');
+  if (!link) return;
+  const over = Math.round(link.scrollWidth - link.clientWidth);
+  if (over > 6) {
+    link.classList.add('hoq-mq');
+    link.style.setProperty('--hoq-mq', (-over - 6) + 'px');
+    link.style.setProperty('--hoq-mq-dur', Math.max(5, Math.min(16, over / 22)).toFixed(1) + 's');
+  } else if (link.classList.contains('hoq-mq')) {
+    link.classList.remove('hoq-mq');
+    link.style.removeProperty('--hoq-mq');
+    link.style.removeProperty('--hoq-mq-dur');
+  }
 }
 
 // Push now-playing to the C# host (Discord Rich Presence + friends backend).
@@ -2840,8 +3573,14 @@ function startShareButton() {
       'background:rgba(20,20,24,0.72);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);' +
       'color:#fff;font:700 12.5px system-ui,sans-serif;box-shadow:0 8px 26px rgba(0,0,0,0.45);' +
       'transition:transform .16s ease,background .16s ease,opacity .16s ease}' +
-      '#hoq-share:hover{transform:translateY(-2px);background:rgba(30,30,36,0.82)}' +
+      '#hoq-share:hover{transform:translateY(-2px);background:rgba(30,30,36,0.82);opacity:1}' +
       '#hoq-share svg{width:16px;height:16px;flex:0 0 auto}' +
+      // Collapsed to just the icon at rest: as a fixed FAB it otherwise parks on
+      // top of whatever is bottom-right (the Reposts stat on the new track page).
+      '#hoq-share{opacity:.72}' +
+      '#hoq-share span{max-width:0;overflow:hidden;white-space:nowrap;opacity:0;' +
+      'transition:max-width .22s ease,opacity .18s ease,margin-left .22s ease}' +
+      '#hoq-share:hover span{max-width:150px;opacity:1;margin-left:2px}' +
       '#hoq-share.done{background:var(--sc-accent,#ff5500);border-color:transparent;color:#fff;cursor:default;opacity:0.82}' +
       '#hoq-share.done:hover{transform:none;background:var(--sc-accent,#ff5500)}';
     document.head.appendChild(st);
@@ -2889,6 +3628,209 @@ function startShareButton() {
   setInterval(refresh, 1000); // re-enables automatically when a new track starts
 }
 
+// "Play in Discord" — same payload as Share, but flagged so the host marks
+// it as a play request. Sits above the Share button and shares its styling.
+let _hoqLastQueued = '';
+
+// ---------------------------------------------------------------------------
+// Queue ANY track, not just the one playing. The bot resolves from the URL, so
+// title/artist/cover here only decide what the embed shows.
+// ---------------------------------------------------------------------------
+const HOQ_Q_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+const HOQ_Q_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
+  'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+// A track permalink is exactly /<user>/<track> — two segments, no reserved first
+// segment, and not a /sets/ playlist.
+function trackLinkInfo(link) {
+  if (!link || !link.getAttribute) return null;
+  let href = link.getAttribute('href') || '';
+  if (!href) return null;
+  if (!href.startsWith('http')) href = location.origin + href;
+  let u;
+  try { u = new URL(href); } catch (e) { return null; }
+  if (!/(^|\.)soundcloud\.com$/i.test(u.hostname)) return null;
+  const seg = u.pathname.split('/').filter(Boolean);
+  if (seg.length !== 2 || NOT_A_TRACK.test(seg[0]) || seg[1] === 'sets') return null;
+  const row = link.closest && link.closest(
+    '[role="listitem"], .soundBadge, .trackItem, .soundList__item, .compactTrackListItem, li');
+  const title = (link.textContent || '').trim() || seg[1].replace(/-/g, ' ');
+  let artist = seg[0], cover = '';
+  if (row) {
+    // The uploader link in the same row is the one with a single path segment.
+    const prof = [...row.querySelectorAll('a[href]')].find((a) => {
+      // Parse it — these hrefs are absolute on the new page, so splitting the raw
+      // attribute counted "https:" and the host as path segments.
+      let h = a.getAttribute('href') || '';
+      if (!h) return false;
+      if (!h.startsWith('http')) h = location.origin + h;
+      let pu;
+      try { pu = new URL(h); } catch (e) { return false; }
+      const p = pu.pathname.split('/').filter(Boolean);
+      return p.length === 1 && !NOT_A_TRACK.test(p[0]);
+    });
+    if (prof && (prof.textContent || '').trim()) artist = prof.textContent.trim();
+    const img = row.querySelector('img[src*="sndcdn"]');
+    if (img && img.src) cover = img.src.replace(/-t\d+x\d+\./, '-t500x500.');
+  }
+  return { url: u.origin + u.pathname, title: title.slice(0, 140), artist, cover };
+}
+
+// The track this PAGE is about. When you're looking at a song you aren't playing,
+// that's the one "Play in Discord" should queue.
+function pageTrackInfo() {
+  const seg = location.pathname.split('/').filter(Boolean);
+  if (seg.length !== 2 || NOT_A_TRACK.test(seg[0]) || seg[1] === 'sets') return null;
+  let title = '', artist = '';
+  for (const f of document.querySelectorAll('iframe')) {     // new webi V2 page
+    let d = null;
+    try { d = f.contentDocument; } catch (e) { continue; }
+    if (!d) continue;
+    const h = d.querySelector('section[aria-label="Track header"] h1');
+    if (!h) continue;
+    title = (h.textContent || '').trim();
+    const a = d.querySelector('section[aria-label="Track header"] a[href$="/' + seg[0] + '"]');
+    if (a) artist = (a.textContent || '').trim();
+    break;
+  }
+  if (!title) {                                               // legacy page
+    const h = document.querySelector('.fullHero__title, .soundTitle__title');
+    if (h) title = (h.textContent || '').trim();
+    const a = document.querySelector('.soundTitle__username, .fullHero__uploader a');
+    if (a) artist = (a.textContent || '').trim();
+  }
+  if (!title) return null;
+  return {
+    url: location.origin + '/' + seg[0] + '/' + seg[1],
+    title: title.slice(0, 140),
+    artist: artist || seg[0],
+    cover: pageCoverUrl() || '',
+  };
+}
+
+function queueTrack(info) {
+  if (!info || !info.url) return false;
+  const s = senderInfo();
+  scPost('playreq:' + JSON.stringify({
+    title: info.title, artist: info.artist, cover: info.cover, url: info.url,
+    name: s.name, avatar: s.avatar, color: accentInt(), length: '',
+  }));
+  return true;
+}
+
+// Drop a hover-reveal queue button on every track row, in whichever document we
+// are handed — the new track page's related tracks live in the webi iframe, the
+// feed/search/legacy rows live in the top frame.
+function addQueueButtons(d) {
+  const ROWS = '[role="listitem"], .soundBadge, .trackItem, .soundList__item, .compactTrackListItem';
+  let rows;
+  try { rows = d.querySelectorAll(ROWS); } catch (e) { return; }
+  rows.forEach((row) => {
+    if (row.querySelector(':scope > .hoq-q')) return;
+    let info = null;
+    for (const a of row.querySelectorAll('a[href]')) {
+      info = trackLinkInfo(a);
+      if (info) break;
+    }
+    if (!info) return;
+    const b = d.createElement('button');
+    b.className = 'hoq-q';
+    b.type = 'button';
+    b.title = 'Play in Discord';
+    b.innerHTML = HOQ_Q_PLAY;
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();   // don't let the row navigate / start playback
+      if (b.classList.contains('done')) return;
+      if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued'; }
+    });
+    try { if (d.defaultView.getComputedStyle(row).position === 'static') row.style.position = 'relative'; } catch (e) {}
+    row.appendChild(b);
+  });
+}
+
+function startPlayButton() {
+  if (document.getElementById('hoq-playbtn')) return;
+  if (!document.getElementById('hoq-playbtn-style')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-playbtn-style';
+    st.textContent =
+      '#hoq-playbtn{position:fixed;right:18px;bottom:146px;z-index:2147483500;display:flex;gap:8px;align-items:center;' +
+      'padding:10px 15px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);cursor:pointer;' +
+      'background:rgba(20,20,24,0.72);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);' +
+      'color:#fff;font:700 12.5px system-ui,sans-serif;box-shadow:0 8px 26px rgba(0,0,0,0.45);' +
+      'transition:transform .16s ease,background .16s ease,opacity .16s ease}' +
+      '#hoq-playbtn:hover{transform:translateY(-2px);background:rgba(30,30,36,0.82);opacity:1}' +
+      // Same collapse as #hoq-share: two full-width FABs stacked bottom-right
+      // buried the Reposts stat on the new track page.
+      '#hoq-playbtn{opacity:.72}' +
+      '#hoq-playbtn span{max-width:0;overflow:hidden;white-space:nowrap;opacity:0;' +
+      'transition:max-width .22s ease,opacity .18s ease,margin-left .22s ease}' +
+      '#hoq-playbtn:hover span{max-width:150px;opacity:1;margin-left:2px}' +
+      '#hoq-playbtn svg{width:16px;height:16px;flex:0 0 auto}' +
+      '#hoq-playbtn.done{background:var(--sc-accent,#ff5500);border-color:transparent;color:#fff;cursor:default;opacity:0.82}' +
+      '#hoq-playbtn.done:hover{transform:none;background:var(--sc-accent,#ff5500)}';
+    document.head.appendChild(st);
+  }
+
+  const PLAY  = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+  const btn = document.createElement('button');
+  btn.id = 'hoq-playbtn';
+
+  // Viewing a track wins over what's playing, so this queues the song on screen
+  // rather than whatever happens to be loaded in the player.
+  const songKey = () => {
+    const pt = pageTrackInfo();
+    if (pt) return pt.url;
+    const linkEl = document.querySelector('.playbackSoundBadge__titleLink');
+    const h = linkEl ? (linkEl.getAttribute('href') || '') : '';
+    if (h) return h;
+    const np = currentNowPlaying();
+    return np.title ? (np.title + '|' + np.artist) : '';
+  };
+
+  const refresh = () => {
+    if (btn.dataset.msg) return;
+    const queued = songKey() && songKey() === _hoqLastQueued;
+    btn.classList.toggle('done', !!queued);
+    btn.innerHTML = (queued ? CHECK : PLAY) + '<span>' + (queued ? 'Queued' : 'Play in Discord') + '</span>';
+  };
+  const flash = (txt) => {
+    btn.dataset.msg = '1';
+    btn.innerHTML = PLAY + '<span>' + txt + '</span>';
+    setTimeout(() => { delete btn.dataset.msg; refresh(); }, 1600);
+  };
+
+  btn.onclick = () => {
+    const k = songKey();
+    if (!k) { flash('Nothing playing'); return; }
+    // On a track page, queue THAT track; elsewhere fall back to now-playing.
+    const pt = pageTrackInfo();
+    let payload;
+    if (pt) {
+      const s = senderInfo();
+      payload = {
+        title: pt.title, artist: pt.artist, cover: pt.cover, url: pt.url,
+        name: s.name, avatar: s.avatar, color: accentInt(), length: '',
+      };
+    } else {
+      payload = shareCurrentSong();
+    }
+    // The bot needs a real track link to resolve; a title alone is no use.
+    if (!payload.url) { flash('No track link'); return; }
+    if (k === _hoqLastQueued) return;   // one request per track
+    scPost('playreq:' + JSON.stringify(payload));
+    _hoqLastQueued = k;
+    refresh();
+  };
+
+  document.body.appendChild(btn);
+  refresh();
+  setInterval(refresh, 1000);   // re-enables when the track changes
+}
+
 function hoqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); }
 
 // The C# host delivers everyone's presence here → render the friends feed.
@@ -2899,7 +3841,7 @@ window.__hoqFriends = function (list) {
   const others = (Array.isArray(list) ? list : []).filter((f) => f.id !== me && f.title);
   if (!others.length) { el.innerHTML = '<div class="hoq-dc-hint">No friends listening right now.</div>'; return; }
   el.innerHTML = others.map((f) => '<div class="hoq-dc-friend">' +
-    '<img class="hoq-dc-fcover" src="' + (hoqEsc(f.cover) || 'https://holdonquietly.app/logo.png') + '">' +
+    '<img class="hoq-dc-fcover" src="' + (hoqEsc(f.cover) || HOQ_LOGO) + '">' +
     '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') + '</b>' +
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +
     (f.sc ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(f.sc) + '">' + hoqEsc(f.sc.replace(/^https?:\/\//, '')) + '</a>' : '') +
@@ -3346,6 +4288,8 @@ function buildContextMenu() {
     if (sel || link || imgUrl) {
       items.push({ sep: true });
       if (sel) items.push({ ico: '❝', label: 'Copy', act: () => hoqCopy(sel) });
+      const qInfo = trackLinkInfo(link);
+      if (qInfo) items.push({ ico: '▶', label: 'Play in Discord', act: () => queueTrack(qInfo) });
       if (link) items.push({ ico: '🔗', label: 'Copy link', act: () => hoqCopy(link.href) });
       if (imgUrl) items.push({ ico: '🖼', label: 'Save image', act: () => scPost('saveimg:' + imgUrl) });
     }
@@ -3513,12 +4457,26 @@ function boot() {
   obs.observe(document.body, { childList: true, subtree: true });
   // Watch the now-playing cover for the "Match song cover" theme mode.
   setInterval(matchTick, 1500);
+  // Keep the webi V2 track-page iframe themed: it mounts late and re-navigates
+  // on every track, so a one-shot push at boot would miss it.
+  themeFrames();
+  setInterval(() => { try { themeFrames(); } catch (e) {} }, 1000);
+  // Same cadence for the top frame's own rows (feed, search, library, legacy pages).
+  addQueueButtons(document);
+  setInterval(() => { try { addQueueButtons(document); } catch (e) {} }, 1200);
+  setInterval(() => { try { tuneNowPlayingMarquee(); } catch (e) {} }, 1500);
+  // The player bar appears/disappears with playback, so keep the tab's bottom
+  // edge honest while it's open.
+  setInterval(() => {
+    try { if (document.documentElement.classList.contains('hoq-tab')) hoqTabMetrics(); } catch (e) {}
+  }, 1000);
   setInterval(() => { try { buildCustomWave(); } catch (e) {} }, 600); // our waveform + playhead
   applyVizState();  // apply saved "song visualizer bar" on/off before it draws
   applyFxClasses(); // apply saved CSS-gated optional effects
   startPlayerViz(); // bottom-player seek bar → flowing bouncy accent visualizer
   startOverlayScrollbar(); // custom floating accent scrollbar (no side gutter)
   startShareButton(); // floating "Share to Discord" button → posts current track to webhook
+  startPlayButton(); // floating "Play in Discord" button → asks the bot to queue it
   // Discord Rich Presence + live activity-card updates.
   setInterval(() => { try { rpcTick(); updateDiscordActivity(); } catch (e) {} }, 3000);
 }
