@@ -324,12 +324,21 @@ class Program
         try
         {
             string wh = File.Exists(WebhookPath()) ? File.ReadAllText(WebhookPath()).Trim() : "";
-            if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http")) return;
+            if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http"))
+            {
+                Log((play ? "playreq" : "share") + " ABORT: webhook not configured at " + WebhookPath());
+                return;
+            }
 
             var r = JsonDocument.Parse(json).RootElement;
             string title = Prop(r, "title"), artist = Prop(r, "artist"), cover = Prop(r, "cover"),
                    url = Prop(r, "url"), name = Prop(r, "name"), avatar = Prop(r, "avatar"), length = Prop(r, "length");
-            if (string.IsNullOrEmpty(title)) return;
+            if (string.IsNullOrEmpty(title))
+            {
+                Log((play ? "playreq" : "share") + " ABORT: payload had no title");
+                return;
+            }
+            Log((play ? "playreq" : "share") + " -> title=\"" + title + "\" url=" + (string.IsNullOrEmpty(url) ? "(none)" : url));
 
             int color = 0xff5500;
             if (r.TryGetProperty("color", out var cc) && cc.ValueKind == JsonValueKind.Number) color = cc.GetInt32();
@@ -367,9 +376,13 @@ class Program
                 ["embeds"] = new[] { embed },
             };
             if (!string.IsNullOrEmpty(avatar)) payload["avatar_url"] = avatar;
-            await http.PostAsync(wh, new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+            var resp = await http.PostAsync(wh, new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+            // Discord answers 204 on success; anything else (bad hook, rate limit,
+            // malformed embed) used to fail completely silently.
+            Log((play ? "playreq" : "share") + " <- HTTP " + (int)resp.StatusCode +
+                (resp.IsSuccessStatusCode ? "" : " " + await resp.Content.ReadAsStringAsync()));
         }
-        catch { }
+        catch (Exception ex) { Log((play ? "playreq" : "share") + " FAILED: " + ex.Message); }
     }
 
     // Poll everyone's presence and hand it to the page to render the friends feed.
