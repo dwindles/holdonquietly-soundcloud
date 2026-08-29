@@ -140,7 +140,7 @@ const BASE_CSS = `
        into a flat colour field: no shape of the artwork survived it. 52px keeps
        it soft but you can still tell what you're looking at — same reasoning as
        the custom-background rule below. */
-    filter: blur(52px) saturate(1.5) brightness(0.66); transform: scale(1.18);
+    filter: blur(52px) saturate(1.5) brightness(var(--sc-bg-bright, 0.66)); transform: scale(1.18);
     transition: background-image .7s ease, opacity .5s ease; pointer-events: none;
   }
   html.sc-coverbg #sc-bg { display: block; }
@@ -155,8 +155,8 @@ const BASE_CSS = `
     content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
     /* radial vignette fades the cover-bg into dark at the edges (cleaner) */
     background:
-      radial-gradient(135% 95% at 50% 32%, rgba(10,10,12,0) 38%, rgba(10,10,12,0.5) 100%),
-      linear-gradient(180deg, rgba(10,10,12,0.22), rgba(10,10,12,0.5));
+      radial-gradient(135% 95% at 50% 32%, rgba(10,10,12,0) 42%, rgba(10,10,12,0.44) 100%),
+      linear-gradient(180deg, rgba(10,10,12,0.16), rgba(10,10,12,0.4));
   }
   /* Frosted translucent bars so the top + bottom blend with the cover bg.
      (Titlebar is a transparent overlay merged into the header now — keep it
@@ -1824,6 +1824,33 @@ const MUI_CSS = `
   }
   html.hoq-webi section[aria-label="Track header"] > * { position: relative; z-index: 1; }
 
+  /* --- track header polish -------------------------------------------------
+     Anchored on aria-label and MUI's stable API classes; the mui-xxxxx hashes
+     are emotion-generated and already changed once between SoundCloud builds. */
+  html.hoq-webi section[aria-label="Track header"] {
+    border-radius: 16px !important;
+    padding: 20px 22px !important;
+  }
+  html.hoq-webi section[aria-label="Track header"] h1.MuiTypography-h1 {
+    line-height: 1.14 !important;
+    letter-spacing: -0.2px !important;
+    text-shadow: 0 2px 16px rgba(0,0,0,0.5);
+  }
+  /* The comment markers sit right under the waveform; give the pair room so the
+     header doesn't read as one cramped block. */
+  html.hoq-webi section[aria-label="Track header"] [aria-label="Waveform"] {
+    margin-top: 4px !important;
+  }
+  /* Comment box: match the pill shape of the action buttons beside it. */
+  html.hoq-webi section[aria-label="Track header"] .MuiOutlinedInput-root {
+    border-radius: 999px !important;
+    background: rgba(255,255,255,0.05) !important;
+  }
+  /* Give the like count and action circles a consistent weight. */
+  html.hoq-webi section[aria-label="Track header"] .MuiIconButton-colorContrast {
+    background: rgba(255,255,255,0.04) !important;
+  }
+
   /* --- artwork: let the 3D tilt actually show ------------------------------
      The wrapper chain clips and flattens by default, so the rotate would be
      sheared off at the card edge. */
@@ -1974,6 +2001,7 @@ function themeFrames() {
       attachWaveRipple(d);
       attachCoverTilt(d);
       addQueueButtons(d);
+      attachFrameContextMenu(d, f);
     } catch (e) {}
   });
 }
@@ -2399,6 +2427,19 @@ function _hslToHex(h, s, l) {
 // achromatic art fall back to the accent the user actually picked rather than
 // inventing a hue that isn't in the image.
 const COVER_MIN_SAT = 0.42, COVER_MIN_L = 0.34, COVER_MAX_L = 0.72;
+// The cover IS the page background, so a fixed brightness() is wrong: dark art
+// blurs down to black and bright art washes out to haze. Aim the wash at a
+// constant perceived lightness by dividing the target by the artwork's own
+// luminance, so every cover lands in the same readable band.
+function setBgBrightness(hex) {
+  try {
+    const rgb = _hexToRgb(hex);
+    const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+    const v = Math.max(0.5, Math.min(1.9, 0.34 / Math.max(0.06, lum)));
+    document.documentElement.style.setProperty('--sc-bg-bright', v.toFixed(2));
+  } catch (e) {}
+}
+
 function normalizeCoverColors(c1, c2) {
   const [h1, s1, l1] = _rgbToHsl(..._hexToRgb(c1));
   if (s1 < 0.06) {
@@ -2444,11 +2485,15 @@ function coverColors(url, cb) {
         r: bk.r / bk.n, g: bk.g / bk.n, b: bk.b / bk.n, score: bk.sat,
       })).sort((x, y) => y.score - x.score);
       if (arr.length === 0) {
-        if (avg.n) { const c = { r: avg.r / avg.n, g: avg.g / avg.n, b: avg.b / avg.n }; cb({ c1: _toHex(c), c2: _toHex(c) }); }
+        if (avg.n) { const c = { r: avg.r / avg.n, g: avg.g / avg.n, b: avg.b / avg.n }; cb({ c1: _toHex(c), c2: _toHex(c), avg: _toHex(c) }); }
         else cb(null);
         return;
       }
-      cb({ c1: _toHex(arr[0]), c2: _toHex(arr[1] || arr[0]) });
+      // `avg` is every pixel, not just the chromatic ones — it's the honest
+      // measure of how dark the artwork actually is, which is what the blurred
+      // background needs (the dominant colour is picked for chroma, not lightness).
+      const avgHex = avg.n ? _toHex({ r: avg.r / avg.n, g: avg.g / avg.n, b: avg.b / avg.n }) : null;
+      cb({ c1: _toHex(arr[0]), c2: _toHex(arr[1] || arr[0]), avg: avgHex });
     } catch (e) { cb(null); } // CORS-tainted canvas
   };
   img.onerror = () => cb(null);
@@ -2507,6 +2552,7 @@ function currentCoverUrl() {
 
 // The C# host delivers colors here when JS can't read the pixels (CORS).
 window.__scCoverColors = function (c1, c2) {
+  setBgBrightness(c1);                 // raw colour: reflects the actual artwork
   const n = normalizeCoverColors(c1, c2);
   setWaveHue(n.c1); // waveform always tracks the cover
   if (localStorage.getItem('scMatchCover') === '1') {
@@ -2548,9 +2594,10 @@ let _lastCover = null;
 function matchTick() {
   const matchOn = localStorage.getItem('scMatchCover') === '1';
   const bgOn = localStorage.getItem('scCoverBg') === '1';
-  // Viewing a track wins over what's playing, so opening a song immediately
-  // repaints the app in its colors; off a track page we fall back to now-playing.
-  const url = pageCoverUrl() || currentCoverUrl();
+  // What's PLAYING owns the accent — clicking into a song shouldn't repaint the
+  // app away from the track you're actually listening to. Only when nothing is
+  // playing does the page you're looking at decide the colours.
+  const url = currentCoverUrl() || pageCoverUrl();
   if (!url || url === _lastCover) return;
   _lastCover = url;
   if (bgOn && !localStorage.getItem('scCustomBg')) {
@@ -2561,6 +2608,7 @@ function matchTick() {
   // match-cover mode is on. (CORS-tainted → C# host samples + calls __scCoverColors.)
   coverColors(url, (cols) => {
     if (cols) {
+      setBgBrightness(cols.avg || cols.c1);   // whole-image average when we have it
       const n = normalizeCoverColors(cols.c1, cols.c2);
       setWaveHue(n.c1);
       if (matchOn) applyAccent(n, true);
@@ -4254,12 +4302,20 @@ function buildContextMenu() {
   window.addEventListener('resize', hide);
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
 
-  document.addEventListener('contextmenu', (e) => {
-    // Let our own inputs (Discord/Last.fm fields) use a normal caret menu-less right-click.
-    e.preventDefault();
-    const t = e.target;
+  // Extracted from the listener so the SAME menu can be opened from inside the
+  // webi iframe: contextmenu events raised in a child document never reach this
+  // one, which is why right-click did nothing on the new track page.
+  // `doc` is the document the target belongs to; the player controls it drives
+  // always live in the top frame.
+  window.__hoqOpenCtx = (t, clientX, clientY, doc) => {
+    doc = doc || document;
+    const view = doc.defaultView || window;
+    // Right-clicking dead space can target the document itself, and
+    // getComputedStyle() throws on a non-element — fall back to <body>.
+    if (!t || t.nodeType !== 1) t = doc.body;
+    if (!t) return;
     const link = t.closest && t.closest('a[href]');
-    const sel = ((window.getSelection && String(window.getSelection())) || '').trim();
+    const sel = ((view.getSelection && String(view.getSelection())) || '').trim();
     const clickSel = (s) => { const el = document.querySelector(s); if (el) el.click(); };
     const pr = playerProgress();
 
@@ -4278,7 +4334,7 @@ function buildContextMenu() {
     else {
       let n = t;
       for (let i = 0; i < 4 && n; i++) {
-        const m = (getComputedStyle(n).backgroundImage || '').match(/url\(["']?(https?:[^"')]+)["']?\)/);
+        const m = (view.getComputedStyle(n).backgroundImage || '').match(/url\(["']?(https?:[^"')]+)["']?\)/);
         if (m) { imgUrl = m[1]; break; }
         n = n.parentElement;
       }
@@ -4308,11 +4364,29 @@ function buildContextMenu() {
     menu.style.left = '-9999px'; menu.style.top = '0';
     menu.classList.add('open');
     const mw = menu.offsetWidth, mh = menu.offsetHeight;
-    let x = e.clientX, y = e.clientY;
+    let x = clientX, y = clientY;
     if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
     if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
     menu.style.left = Math.max(8, x) + 'px';
     menu.style.top = Math.max(8, y) + 'px';
+  };
+
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    window.__hoqOpenCtx(e.target, e.clientX, e.clientY, document);
+  });
+}
+
+// Right-click inside the webi iframe: reuse the top frame's menu, shifting the
+// coordinates by the iframe's position so it lands under the cursor.
+function attachFrameContextMenu(d, frameEl) {
+  if (d.__hoqCtx) return;
+  d.__hoqCtx = true;
+  d.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (typeof window.__hoqOpenCtx !== 'function') return;
+    const r = frameEl.getBoundingClientRect();
+    window.__hoqOpenCtx(e.target, e.clientX + r.left, e.clientY + r.top, d);
   });
 }
 
