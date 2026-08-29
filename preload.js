@@ -154,9 +154,12 @@ const BASE_CSS = `
   html.sc-coverbg body::before {
     content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
     /* radial vignette fades the cover-bg into dark at the edges (cleaner) */
+    /* Kept deliberately light. setBgBrightness() already normalises the wash to a
+       constant level, so a heavy scrim here just cancels it out — that is what
+       kept the page reading black however much brightness was added. */
     background:
-      radial-gradient(135% 95% at 50% 32%, rgba(10,10,12,0) 42%, rgba(10,10,12,0.44) 100%),
-      linear-gradient(180deg, rgba(10,10,12,0.16), rgba(10,10,12,0.4));
+      radial-gradient(140% 100% at 50% 30%, rgba(10,10,12,0) 48%, rgba(10,10,12,0.34) 100%),
+      linear-gradient(180deg, rgba(10,10,12,0.10), rgba(10,10,12,0.26));
   }
   /* Frosted translucent bars so the top + bottom blend with the cover bg.
      (Titlebar is a transparent overlay merged into the header now — keep it
@@ -1735,12 +1738,19 @@ const MUI_CSS = `
   html.hoq-webi #navigation-shell-right-side-container, html.hoq-webi #main {
     background: transparent !important; background-image: none !important;
   }
+  /* THE reason the frame stayed black. With color-scheme:dark on an iframe's
+     ROOT element, Chromium paints its own opaque dark canvas underneath the
+     document — transparent backgrounds on html/body do not defeat it. Clearing
+     it on the root lets #sc-bg show through; re-declaring it on <body> keeps
+     form controls and scrollbars dark, since that only needs an ancestor. */
+  html.hoq-webi { color-scheme: normal !important; }
+  html.hoq-webi body { color-scheme: dark; }
 
   /* Panels pick up the same acrylic as the rest of the app. */
   html.hoq-webi.sc-coverbg section[aria-label="Track header"],
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiCard-root,
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiPaper-contained {
-    background: rgba(12,12,14,0.42) !important;
+    background: rgba(12,12,14,0.3) !important;
     backdrop-filter: blur(26px) saturate(1.35) !important;
     -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
     border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
@@ -2435,7 +2445,7 @@ function setBgBrightness(hex) {
   try {
     const rgb = _hexToRgb(hex);
     const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
-    const v = Math.max(0.5, Math.min(1.9, 0.34 / Math.max(0.06, lum)));
+    const v = Math.max(0.5, Math.min(2.0, 0.36 / Math.max(0.06, lum)));
     document.documentElement.style.setProperty('--sc-bg-bright', v.toFixed(2));
   } catch (e) {}
 }
