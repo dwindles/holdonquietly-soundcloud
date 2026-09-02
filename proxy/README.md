@@ -29,43 +29,36 @@ Cloudflare (holdonquietly.com → DNS → Records) add:
 Grey cloud matters: Cloudflare's ToS restricts proxying audio through their CDN,
 and their edge interferes with certbot's HTTP-01 challenge.
 
-**1. Check nginx has the sub_filter module** — the whole design needs it:
+**1. One command.** From Windows, or anywhere with ssh:
 
 ```bash
-nginx -V 2>&1 | grep -o with-http_sub_module
+ssh -p 2222 root@155.138.222.253 "bash <(curl -fsSL https://raw.githubusercontent.com/dwindles/holdonquietly-soundcloud/master/proxy/install.sh) sc.holdonquietly.com"
 ```
 
-**2. Copy everything up** (from the Windows box, in the repo root):
+The installer fetches the configs and the theme from GitHub itself, substitutes
+the hostname (including the regex-escaped form the `server_name` patterns need),
+installs everything, expands the certificate across all 18 subdomains, reloads,
+and then verifies the result.
 
-```bash
-scp -P 2222 proxy/hoq-proxy.conf proxy/hoq-rewrites.conf proxy/install.sh dist/holdonquietly.proxy.js root@155.138.222.253:/tmp/
-```
-
-**3. Run the installer on the VPS.** It substitutes the hostname (including the
-regex-escaped form the `server_name` patterns need), installs both configs,
-expands the certificate to cover all 15 subdomains, then tests and reloads:
-
-```bash
-bash /tmp/install.sh sc.holdonquietly.com
-```
-
-That replaces the old hand-typed one-liners, which were the single biggest
-source of mistakes — in particular `__PROXY_HOST_RE__` has to be substituted
-before `__PROXY_HOST__`, or the second pass eats the prefix of the first.
+That self-fetch is deliberate. Every deploy failure in this project came from the
+hand-off rather than the config: files scp'd from Windows arrive with CRLF and
+bash reads `set -euo pipefail` as an invalid option; commands get pasted into
+the wrong machine's shell; a previous run has already consumed a staged file.
+Fetching over https removes all three.
 
 ## Smoke test
 
-```bash
-curl -s https://sc.holdonquietly.com/ | grep -c 'hoq.js'
-curl -s https://sc.holdonquietly.com/ | grep -oE '(api-v2|a-v2|i1)\.[a-z.]*(soundcloud|sndcdn)\.com' | wc -l
-curl -sI https://api-v2.sc.holdonquietly.com/ | head -1
+The installer runs it for you and prints four numbers:
+
+```
+app responds       : HTTP 200   (want 200)
+theme injected     : 1          (want 1)
+un-proxied hosts   : 0          (want 0)
+infinite-load fix  : 1          (want 1)
 ```
 
-Want `1`, then **`0`** (every host rewritten), then a response from the API
-subdomain rather than a TLS error.
-
-Then open it on the phone. The nav should read
-**Discover / Stream / Collection / Social/Settings**.
+`un-proxied hosts` is the one that matters most — anything above zero is a
+SoundCloud host escaping the rewrite, and that is always the next thing to fix.
 
 ## When something breaks
 
