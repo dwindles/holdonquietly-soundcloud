@@ -463,6 +463,11 @@ const BASE_CSS = `
   .header__navMenuItem[data-menu-name="stream"]::after { content: 'Stream' !important; }
   .header__navMenuItem[data-menu-name="library"]::after { content: 'Collection' !important; }
 
+  /* SoundCloud's "new items" dot is always its brand orange, and recolorOrange
+     only reaches it after the 800ms debounce — long enough to see it flash.
+     It's unambiguously an accent dot, so paint it statically from frame one. */
+  .newItemBadge { background-color: var(--sc-accent, #ff5500) !important; }
+
   /* Upsells: hidden for good rather than left in the row to flash on load. */
   .header__upsellWrapper, .header__fanUpsell, .creatorSubscriptionsButton,
   .header__forArtistsButton { display: none !important; }
@@ -4936,13 +4941,22 @@ function boot() {
   const schedule = () => {
     if (pending) return;
     pending = true;
+    // Lazily mounted tiles land with SoundCloud's orange still on them, and at
+    // the gentle cadence that stayed visible for ~2s on a cold start. React fast
+    // while the page is settling, then back off to the slow cadence.
     setTimeout(() => {
       pending = false;
       removeClutter();
-    }, 800);
+    }, performance.now() < 5000 ? 150 : 800);
   };
   const obs = new MutationObserver(schedule);
   obs.observe(document.body, { childList: true, subtree: true });
+  // Cold load shows a burst of SoundCloud orange (follow buttons, badges) before
+  // the first debounced pass lands. These few extra early passes close that window
+  // without turning into the sustained write stream the debounce exists to avoid.
+  [120, 350, 700, 1400, 2500].forEach((ms) => {
+    setTimeout(() => { try { removeClutter(); } catch (e) {} }, ms);
+  });
   // Watch the now-playing cover for the "Match song cover" theme mode.
   setInterval(matchTick, 1500);
   // Keep the webi V2 track-page iframe themed: it mounts late and re-navigates
