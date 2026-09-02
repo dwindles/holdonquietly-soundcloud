@@ -445,3 +445,16 @@ const LOADER =
   'document.body.appendChild(s);})()';
 fs.writeFileSync(path.join(dir, 'bookmarklet.txt'), LOADER + '\n', 'utf8');
 console.log('wrote ' + path.join(dir, 'bookmarklet.txt') + '  (' + LOADER.length + ' chars)');
+
+/* Same loader again, shaped for the iOS Shortcuts "Run JavaScript on Web Page"
+   action. Shortcuts is preinstalled, so this is the one route that needs no
+   App Store and no bookmark editing. That action requires calling completion()
+   to hand a result back, or the shortcut just hangs. */
+const SHORTCUT = [
+  'var s = document.createElement("script");',
+  "s.src = 'https://cdn.jsdelivr.net/gh/dwindles/holdonquietly-soundcloud@master/dist/holdonquietly.boot.js?v=' + Date.now();",
+  'document.body.appendChild(s);',
+  'completion("hoq loaded");',
+].join('\n');
+fs.writeFileSync(path.join(dir, 'shortcut.js'), SHORTCUT + '\n', 'utf8');
+console.log('wrote ' + path.join(dir, 'shortcut.js') + '  (' + SHORTCUT.split('\n').length + ' lines)');

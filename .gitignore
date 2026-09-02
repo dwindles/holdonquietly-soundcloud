@@ -11,6 +11,7 @@ dist/*
 # (GitHub raw sends text/plain + nosniff, so a browser refuses to run it).
 !dist/holdonquietly.boot.js
 !dist/bookmarklet.txt
+!dist/shortcut.js
 *.user
 *.suo
 *.cache

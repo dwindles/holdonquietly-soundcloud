@@ -40,6 +40,25 @@ matches.
 
 First Share to Discord asks once for your webhook URL and keeps it on the device.
 
+## No-install option — the Shortcuts app (easiest on iOS)
+
+Shortcuts is **preinstalled** on iOS, so this needs no App Store and no fighting
+with Safari's bookmark editor. Its "Run JavaScript on Web Page" action does the
+same job as a bookmarklet.
+
+1. Settings → Shortcuts → Advanced → **Allow Running Scripts** → on.
+2. Shortcuts app → **+** → add action → search **Run JavaScript on Web Page**.
+3. Replace the placeholder script with the contents of `dist/shortcut.js`.
+4. Tap the shortcut's name → Details → **Show in Share Sheet** on. Leave the
+   accepted input as web pages / URLs. Name it `hoq`.
+5. Safari → soundcloud.com → **aA** → Request Desktop Website.
+6. Share button → scroll to **hoq** → tap.
+
+The `completion()` call at the end of the script is required — that action hands
+a result back through it, and without it the shortcut hangs.
+
+Same once-per-page-load cost as the bookmarklet, and the same feature set.
+
 ## No-install option — bookmarklet
 
 If you can't install a userscript manager, a `javascript:` bookmark is the only
