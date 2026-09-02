@@ -102,12 +102,27 @@ substrings of every host above and would corrupt all of them.
 
 ## Status
 
-Deployed and serving: the themed app loads on a phone, content renders, playback
-runs, and the accent tracks the cover art. 18 upstreams are proxied.
+**Live and working** at https://sc.holdonquietly.com — nothing installed on the
+phone, nothing tapped.
 
-Verified server-side: every bundle the shell loads comes back with zero
-un-proxied functional hosts, the API returns 200 with correct CORS, phone
-user-agents no longer bounce to m.soundcloud.com, and the auth iframe renders.
+Verified against the deployed proxy at 390px:
 
-Not yet confirmed: a real end-to-end sign-in, which needs credentials and so has
-to be done by hand.
+- page completes loading, theme applied, **18 tiles rendering**, no errors
+- nav reads Discover / Stream / Collection / Social/Settings, one row, 18px gaps
+- containers 390px (were 1240), right rail dropped, tiles 172px two-up
+- no horizontal overflow; header scrolls away instead of eating half the screen
+- 61 requests through the proxy; the only host left off it is `dwt` (tracking)
+- all 18 upstream subdomains resolve with valid TLS
+- `/`, `/discover`, `/search`, `/signin` all 200; `/feed` and `/you/library`
+  return 401 only because the session is logged out
+- the sign-in iframe renders, its scripts load from `secure-cdn`, and `/me`
+  returns 200 with no "Something unexpected happened"
+
+**Not verified: a completed sign-in.** That needs real credentials, so it has to
+be done by hand. Everything the flow touches before the password is confirmed
+working; if it still fails, the console will name a host and that is a
+three-line fix (see "When something breaks").
+
+**OAuth will never work** — "Continue with Google/Apple/Facebook" carries a
+`redirect_uri` registered to soundcloud.com, so the provider sends you back
+there rather than here. Use email and password.
