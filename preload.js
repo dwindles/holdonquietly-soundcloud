@@ -1143,6 +1143,18 @@ const BASE_CSS = `
 
   /* Remove the "Insights / X plays / View your Insights" nag everywhere */
   .insightsSidebarModule { display: none !important; }
+  /* Same treatment for the "ON TOUR" module — it is an Artist Pro upsell, not a
+     tour listing. It is also the one sidebar frame that genuinely cannot be
+     themed: artist-events.soundcloud.com is a DIFFERENT ORIGIN, so
+     contentDocument is null and themeFrames() can never reach it. ?theme=dark
+     makes the child declare color-scheme: dark, so Chromium paints an opaque
+     canvas under it (hard rule 7) and it renders as a black rectangle punched
+     through the cover background. mix-blend-mode does not rescue it either —
+     cross-origin frames composite on their own layer, so the black survives.
+     Nothing to theme, so drop the module. */
+  .sidebarModule:has(> .sidebarContent > iframe.velvetCakeIframe) {
+    display: none !important;
+  }
   /* Feed should be just the feed — drop the whole right sidebar there */
   html.hoq-feed .l-sidebar-right { display: none !important; }
   html.hoq-feed .l-fluid-fixed .l-fluid, html.hoq-feed .l-fluid-fixed .stream,
@@ -1608,13 +1620,24 @@ const MUI_CSS = `
     --mui-palette-primary-mainChannel: var(--sc-accent-ch, 255 85 0) !important;
     --mui-palette-primary-contrastText: #fff !important;
 
-    /* The track waveform is an <svg> of <rect>s painted straight from these:
+  }
+
+  /* The track waveform is an <svg> of <rect>s painted straight from the
+     "contrast" palette:
          contrastText -> played bars (and the playhead line)
          light        -> unplayed bars
          dark         -> the mirrored reflection under the centre line
-       contrastTextChannel is consumed as rgba(var(--...) / .5) for the centre
-       rule, so it MUST be space-separated channels — a hex can't satisfy it
-       (applyAccent keeps --sc-accent-ch in sync). */
+     contrastTextChannel is consumed as rgba(var(--...) / .5) for the centre
+     rule, so it MUST be space-separated channels — a hex can't satisfy it
+     (applyAccent keeps --sc-accent-ch in sync).
+
+     These have to stay SCOPED TO THE WAVEFORM. MUI paints the track header's
+     text out of contrast-contrastText as well — the title, the artist/tag/date
+     caption, the elapsed time, the like count — so repointing it on :root
+     turned the whole header monochrome accent instead of white. The slider
+     element wraps the bars AND both presentation rules (centre line, playhead),
+     so scoping it here still reaches everything the waveform draws. */
+  [aria-label="Waveform"] {
     --mui-palette-contrast-contrastText: var(--sc-accent, #ff5500) !important;
     --mui-palette-contrast-contrastTextChannel: var(--sc-accent-ch, 255 85 0) !important;
     --mui-palette-contrast-light: color-mix(in srgb, var(--sc-accent, #ff5500) 52%, transparent) !important;
@@ -1841,6 +1864,16 @@ const MUI_CSS = `
     border-radius: 16px !important;
     padding: 20px 22px !important;
   }
+  /* The frame begins flush under the app's top bar, so the header card's top
+     edge and border collided with the chrome. Gap it off, matching the 20px the
+     layout already leaves down each side. #main sits inside the scroll
+     container, so the gap scrolls away with the content.
+     SoundCloud is migrating more pages into these frames, so the gap is keyed
+     to a header actually being there. The bounded "> * >" keeps the :has() off
+     a whole-subtree scan. */
+  html.hoq-webi #main:has(> * > section[aria-label="Track header"]) {
+    padding-top: 16px !important;
+  }
   html.hoq-webi section[aria-label="Track header"] h1.MuiTypography-h1 {
     line-height: 1.14 !important;
     letter-spacing: -0.2px !important;
@@ -1863,9 +1896,9 @@ const MUI_CSS = `
 
   /* --- artwork: let the 3D tilt actually show ------------------------------
      The wrapper chain clips and flattens by default, so the rotate would be
-     sheared off at the card edge. */
-     overflow:visible has to go on the GRANDparent — putting it on the frame that
-     holds the <img> is what let the artwork spill past its own rounded corners. */
+     sheared off at the card edge. overflow:visible has to go on the GRANDparent
+     — putting it on the frame that holds the <img> is what let the artwork
+     spill past its own rounded corners. */
   html.hoq-webi section[aria-label="Track header"] .MuiBox-root:has(> .MuiBox-root > img[src*="artworks-"]) {
     overflow: visible !important;
   }
@@ -1878,6 +1911,42 @@ const MUI_CSS = `
   }
   html.hoq-webi section[aria-label="Track header"] img[src*="artworks-"] {
     border-radius: 12px; cursor: pointer;
+  }
+
+  /* --- track sidebar panels ------------------------------------------------
+     The artist card and the three stat tiles are plain MuiStack/MuiBox, NOT
+     MuiCard/MuiPaper, so the acrylic rule further up never reached them: they
+     stayed on SoundCloud's flat #212121 while the header went frosted. Anchor
+     on what each panel actually contains. The 64px on the avatar is load
+     bearing — without it the same shape also matches the "N others like this"
+     row, which is transparent by design and should stay that way. */
+  html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiStack-root:has(> .MuiStack-root > a > img[sizes="64px"]),
+  html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiStack-root:has(> .MuiTypography-h2) {
+    background: rgba(12,12,14,0.3) !important;
+    backdrop-filter: blur(26px) saturate(1.35) !important;
+    -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
+    border-radius: 14px !important;
+  }
+
+  /* --- track header action row ---------------------------------------------
+     Like / comment field / share / copy / repost / playlist / more. The circles
+     are 42px with a 1px accent edge, but MUI draws the comment field's border
+     on its <fieldset>, not on the input root — so the field rendered 40px tall
+     and apparently borderless beside them. Two pixels out and one missing edge
+     reads as a mistake rather than a choice; put the row on one height and one
+     edge. */
+  html.hoq-webi section[aria-label="Track header"] .MuiOutlinedInput-root {
+    min-height: 42px !important;
+  }
+  html.hoq-webi section[aria-label="Track header"] .MuiOutlinedInput-notchedOutline {
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 26%, rgba(255,255,255,0.10)) !important;
+  }
+  /* Liked reads as accent, the way the player bar's heart already does. */
+  html.hoq-webi section[aria-label="Track header"] button[aria-label="Unlike"] {
+    color: var(--sc-accent, #ff5500) !important;
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 12%, transparent) !important;
   }
 `;
 
@@ -3118,17 +3187,72 @@ function ensureDiscordPanel() {
         #hoq-discord .hoq-dc-body > .hoq-dc-sec.hoq-wide { grid-column: 1 / -1; }
       }
       #hoq-discord .hoq-dc-top { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-      #hoq-discord .hoq-dc-logo { width: 30px; height: 30px; object-fit: contain;
-        filter: drop-shadow(0 0 5px rgba(90,160,255,0.4)); }
-      #hoq-discord .hoq-dc-top span { font-weight: 800; font-size: 18px; color: #fff; flex: 1; }
-      #hoq-discord .hoq-dc-x { background: rgba(255,255,255,0.06); border: 0; color: #ccc;
-        width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 14px; }
-      #hoq-discord .hoq-dc-x:hover { background: #e81123; color: #fff; }
+      /* Page header, not a dialog title bar — a tab has no close button; you
+         leave it by picking another tab, the same as Home or Library. */
+      #hoq-discord .hoq-dc-logo { width: 42px; height: 42px; object-fit: contain;
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent)); }
+      #hoq-discord .hoq-dc-titles { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+      #hoq-discord .hoq-dc-top span { font-weight: 800; font-size: 26px; color: #fff; letter-spacing: -.3px;
+        text-shadow: 0 2px 14px rgba(0,0,0,0.55); }
+      #hoq-discord .hoq-dc-top small { color: #c4c4c8; font-size: 12.5px; text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
+      #hoq-discord .hoq-dc-accent { display: flex; gap: 5px; }
+      #hoq-discord .hoq-dc-accent i { width: 16px; height: 16px; border-radius: 5px; display: block;
+        border: 1px solid rgba(255,255,255,0.18); }
+      #hoq-discord .hoq-dc-accent .a1 { background: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-dc-accent .a2 { background: var(--sc-accent-bg,#ff5500); }
+
+      /* now-playing hero */
+      #hoq-discord .hoq-dc-bar { height: 4px; border-radius: 99px; margin-top: 8px;
+        background: rgba(255,255,255,0.12); overflow: hidden; }
+      #hoq-discord .hoq-dc-bar i { display: block; height: 100%; width: 0%;
+        background: var(--sc-accent-bg, var(--sc-accent,#ff5500)); border-radius: 99px;
+        transition: width .4s linear; }
+      #hoq-discord .hoq-dc-times { display: flex; justify-content: space-between;
+        color: #8a8a8c; font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+      /* quick actions */
+      #hoq-discord .hoq-dc-quick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+      #hoq-discord .hoq-dc-quick button { border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(12,12,14,0.55); backdrop-filter: blur(16px); color: #e4e4e6; border-radius: 999px;
+        padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+        transition: background .12s ease, border-color .12s ease, color .12s ease; }
+      #hoq-discord .hoq-dc-quick button:hover {
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 20%, transparent);
+        border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent); color: #fff; }
+      #hoq-discord .hoq-dc-quick button.done {
+        background: var(--sc-accent,#ff5500); border-color: transparent; color: #fff; }
+
+      /* listening stats */
+      #hoq-discord .hoq-stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+      #hoq-discord .hoq-stat { background: rgba(12,12,14,0.55); backdrop-filter: blur(20px) saturate(1.3);
+        border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; padding: 12px 13px;
+        display: flex; flex-direction: column; gap: 2px; }
+      #hoq-discord .hoq-stat b { color: var(--sc-accent,#ff5500); font-size: 21px; font-weight: 800;
+        font-variant-numeric: tabular-nums; }
+      #hoq-discord .hoq-stat span { color: #8a8a8c; font-size: 11px; text-transform: uppercase;
+        letter-spacing: 1px; font-weight: 700; }
+      #hoq-discord .hoq-stat-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 16px; }
+      #hoq-discord .hoq-top { list-style: none; margin: 0; padding: 0; display: flex;
+        flex-direction: column; gap: 5px; counter-reset: hoqrank; }
+      #hoq-discord .hoq-top li { counter-increment: hoqrank; display: flex; align-items: center; gap: 9px;
+        background: rgba(12,12,14,0.5); backdrop-filter: blur(16px);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 9px; padding: 7px 10px; color: #e4e4e6; font-size: 12.5px; }
+      #hoq-discord .hoq-top li::before { content: counter(hoqrank); color: var(--sc-accent,#ff5500);
+        font-weight: 800; font-size: 11px; min-width: 12px; }
+      #hoq-discord .hoq-top li em { margin-left: auto; font-style: normal; color: #8a8a8c; font-size: 11px; }
+      #hoq-discord .hoq-top li b { flex: 1; font-weight: 500; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-stat-reset { background: none; border: 0; color: #8a8a8c; cursor: pointer;
+        text-decoration: underline; font-size: 12px; padding: 0 2px; }
+      #hoq-discord .hoq-stat-reset:hover { color: #ff9a9a; }
       #hoq-discord .hoq-dc-sec { margin-bottom: 18px; }
       #hoq-discord .hoq-dc-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
-        color: #8a8a8c; font-weight: 700; margin-bottom: 9px; }
+        color: #c9c9cc; font-weight: 700; margin-bottom: 9px;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
       #hoq-discord .hoq-dc-presence { display: flex; gap: 14px; align-items: center;
-        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+        background: rgba(12,12,14,0.55); backdrop-filter: blur(20px) saturate(1.3);
+        border: 1px solid rgba(255,255,255,0.09);
         border-radius: 12px; padding: 14px; }
       #hoq-discord .hoq-dc-cover { width: 62px; height: 62px; border-radius: 10px; object-fit: cover;
         box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
@@ -3137,14 +3261,16 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-dc-title { color: #fff; font-weight: 700; font-size: 15px; white-space: nowrap;
         overflow: hidden; text-overflow: ellipsis; }
       #hoq-discord .hoq-dc-artist { color: #b7b7ba; font-size: 13px; }
-      #hoq-discord .hoq-dc-hint { color: #7a7a7c; font-size: 12px; margin-top: 8px; }
+      #hoq-discord .hoq-dc-hint { color: #b9b9bd; font-size: 12px; margin-top: 8px;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.6); }
       #hoq-discord .hoq-dc-name, #hoq-discord .hoq-dc-sc { width: 100%; box-sizing: border-box; padding: 10px 12px;
-        border-radius: 9px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05);
+        border-radius: 9px; border: 1px solid rgba(255,255,255,0.12); background: rgba(12,12,14,0.55);
         color: #e4e4e6; font-size: 13px; outline: none; }
       #hoq-discord .hoq-dc-name:focus, #hoq-discord .hoq-dc-sc:focus { border-color: var(--sc-accent,#ff5500); }
       #hoq-discord .hoq-dc-friends { min-height: 20px; display: flex; flex-direction: column; gap: 6px; }
       #hoq-discord .hoq-dc-friend { display: flex; gap: 12px; align-items: center; padding: 8px;
-        border-radius: 10px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.05); }
+        border-radius: 10px; background: rgba(12,12,14,0.5); backdrop-filter: blur(16px);
+        border: 1px solid rgba(255,255,255,0.08); }
       #hoq-discord .hoq-dc-fcover { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; flex: none; }
       #hoq-discord .hoq-dc-ftext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       #hoq-discord .hoq-dc-ftext b { color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3167,7 +3293,8 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-dc-embed .hoq-dc-dot { width: 8px; height: 8px; border-radius: 50%; background: #3ba55d; display: inline-block; }
       /* Last.fm scrobbler */
       #hoq-discord .hoq-lf { display: flex; gap: 14px; align-items: center;
-        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+        background: rgba(12,12,14,0.55); backdrop-filter: blur(20px) saturate(1.3);
+        border: 1px solid rgba(255,255,255,0.09);
         border-radius: 12px; padding: 14px; }
       #hoq-discord .hoq-lf-logo { width: 44px; height: 44px; border-radius: 12px; flex: none;
         background: linear-gradient(180deg,#e21212,#b40707); display: flex; align-items: center; justify-content: center;
@@ -3186,7 +3313,8 @@ function ensureDiscordPanel() {
       /* Accounts */
       #hoq-discord .hoq-acct-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
       #hoq-discord .hoq-acct-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px;
-        border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+        border-radius: 10px; background: rgba(12,12,14,0.5); backdrop-filter: blur(16px);
+        border: 1px solid rgba(255,255,255,0.08); }
       #hoq-discord .hoq-acct-row b { flex: 1; color: #e4e4e6; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #hoq-discord .hoq-acct-sw { border: 0; border-radius: 7px; padding: 6px 12px; cursor: pointer;
         background: var(--sc-accent-bg,#5865F2); color: #fff; font-weight: 700; font-size: 12px; }
@@ -3195,17 +3323,22 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-acct-rm:hover { color: #e81123; }
       #hoq-discord .hoq-acct-add { display: flex; gap: 8px; }
       #hoq-discord .hoq-acct-name { flex: 1; box-sizing: border-box; padding: 9px 12px; border-radius: 9px;
-        border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: #e4e4e6; font-size: 13px; outline: none; }
+        border: 1px solid rgba(255,255,255,0.12); background: rgba(12,12,14,0.55);
+        backdrop-filter: blur(16px); color: #e4e4e6; font-size: 13px; outline: none; }
       #hoq-discord .hoq-acct-name:focus { border-color: var(--sc-accent,#ff5500); }
       #hoq-discord .hoq-acct-save, #hoq-discord .hoq-acct-new { border: 0; border-radius: 9px; padding: 9px 14px;
         cursor: pointer; font-weight: 700; font-size: 12px; }
       #hoq-discord .hoq-acct-save { background: var(--sc-accent,#ff5500); color: #fff; }
-      #hoq-discord .hoq-acct-new { width: 100%; margin-top: 8px; background: rgba(255,255,255,0.08); color: #e4e4e6;
-        border: 1px solid rgba(255,255,255,0.12); }
-      #hoq-discord .hoq-acct-new:hover { background: rgba(255,255,255,0.14); }
+      #hoq-discord .hoq-acct-new { width: 100%; margin-top: 8px; background: rgba(12,12,14,0.55);
+        backdrop-filter: blur(16px); color: #e4e4e6; border: 1px solid rgba(255,255,255,0.12); }
+      #hoq-discord .hoq-acct-new:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 22%, rgba(12,12,14,0.6)); }
     </style>
     <div class="hoq-dc-card">
-      <div class="hoq-dc-top"><img class="hoq-dc-logo" src="${HOQ_LOGO}"><span>hoq</span><button class="hoq-dc-x">&#10005;</button></div>
+      <div class="hoq-dc-top">
+        <img class="hoq-dc-logo" src="${HOQ_LOGO}">
+        <div class="hoq-dc-titles"><span>hoq</span><small>Your listening, your accounts, your people.</small></div>
+        <div class="hoq-dc-accent" title="Current accent"><i class="a1"></i><i class="a2"></i></div>
+      </div>
       <div class="hoq-dc-body">
       <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Your listening activity</div>
@@ -3215,7 +3348,15 @@ function ensureDiscordPanel() {
             <b>Listening to holdonquietly</b>
             <span class="hoq-dc-title">Nothing playing</span>
             <span class="hoq-dc-artist"></span>
+            <div class="hoq-dc-bar"><i></i></div>
+            <div class="hoq-dc-times"><span class="hoq-dc-pos">0:00</span><span class="hoq-dc-dur">0:00</span></div>
           </div>
+        </div>
+        <div class="hoq-dc-quick">
+          <button data-act="share">Share to Discord</button>
+          <button data-act="play">Play in Discord</button>
+          <button data-act="copy">Copy track link</button>
+          <button data-act="server">Open server</button>
         </div>
         <div class="hoq-dc-hint">This is what your friends will see on Discord.</div>
       </div>
@@ -3252,6 +3393,20 @@ function ensureDiscordPanel() {
         <input class="hoq-dc-name" placeholder="Discord name" style="margin-top:8px">
       </div>
       <div class="hoq-dc-sec hoq-wide">
+        <div class="hoq-dc-label">Listening stats</div>
+        <div class="hoq-stat-row">
+          <div class="hoq-stat"><b class="hoq-stat-plays">0</b><span>Tracks played</span></div>
+          <div class="hoq-stat"><b class="hoq-stat-time">0m</b><span>Time listened</span></div>
+          <div class="hoq-stat"><b class="hoq-stat-uniq">0</b><span>Different tracks</span></div>
+          <div class="hoq-stat"><b class="hoq-stat-since">&mdash;</b><span>Counting since</span></div>
+        </div>
+        <div class="hoq-stat-cols">
+          <div><div class="hoq-dc-label">Top artists</div><ol class="hoq-top hoq-top-artists"></ol></div>
+          <div><div class="hoq-dc-label">Top tracks</div><ol class="hoq-top hoq-top-tracks"></ol></div>
+        </div>
+        <div class="hoq-dc-hint">Counted locally by the app &mdash; SoundCloud exposes no history API. <button class="hoq-stat-reset">Reset</button></div>
+      </div>
+      <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Friends listening</div>
         <div class="hoq-dc-friends"></div>
       </div>
@@ -3269,7 +3424,34 @@ function ensureDiscordPanel() {
       </div>
     </div>`;
   document.body.appendChild(p);
-  p.querySelector('.hoq-dc-x').addEventListener('click', () => p.classList.remove('open'));
+
+  // Quick actions just drive the controls that already exist, so there's one
+  // implementation of each behaviour rather than two.
+  p.querySelectorAll('.hoq-dc-quick button').forEach((b) => {
+    b.addEventListener('click', () => {
+      const act = b.dataset.act;
+      const flash = (txt) => {
+        const was = b.textContent;
+        b.textContent = txt; b.classList.add('done');
+        setTimeout(() => { b.textContent = was; b.classList.remove('done'); }, 1400);
+      };
+      if (act === 'share') { const el = document.getElementById('hoq-share'); if (el) el.click(); flash('Shared'); }
+      else if (act === 'play') { const el = document.getElementById('hoq-playbtn'); if (el) el.click(); flash('Queued'); }
+      else if (act === 'server') { const el = p.querySelector('.hoq-dc-open'); if (el) el.click(); }
+      else if (act === 'copy') {
+        const link = document.querySelector('.playbackSoundBadge__titleLink');
+        const href = link && link.getAttribute('href');
+        if (href) { hoqCopy(href.startsWith('http') ? href : location.origin + href); flash('Copied'); }
+        else flash('Nothing playing');
+      }
+    });
+  });
+  const reset = p.querySelector('.hoq-stat-reset');
+  if (reset) reset.addEventListener('click', () => {
+    try { localStorage.removeItem('hoqStats'); } catch (e) {}
+    _statsTitle = ''; _statsLastTick = 0;
+    renderHoqStats();
+  });
   const name = p.querySelector('.hoq-dc-name');
   const sc = p.querySelector('.hoq-dc-sc');
   name.value = localStorage.getItem('hoqDiscord') || '';
@@ -3403,6 +3585,70 @@ window.__hoqDcWidget = function (data) {
   p.querySelector('.hoq-dc-count').textContent = n + ' online';
 };
 
+// Local listening stats. SoundCloud exposes no history API, so the tab keeps its
+// own tally: the track-change detection we already run for Rich Presence doubles
+// as the counter. Stored in localStorage, so it survives restarts.
+function hoqStatsRead() {
+  try {
+    const s = JSON.parse(localStorage.getItem('hoqStats')) || {};
+    s.plays = s.plays || 0; s.seconds = s.seconds || 0;
+    s.artists = s.artists || {}; s.tracks = s.tracks || {};
+    if (!s.since) s.since = Date.now();
+    return s;
+  } catch (e) { return { plays: 0, seconds: 0, artists: {}, tracks: {}, since: Date.now() }; }
+}
+function hoqStatsWrite(s) { try { localStorage.setItem('hoqStats', JSON.stringify(s)); } catch (e) {} }
+
+let _statsTitle = '', _statsLastTick = 0;
+function hoqStatsTick() {
+  const np = currentNowPlaying();
+  const pr = playerProgress();
+  const s = hoqStatsRead();
+  const now = Date.now();
+  if (!pr.paused && np.title) {
+    // Cap the delta so a backgrounded app or a long pause can't bank hours.
+    if (_statsLastTick) s.seconds += Math.min(15, Math.round((now - _statsLastTick) / 1000));
+    _statsLastTick = now;
+  } else {
+    _statsLastTick = 0;
+  }
+  if (np.title && np.title !== _statsTitle) {
+    _statsTitle = np.title;
+    s.plays++;
+    s.tracks[np.title] = (s.tracks[np.title] || 0) + 1;
+    if (np.artist) s.artists[np.artist] = (s.artists[np.artist] || 0) + 1;
+  }
+  hoqStatsWrite(s);
+}
+
+function hoqFmtDur(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return h ? h + 'h ' + m + 'm' : (m || Math.round(sec / 60)) + 'm';
+}
+
+function renderHoqStats() {
+  const p = document.getElementById('hoq-discord');
+  if (!p || !p.classList.contains('open')) return;
+  const s = hoqStatsRead();
+  const set = (sel, v) => { const el = p.querySelector(sel); if (el) el.textContent = v; };
+  set('.hoq-stat-plays', s.plays.toLocaleString());
+  set('.hoq-stat-time', hoqFmtDur(s.seconds));
+  set('.hoq-stat-uniq', Object.keys(s.tracks).length.toLocaleString());
+  set('.hoq-stat-since', new Date(s.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  const top = (obj, n) => Object.keys(obj).map((k) => [k, obj[k]])
+    .sort((a, b) => b[1] - a[1]).slice(0, n);
+  const fill = (sel, rows, unit) => {
+    const el = p.querySelector(sel);
+    if (!el) return;
+    el.innerHTML = rows.length
+      ? rows.map((r) => '<li><b>' + hoqEsc(r[0]) + '</b><em>' + r[1] + ' ' + unit + (r[1] === 1 ? '' : 's') + '</em></li>').join('')
+      : '<li><b style="color:#7a7a7c">Nothing yet — play something.</b></li>';
+  };
+  fill('.hoq-top-artists', top(s.artists, 5), 'play');
+  fill('.hoq-top-tracks', top(s.tracks, 5), 'play');
+}
+
 function updateDiscordActivity() {
   const p = document.getElementById('hoq-discord');
   if (!p || !p.classList.contains('open')) return;
@@ -3411,6 +3657,14 @@ function updateDiscordActivity() {
   p.querySelector('.hoq-dc-artist').textContent = np.artist || '';
   const cov = p.querySelector('.hoq-dc-cover');
   cov.src = np.cover || HOQ_LOGO;
+  const pr = playerProgress();
+  const bar = p.querySelector('.hoq-dc-bar i');
+  if (bar) bar.style.width = (pr.dur > 0 ? Math.min(100, (pr.pos / pr.dur) * 100) : 0).toFixed(1) + '%';
+  const t = (n) => Math.floor(n / 60) + ':' + String(Math.floor(n % 60)).padStart(2, '0');
+  const pos = p.querySelector('.hoq-dc-pos'), dur = p.querySelector('.hoq-dc-dur');
+  if (pos) pos.textContent = t(pr.pos || 0);
+  if (dur) dur.textContent = t(pr.dur || 0);
+  renderHoqStats();
 }
 
 // The tab occupies the same band SoundCloud's own content does — under the
@@ -4549,6 +4803,7 @@ function boot() {
   addQueueButtons(document);
   setInterval(() => { try { addQueueButtons(document); } catch (e) {} }, 1200);
   setInterval(() => { try { tuneNowPlayingMarquee(); } catch (e) {} }, 1500);
+  setInterval(() => { try { hoqStatsTick(); } catch (e) {} }, 4000);
   // The player bar appears/disappears with playback, so keep the tab's bottom
   // edge honest while it's open.
   setInterval(() => {
