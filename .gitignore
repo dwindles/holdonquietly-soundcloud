@@ -12,6 +12,7 @@ dist/*
 !dist/holdonquietly.boot.js
 !dist/bookmarklet.txt
 !dist/shortcut.js
+!dist/holdonquietly.proxy.js
 *.user
 *.suo
 *.cache
