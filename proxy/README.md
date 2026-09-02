@@ -19,72 +19,52 @@ Two facts worth knowing, both checked rather than assumed:
 
 ## Deploy
 
-Everything runs on the VPS (155.138.222.253, ssh port 2222). Pick a hostname,
-e.g. `sc.holdonquietly.com`, and point an A record at the box first.
+**0. DNS — one wildcard record.** Every upstream gets its own subdomain, so in
+Cloudflare (holdonquietly.com → DNS → Records) add:
 
-**1. Check nginx has the sub_filter module** — the whole design depends on it:
+| Type | Name | Value | Proxy |
+|---|---|---|---|
+| A | `*.sc` | `155.138.222.253` | **DNS only** (grey cloud) |
+
+Grey cloud matters: Cloudflare's ToS restricts proxying audio through their CDN,
+and their edge interferes with certbot's HTTP-01 challenge.
+
+**1. Check nginx has the sub_filter module** — the whole design needs it:
 
 ```bash
 nginx -V 2>&1 | grep -o with-http_sub_module
 ```
 
-If that prints nothing, install `nginx-extras` (Debian/Ubuntu) and re-check.
-
-**2. Copy the two files up** (from the Windows box):
+**2. Copy everything up** (from the Windows box, in the repo root):
 
 ```bash
-scp -P 2222 proxy/hoq-proxy.conf dist/holdonquietly.proxy.js root@155.138.222.253:/tmp/
+scp -P 2222 proxy/hoq-proxy.conf proxy/hoq-rewrites.conf proxy/install.sh dist/holdonquietly.proxy.js root@155.138.222.253:/tmp/
 ```
 
-**3. On the VPS, set your hostname and install** (note: two files now — the
-rewrites live in a snippet so a new host is a one-line change in one place):
+**3. Run the installer on the VPS.** It substitutes the hostname (including the
+regex-escaped form the `server_name` patterns need), installs both configs,
+expands the certificate to cover all 15 subdomains, then tests and reloads:
 
 ```bash
-export H=sc.holdonquietly.com
-mkdir -p /var/www/hoq /etc/nginx/snippets && mv /tmp/holdonquietly.proxy.js /var/www/hoq/
-sed -i "s/__PROXY_HOST__/$H/g" /tmp/hoq-proxy.conf /tmp/hoq-rewrites.conf
-mv /tmp/hoq-rewrites.conf /etc/nginx/snippets/hoq-rewrites.conf
-mv /tmp/hoq-proxy.conf /etc/nginx/sites-available/hoq-proxy
-ln -sf /etc/nginx/sites-available/hoq-proxy /etc/nginx/sites-enabled/hoq-proxy
+bash /tmp/install.sh sc.holdonquietly.com
 ```
 
-**4. Get a certificate** (the conf references it, so do this before reloading):
+That replaces the old hand-typed one-liners, which were the single biggest
+source of mistakes — in particular `__PROXY_HOST_RE__` has to be substituted
+before `__PROXY_HOST__`, or the second pass eats the prefix of the first.
+
+## Smoke test
 
 ```bash
-certbot certonly --webroot -w /var/www/html -d sc.holdonquietly.com
-```
-
-**5. Test the config, then reload — never reload blind:**
-
-```bash
-nginx -t && systemctl reload nginx
-```
-
-If `nginx -t` complains about **`unknown directive "http2"`**, your nginx predates
-1.25.1. Delete the `http2 on;` line and put it on the listen directive instead:
-
-```bash
-sed -i 's/    http2 on;//; s/listen 443 ssl;/listen 443 ssl http2;/' /etc/nginx/sites-available/hoq-proxy
-```
-
-## Smoke test, in order
-
-Each step isolates one layer, so a failure tells you where it is.
-
-```bash
-curl -sI https://sc.holdonquietly.com/ | head -1
 curl -s https://sc.holdonquietly.com/ | grep -c 'hoq.js'
-curl -s https://sc.holdonquietly.com/ | grep -c 'a-v2.sndcdn.com'
-curl -sI https://sc.holdonquietly.com/hoq.js | grep -i content-type
+curl -s https://sc.holdonquietly.com/ | grep -oE '(api-v2|a-v2|i1)\.[a-z.]*(soundcloud|sndcdn)\.com' | wc -l
+curl -sI https://api-v2.sc.holdonquietly.com/ | head -1
 ```
 
-- Line 1 should be `200`.
-- Line 2 should be `1` — the theme got injected.
-- Line 3 should be **`0`** — every original host was rewritten. Any number above
-  zero is a host escaping the rewrite, and that is what to fix first.
-- Line 4 should say `application/javascript`.
+Want `1`, then **`0`** (every host rewritten), then a response from the API
+subdomain rather than a TLS error.
 
-Then open it on the phone. You want the nav to read
+Then open it on the phone. The nav should read
 **Discover / Stream / Collection / Social/Settings**.
 
 ## When something breaks
