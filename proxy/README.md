@@ -102,27 +102,30 @@ substrings of every host above and would corrupt all of them.
 
 ## Status
 
-**Live and working** at https://sc.holdonquietly.com — nothing installed on the
-phone, nothing tapped.
+**Live** at https://sc.holdonquietly.com — nothing installed on the phone.
 
-Verified against the deployed proxy at 390px:
+19 upstream subdomains proxied, all with valid TLS. The only SoundCloud hosts
+still contacted directly are `help`, `community`, `checkout` (static links) and
+`eventlogger` (analytics) — none functional.
 
-- page completes loading, theme applied, **18 tiles rendering**, no errors
-- nav reads Discover / Stream / Collection / Social/Settings, one row, 18px gaps
-- containers 390px (were 1240), right rail dropped, tiles 172px two-up
-- no horizontal overflow; header scrolls away instead of eating half the screen
-- 61 requests through the proxy; the only host left off it is `dwt` (tracking)
-- all 18 upstream subdomains resolve with valid TLS
-- `/`, `/discover`, `/search`, `/signin` all 200; `/feed` and `/you/library`
-  return 401 only because the session is logged out
-- the sign-in iframe renders, its scripts load from `secure-cdn`, and `/me`
-  returns 200 with no "Something unexpected happened"
+### Two things that broke sign-in, both non-obvious
 
-**Not verified: a completed sign-in.** That needs real credentials, so it has to
-be done by hand. Everything the flow touches before the password is confirmed
-working; if it still fails, the console will name a host and that is a
-three-line fix (see "When something breaks").
+**1. The OAuth callback pointed at the wrong origin.** `redirect_uri` is
+hardcoded as `https://soundcloud.com/signin/callback` in three places in the
+bundles, so a *successful* authentication delivered its code to the real
+soundcloud.com. The session was created there, this domain never saw it, and the
+UI reported a generic error. Rewritten to this host.
 
-**OAuth will never work** — "Continue with Google/Apple/Facebook" carries a
-`redirect_uri` registered to soundcloud.com, so the provider sends you back
-there rather than here. Use email and password.
+**2. `dwt.soundcloud.com` is DataDome, not analytics.** The name reads like
+tracking and it was dismissed as such twice. It POSTs to `/js/` and answers with
+`datadome=...; Domain=.holdonquietly.com` — but cross-origin the browser drops a
+`Set-Cookie` whose Domain is not the request host, so the cookie never stored.
+Without it the sign-in POST gets a 403 captcha challenge, which surfaces as
+"Something unexpected happened". Proxying it lets the cookie set from our own
+origin and the handshake complete.
+
+Verified after the fix: the `datadome` and `sc_session` cookies are both set on
+this domain, and zero hosts are contacted off-proxy during a sign-in page load.
+
+**OAuth buttons will never work** — Google/Apple/Facebook carry a `redirect_uri`
+registered to soundcloud.com. Use email and password.
