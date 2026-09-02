@@ -3163,10 +3163,24 @@ function ensureDiscordPanel() {
         border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
       #hoq-discord::-webkit-scrollbar-track { background: transparent; }
       #hoq-discord.open { display: block; animation: hoqIn .18s ease; }
-      /* Selected-tab styling so "hoq" reads as the current page, like Home/Feed. */
-      .hoq-dc-tab.hoq-active { color: #fff !important; position: relative; }
-      .hoq-dc-tab.hoq-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -6px;
-        height: 2px; border-radius: 2px; background: var(--sc-accent, #ff5500); }
+      /* Selected-tab styling so "hoq" reads as the current page, like Home/Feed.
+         Use SoundCloud's OWN mechanism — .selected draws border-bottom: 2px solid
+         — just in the accent, so the underline sits at exactly the same height as
+         the other tabs. The previous ::after sat 6px lower and something already
+         paints an inset white line on the item, so the two together read as a
+         doubled underline. */
+      .hoq-dc-tab.hoq-active {
+        color: #fff !important;
+        border-bottom: 2px solid var(--sc-accent, #ff5500) !important;
+        box-shadow: none !important;
+      }
+      .hoq-dc-tab.hoq-active::after { content: none !important; }
+      /* Only one tab can be current. SoundCloud keeps its 'selected' class on whatever route
+         is still mounted underneath, which left Home/Feed lit at the same time. */
+      html.hoq-tab .header__navMenuItem.selected:not(.hoq-dc-tab) {
+        border-bottom-color: transparent !important;
+        color: #999 !important;
+      }
       @keyframes hoqIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
       /* Page-width, and on a wide window the sections flow in two columns like a
          real settings page instead of one long 540px ribbon. */
@@ -3275,6 +3289,10 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-dc-ftext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       #hoq-discord .hoq-dc-ftext b { color: #fff; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #hoq-discord .hoq-dc-ftext span { color: #b7b7ba; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-me { font-style: normal; font-size: 10px; font-weight: 700; margin-left: 7px;
+        padding: 1px 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: .6px;
+        color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); }
+      #hoq-discord .hoq-dc-friend.is-me { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); }
       #hoq-discord .hoq-dc-sclink { color: var(--sc-accent,#ff5500); font-size: 11px; cursor: pointer; text-decoration: none; }
       #hoq-discord .hoq-dc-sclink:hover { text-decoration: underline; }
       #hoq-discord .hoq-dc-open { width: 100%; padding: 11px; border-radius: 10px; cursor: pointer;
@@ -4150,11 +4168,24 @@ window.__hoqFriends = function (list) {
   const el = document.querySelector('.hoq-dc-friends');
   if (!el) return;
   const me = myId();
-  const others = (Array.isArray(list) ? list : []).filter((f) => f.id !== me && f.title);
-  if (!others.length) { el.innerHTML = '<div class="hoq-dc-hint">No friends listening right now.</div>'; return; }
-  el.innerHTML = others.map((f) => '<div class="hoq-dc-friend">' +
+  const all = (Array.isArray(list) ? list : []).filter((f) => f.title);
+  const others = all.filter((f) => f.id !== me);
+  const mine = all.filter((f) => f.id === me);
+  // Show your own row too. "No friends listening" on its own is indistinguishable
+  // from the feed being broken; seeing yourself in it proves presence is live.
+  const rows = others.concat(mine);
+  if (!rows.length) {
+    el.innerHTML = '<div class="hoq-dc-hint">Nobody is reporting right now — not even you. ' +
+      'Presence only posts while a track is playing.</div>';
+    return;
+  }
+  if (!others.length) {
+    el.innerHTML = '<div class="hoq-dc-hint">Only you are on right now.</div>';
+  }
+  el.innerHTML += rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
     '<img class="hoq-dc-fcover" src="' + (hoqEsc(f.cover) || HOQ_LOGO) + '">' +
-    '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') + '</b>' +
+    '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') +
+    (f.id === me ? '<em class="hoq-me">you</em>' : '') + '</b>' +
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +
     (f.sc ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(f.sc) + '">' + hoqEsc(f.sc.replace(/^https?:\/\//, '')) + '</a>' : '') +
     '</div></div>').join('');
