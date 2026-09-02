@@ -36,12 +36,14 @@ If that prints nothing, install `nginx-extras` (Debian/Ubuntu) and re-check.
 scp -P 2222 proxy/hoq-proxy.conf dist/holdonquietly.proxy.js root@155.138.222.253:/tmp/
 ```
 
-**3. On the VPS, set your hostname and install:**
+**3. On the VPS, set your hostname and install** (note: two files now — the
+rewrites live in a snippet so a new host is a one-line change in one place):
 
 ```bash
 export H=sc.holdonquietly.com
-mkdir -p /var/www/hoq && mv /tmp/holdonquietly.proxy.js /var/www/hoq/
-sed -i "s/__PROXY_HOST__/$H/g" /tmp/hoq-proxy.conf
+mkdir -p /var/www/hoq /etc/nginx/snippets && mv /tmp/holdonquietly.proxy.js /var/www/hoq/
+sed -i "s/__PROXY_HOST__/$H/g" /tmp/hoq-proxy.conf /tmp/hoq-rewrites.conf
+mv /tmp/hoq-rewrites.conf /etc/nginx/snippets/hoq-rewrites.conf
 mv /tmp/hoq-proxy.conf /etc/nginx/sites-available/hoq-proxy
 ln -sf /etc/nginx/sites-available/hoq-proxy /etc/nginx/sites-enabled/hoq-proxy
 ```
