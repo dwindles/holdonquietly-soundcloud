@@ -2758,7 +2758,6 @@ function buildTitlebar() {
       }
       #sc-titlebar .sc-tb-btn svg { width: 15px; height: 15px; display: block; }
       #sc-titlebar .sc-tb-btn:hover { background: rgba(255,255,255,0.09); color: #fff; }
-      #sc-titlebar .sc-tb-palette:hover { color: var(--sc-accent, #ff5500); }
       #sc-titlebar .sc-tb-skipad:hover { color: var(--sc-accent, #ff5500); }
       #sc-titlebar .sc-tb-accentdot { fill: var(--sc-accent, #ff5500); }
       /* macOS traffic-light window controls */
@@ -2795,6 +2794,51 @@ function buildTitlebar() {
       }
       @keyframes scPalIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
       #sc-palette.open { display: block; }
+      /* Rows carry padding + a 1px border; without border-box each one renders
+         wider than its grid track and bleeds into the neighbouring column. */
+      #sc-palette, #sc-palette *, #sc-palette *::before, #sc-palette *::after {
+        box-sizing: border-box;
+      }
+
+      /* --- Palette adopted by the Social/Settings tab ---------------------
+         Same element, same handlers; it just stops being a floating popup and
+         becomes an inline block that can breathe. The tab scrolls, so none of
+         the popup's height clamping is needed (that was what clipped rows). */
+      #hoq-discord .hoq-settings-host #sc-palette {
+        position: static !important; display: block !important;
+        width: auto !important; max-width: none !important;
+        max-height: none !important; overflow: visible !important;
+        background: transparent !important;
+        backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+        border: 0 !important; border-radius: 0 !important;
+        box-shadow: none !important; padding: 0 !important;
+        animation: none !important; font-size: 12px;
+      }
+      /* The card already has a "Settings" label above it. */
+      #hoq-discord .hoq-settings-host #sc-palette > h4 { display: none !important; }
+      #hoq-discord .hoq-settings-host #sc-palette .section-label {
+        margin: 16px 0 7px !important;
+        /* The tab sits on the cover wash, which can be light — the popup's mid
+           grey vanished on bright artwork, so lift it and anchor it with a shadow. */
+        font-size: 10px !important;
+        color: rgba(255,255,255,0.74) !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.55) !important;
+      }
+      #hoq-discord .hoq-settings-host #sc-palette .section-label:first-of-type { margin-top: 2px !important; }
+      /* Fill the tab's width instead of forcing two cramped columns. */
+      #hoq-discord .hoq-settings-host #sc-palette .pal-grid {
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 8px 18px !important;
+      }
+      #hoq-discord .hoq-settings-host #sc-palette .row {
+        padding: 7px 11px !important;
+      }
+      #hoq-discord .hoq-settings-host #sc-palette .pal-grid .row { margin: 0 !important; }
+      /* Keep the full-width singles on the same column rhythm as the grids
+         (2 cols = 232+232+18) instead of stretching across the whole tab. */
+      #hoq-discord .hoq-settings-host #sc-palette > .row,
+      #hoq-discord .hoq-settings-host #sc-palette > .bgurl,
+      #hoq-discord .hoq-settings-host #sc-palette > .btn-2up { max-width: calc(66.667% - 6px); }
       #sc-palette h4 {
         margin: 1px 0 8px; font-size: 10.5px; font-weight: 700; color: #fff;
         letter-spacing: 1.3px; text-transform: uppercase; display: flex; align-items: center; gap: 7px;
@@ -2895,8 +2939,6 @@ function buildTitlebar() {
     <div class="sc-tb-spacer"></div>
     <button class="sc-tb-btn sc-tb-skipad" title="Kill current ad (mute + fast-forward)">
       <svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></svg></button>
-    <button class="sc-tb-btn sc-tb-palette" title="Theme color">
-      <svg class="lucide sc-tb-accentdot" viewBox="0 0 24 24" fill="none" stroke="var(--sc-accent, #ff5500)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></button>
     <div class="sc-tb-lights">
       <button class="sc-light sc-tb-close" title="Close"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></span></button>
       <button class="sc-light sc-tb-min" title="Minimize"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg></span></button>
@@ -2988,15 +3030,10 @@ function buildTitlebar() {
   bar.querySelector('.sc-tb-min').addEventListener('click', () => window.scDesktop.minimize());
   bar.querySelector('.sc-tb-max').addEventListener('click', () => window.scDesktop.maximize());
   bar.querySelector('.sc-tb-close').addEventListener('click', () => window.scDesktop.close());
-  bar.querySelector('.sc-tb-palette').addEventListener('click', (e) => {
-    e.stopPropagation();
-    panel.classList.toggle('open');
-  });
-  document.addEventListener('click', (e) => {
-    if (!panel.contains(e.target) && !e.target.closest('.sc-tb-palette')) {
-      panel.classList.remove('open');
-    }
-  });
+  // Settings live in the Social/Settings tab now, so the gear is just a shortcut
+  // to it rather than a second place the same controls can appear.
+  // No titlebar gear any more — the Social/Settings tab is the single entry
+  // point, so the palette is never a floating panel and needs no dismiss logic.
 
   // Palette wiring
   const c1 = panel.querySelector('#sc-c1');
@@ -3134,7 +3171,7 @@ function buildDiscordTab() {
   const li = libLi.cloneNode(false); // empty <li> with the same class
   const tab = document.createElement('a');
   tab.className = (lib.className || '').toString().replace(/\b(selected|active|m-selected)\b/g, '').trim() + ' hoq-dc-tab';
-  tab.textContent = 'hoq';
+  tab.textContent = 'Social/Settings';
   tab.style.cursor = 'pointer';
   tab.addEventListener('click', (e) => { e.preventDefault(); toggleDiscord(); });
   li.appendChild(tab);
@@ -3357,13 +3394,35 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-acct-save { background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-acct-new { width: 100%; margin-top: 8px; background: rgba(12,12,14,0.55);
         backdrop-filter: blur(16px); color: #e4e4e6; border: 1px solid rgba(255,255,255,0.12); }
+      #hoq-discord .hoq-sub {
+        display: flex; gap: 4px; margin: 0 0 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.09); padding-bottom: 0;
+      }
+      #hoq-discord .hoq-subtab {
+        background: none; border: 0; cursor: pointer;
+        padding: 7px 2px; margin-right: 18px;
+        font: 700 12.5px/1 Inter, -apple-system, Arial, sans-serif;
+        color: #8b8b8f; letter-spacing: .2px;
+        border-bottom: 2px solid transparent; margin-bottom: -1px;
+      }
+      #hoq-discord .hoq-subtab:hover { color: #d2d2d6; }
+      #hoq-discord .hoq-subtab.hoq-on {
+        color: #fff; border-bottom-color: var(--sc-accent, #ff5500);
+      }
+      /* One pane at a time; sections are tagged in ensureDiscordPanel(). */
+      #hoq-discord[data-pane="social"] .hoq-pane-set { display: none !important; }
+      #hoq-discord[data-pane="settings"] .hoq-dc-sec:not(.hoq-pane-set) { display: none !important; }
       #hoq-discord .hoq-acct-new:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 22%, rgba(12,12,14,0.6)); }
     </style>
     <div class="hoq-dc-card">
       <div class="hoq-dc-top">
         <img class="hoq-dc-logo" src="${HOQ_LOGO}">
-        <div class="hoq-dc-titles"><span>hoq</span><small>Your listening, your accounts, your people.</small></div>
+        <div class="hoq-dc-titles"><span>hoq</span></div>
         <div class="hoq-dc-accent" title="Current accent"><i class="a1"></i><i class="a2"></i></div>
+      </div>
+      <div class="hoq-sub">
+        <button class="hoq-subtab hoq-on" data-pane="social">Social</button>
+        <button class="hoq-subtab" data-pane="settings">Settings</button>
       </div>
       <div class="hoq-dc-body">
       <div class="hoq-dc-sec hoq-wide">
@@ -3384,7 +3443,6 @@ function ensureDiscordPanel() {
           <button data-act="copy">Copy track link</button>
           <button data-act="server">Open server</button>
         </div>
-        <div class="hoq-dc-hint">This is what your friends will see on Discord.</div>
       </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Last.fm scrobbling</div>
@@ -3411,12 +3469,16 @@ function ensureDiscordPanel() {
           <button class="hoq-acct-save">Save</button>
         </div>
         <button class="hoq-acct-new">＋ Log into another account</button>
-        <div class="hoq-dc-hint">Switch between SoundCloud accounts without logging out. Save your current session, then add another.</div>
+        <div class="hoq-dc-hint">Save the current session, then add another.</div>
       </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Your info</div>
         <input class="hoq-dc-sc" placeholder="SoundCloud profile link  (e.g. soundcloud.com/you)">
         <input class="hoq-dc-name" placeholder="Discord name" style="margin-top:8px">
+      </div>
+      <div class="hoq-dc-sec hoq-wide">
+        <div class="hoq-dc-label">Settings</div>
+        <div class="hoq-settings-host"></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Listening stats</div>
@@ -3449,6 +3511,32 @@ function ensureDiscordPanel() {
       </div>
       </div>
     </div>`;
+  // Configuration lives behind the Settings sub-tab; everything else is Social.
+  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'your info'];
+  p.querySelectorAll('.hoq-dc-sec').forEach((sec) => {
+    const lab = sec.querySelector('.hoq-dc-label');
+    const t = lab ? lab.textContent.trim().toLowerCase() : '';
+    if (SET_SECS.indexOf(t) !== -1) sec.classList.add('hoq-pane-set');
+  });
+  // The palette is the point of the Settings pane, so lead with it.
+  const setSecs = [...p.querySelectorAll('.hoq-dc-sec.hoq-pane-set')];
+  const palSec = setSecs.find((sec) => sec.querySelector('.hoq-settings-host'));
+  if (palSec && setSecs[0] && palSec !== setSecs[0]) {
+    setSecs[0].parentNode.insertBefore(palSec, setSecs[0]);
+  }
+  // The sub-tab already reads "Settings"; the card's own label just repeats it.
+  if (palSec) {
+    const dup = palSec.querySelector('.hoq-dc-label');
+    if (dup) dup.remove();
+  }
+  p.dataset.pane = 'social';
+  p.querySelectorAll('.hoq-subtab').forEach((b) => {
+    b.addEventListener('click', () => {
+      p.dataset.pane = b.dataset.pane;
+      p.querySelectorAll('.hoq-subtab').forEach((o) => o.classList.toggle('hoq-on', o === b));
+      p.scrollTop = 0;
+    });
+  });
   document.body.appendChild(p);
 
   // Quick actions just drive the controls that already exist, so there's one
@@ -3732,6 +3820,14 @@ function toggleDiscord() {
   if (tab) tab.classList.toggle('hoq-active', opening);
   document.documentElement.classList.toggle('hoq-tab', opening);
   if (opening) {
+    // Re-parent the settings palette into the tab. appendChild MOVES the node,
+    // so every listener wired in buildTitlebar() survives untouched — nothing
+    // about the palette's behaviour is duplicated here.
+    try {
+      const pal = document.getElementById('sc-palette');
+      const host = p.querySelector('.hoq-settings-host');
+      if (pal && host && pal.parentElement !== host) host.appendChild(pal);
+    } catch (e) {}
     hoqTabMetrics();
     // Deliberately NO pushState/hash here. Writing '#hoq' made SoundCloud's own
     // router react and rewrite history state, which fired popstate and closed the
