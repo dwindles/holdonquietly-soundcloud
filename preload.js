@@ -451,24 +451,6 @@ const BASE_CSS = `
     background: url("${HOQ_LOGO}") center/contain no-repeat !important;
     filter: drop-shadow(0 0 4px rgba(90,160,255,0.3)) !important;
   }
-  /* Wordmark. The link's own text node still reads "SoundCloud" and is hidden by
-     SoundCloud's .sc-ir image-replacement, so undo that and zero the font instead
-     — then ::after can carry our name. Done in CSS so a React re-render can't
-     revert it (and buildDiscordTab still matches nav items by textContent). */
-  .header__logo .header__logoLink-iconOnly {
-    text-indent: 0 !important; overflow: visible !important;
-    white-space: nowrap !important; font-size: 0 !important; gap: 9px !important;
-    /* SoundCloud stacks this link's contents (flex-direction: column), which put
-       the wordmark under the header and clipped the mark. */
-    flex-direction: row !important; line-height: 1 !important;
-  }
-  .header__logo .header__logoLink-iconOnly::after {
-    content: 'holdonquietly' !important;
-    font: 700 15px/1 Inter, -apple-system, Arial, sans-serif !important;
-    letter-spacing: -0.2px !important; color: #f2f2f4 !important;
-  }
-  .header__logo .header__logoLink-iconOnly:hover::after { color: var(--sc-accent, #ff5500) !important; }
-
   /* Nav labels, renamed the same way. Scoped by data-menu-name so the injected
      Social/Settings tab (no such attribute) is left alone. */
   .header__navMenuItem[data-menu-name="home"],
