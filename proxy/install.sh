@@ -13,7 +13,7 @@ set -euo pipefail
 H="${1:-sc.holdonquietly.com}"
 H_RE="${H//./\\.}"                 # dots escaped, for the regex server_names
 RAW="https://raw.githubusercontent.com/dwindles/holdonquietly-soundcloud/master"
-SUBS=(api-v2 api-auth api graph secure secure-cdn a-v2 style va wis i1 i2 i3 i4 hls hls2 wave pushers)
+SUBS=(api-v2 api-auth api graph secure secure-cdn a-v2 style va wis i1 i2 i3 i4 hls hls2 wave pushers dwt)
 
 echo "==> base host: $H"
 echo "==> ${#SUBS[@]} upstream subdomains"
