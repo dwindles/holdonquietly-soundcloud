@@ -10,7 +10,7 @@ set -euo pipefail
 
 H="${1:-sc.holdonquietly.com}"
 H_RE="${H//./\\.}"                      # dots escaped, for the regex server_names
-SUBS=(api-v2 api-auth api graph secure a-v2 style va wis i1 i2 i3 i4 hls hls2)
+SUBS=(api-v2 api-auth api graph secure secure-cdn a-v2 style va wis i1 i2 i3 i4 hls hls2)
 
 echo "==> base host: $H"
 
