@@ -4022,21 +4022,19 @@ function startShareButton() {
     const st = document.createElement('style');
     st.id = 'hoq-share-style';
     st.textContent =
-      '#hoq-share{position:fixed;right:18px;bottom:96px;z-index:2147483500;display:flex;gap:8px;align-items:center;' +
-      'padding:10px 15px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);cursor:pointer;' +
-      'background:rgba(20,20,24,0.72);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);' +
-      'color:#fff;font:700 12.5px system-ui,sans-serif;box-shadow:0 8px 26px rgba(0,0,0,0.45);' +
-      'transition:transform .16s ease,background .16s ease,opacity .16s ease}' +
-      '#hoq-share:hover{transform:translateY(-2px);background:rgba(30,30,36,0.82);opacity:1}' +
-      '#hoq-share svg{width:16px;height:16px;flex:0 0 auto}' +
-      // Collapsed to just the icon at rest: as a fixed FAB it otherwise parks on
-      // top of whatever is bottom-right (the Reposts stat on the new track page).
-      '#hoq-share{opacity:.72}' +
-      '#hoq-share span{max-width:0;overflow:hidden;white-space:nowrap;opacity:0;' +
-      'transition:max-width .22s ease,opacity .18s ease,margin-left .22s ease}' +
-      '#hoq-share:hover span{max-width:150px;opacity:1;margin-left:2px}' +
-      '#hoq-share.done{background:var(--sc-accent,#ff5500);border-color:transparent;color:#fff;cursor:default;opacity:0.82}' +
-      '#hoq-share.done:hover{transform:none;background:var(--sc-accent,#ff5500)}';
+      // Lives in the player bar's action cluster, styled like SoundCloud's own
+      // icon buttons there. Hidden while unmounted so it can never float loose.
+      '#hoq-share{display:none}' +
+      '.playbackSoundBadge__actions #hoq-share{display:inline-flex;align-items:center;justify-content:center;' +
+      'width:26px;height:26px;margin-left:10px;padding:0;background:none;border:0;' +
+      'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
+      'transition:color .15s ease,background .15s ease}' +
+      '.playbackSoundBadge__actions #hoq-share:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
+      '.playbackSoundBadge__actions #hoq-share svg{width:15px;height:15px;flex:0 0 auto}' +
+      // The label becomes the tooltip once we're icon-only.
+      '.playbackSoundBadge__actions #hoq-share span{display:none}' +
+      '.playbackSoundBadge__actions #hoq-share.done{color:var(--sc-accent,#ff5500);cursor:default}' +
+      '.playbackSoundBadge__actions #hoq-share.done:hover{background:none}';
     document.head.appendChild(st);
   }
   const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>';
@@ -4203,27 +4201,50 @@ function addQueueButtons(d) {
   });
 }
 
+// The Discord actions belong beside the other now-playing actions, not floating
+// over the page — as fixed FABs they parked on top of whatever sat bottom-right
+// (the Reposts stat on the new track page). appendChild MOVES them, so their
+// handlers survive. The player bar unmounts with playback and React re-renders
+// it, so this re-mounts (and rebuilds, if React took the container with it).
+function mountDiscordActions() {
+  const host = document.querySelector('.playbackSoundBadge__actions');
+  if (!host) return;
+  if (!document.getElementById('hoq-playbtn')) { try { startPlayButton(); } catch (e) {} }
+  if (!document.getElementById('hoq-share')) { try { startShareButton(); } catch (e) {} }
+  for (const id of ['hoq-playbtn', 'hoq-share']) {
+    const b = document.getElementById(id);
+    if (!b) continue;
+    if (b.parentElement !== host) host.appendChild(b);
+    // Keep the tooltip in step with the button's own label (Share/Shared, …).
+    const label = b.querySelector('span');
+    if (label) b.title = label.textContent.trim();
+  }
+}
+
 function startPlayButton() {
   if (document.getElementById('hoq-playbtn')) return;
   if (!document.getElementById('hoq-playbtn-style')) {
     const st = document.createElement('style');
     st.id = 'hoq-playbtn-style';
     st.textContent =
-      '#hoq-playbtn{position:fixed;right:18px;bottom:146px;z-index:2147483500;display:flex;gap:8px;align-items:center;' +
-      'padding:10px 15px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);cursor:pointer;' +
-      'background:rgba(20,20,24,0.72);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);' +
-      'color:#fff;font:700 12.5px system-ui,sans-serif;box-shadow:0 8px 26px rgba(0,0,0,0.45);' +
-      'transition:transform .16s ease,background .16s ease,opacity .16s ease}' +
-      '#hoq-playbtn:hover{transform:translateY(-2px);background:rgba(30,30,36,0.82);opacity:1}' +
-      // Same collapse as #hoq-share: two full-width FABs stacked bottom-right
-      // buried the Reposts stat on the new track page.
-      '#hoq-playbtn{opacity:.72}' +
-      '#hoq-playbtn span{max-width:0;overflow:hidden;white-space:nowrap;opacity:0;' +
-      'transition:max-width .22s ease,opacity .18s ease,margin-left .22s ease}' +
-      '#hoq-playbtn:hover span{max-width:150px;opacity:1;margin-left:2px}' +
-      '#hoq-playbtn svg{width:16px;height:16px;flex:0 0 auto}' +
-      '#hoq-playbtn.done{background:var(--sc-accent,#ff5500);border-color:transparent;color:#fff;cursor:default;opacity:0.82}' +
-      '#hoq-playbtn.done:hover{transform:none;background:var(--sc-accent,#ff5500)}';
+      // Lives in the player bar's action cluster, styled like SoundCloud's own
+      // icon buttons there. Hidden while unmounted so it can never float loose.
+      '#hoq-playbtn{display:none}' +
+      '.playbackSoundBadge__actions #hoq-playbtn{display:inline-flex;align-items:center;justify-content:center;' +
+      'width:26px;height:26px;margin-left:10px;padding:0;background:none;border:0;' +
+      'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
+      'transition:color .15s ease,background .15s ease}' +
+      '.playbackSoundBadge__actions #hoq-playbtn:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
+      // Hairline before the pair so the Discord actions read as ours rather than
+      // as two more of SoundCloud's own buttons.
+      '.playbackSoundBadge__actions #hoq-playbtn{position:relative;margin-left:17px}' +
+      '.playbackSoundBadge__actions #hoq-playbtn::before{content:"";position:absolute;left:-9px;' +
+      'top:5px;bottom:5px;width:1px;background:rgba(255,255,255,0.15)}' +
+      '.playbackSoundBadge__actions #hoq-playbtn svg{width:15px;height:15px;flex:0 0 auto}' +
+      // The label becomes the tooltip once we're icon-only.
+      '.playbackSoundBadge__actions #hoq-playbtn span{display:none}' +
+      '.playbackSoundBadge__actions #hoq-playbtn.done{color:var(--sc-accent,#ff5500);cursor:default}' +
+      '.playbackSoundBadge__actions #hoq-playbtn.done:hover{background:none}';
     document.head.appendChild(st);
   }
 
@@ -4978,8 +4999,10 @@ function boot() {
   applyFxClasses(); // apply saved CSS-gated optional effects
   startPlayerViz(); // bottom-player seek bar → flowing bouncy accent visualizer
   startOverlayScrollbar(); // custom floating accent scrollbar (no side gutter)
-  startShareButton(); // floating "Share to Discord" button → posts current track to webhook
-  startPlayButton(); // floating "Play in Discord" button → asks the bot to queue it
+  startShareButton(); // "Share to Discord" → posts the current track to the webhook
+  startPlayButton(); // "Play in Discord" → asks the bot to queue it
+  mountDiscordActions();
+  setInterval(() => { try { mountDiscordActions(); } catch (e) {} }, 1000);
   // Discord Rich Presence + live activity-card updates.
   setInterval(() => { try { rpcTick(); updateDiscordActivity(); } catch (e) {} }, 3000);
 }
