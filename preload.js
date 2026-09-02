@@ -2909,43 +2909,51 @@ function buildTitlebar() {
   panel.id = 'sc-palette';
   const presets = ['#ff5500', '#1db954', '#3b82f6', '#a855f7', '#ef4444', '#eab308', '#ec4899', '#14b8a6'];
   panel.innerHTML = `
-    <h4>Theme color</h4>
-    <div class="pal-grid">
-      <label class="row"><span>Match cover</span><input type="checkbox" id="sc-match"></label>
-      <label class="row"><span>Blurred bg</span><input type="checkbox" id="sc-coverbg"></label>
-    </div>
-    <div class="section-label">Effects</div>
-    <div class="pal-grid">
-      <label class="row"><span>Visualizer</span><input type="checkbox" id="sc-fx-viz"></label>
-      <label class="row"><span>3D tilt</span><input type="checkbox" id="sc-fx-tilt"></label>
-      <label class="row"><span>Interactive wave</span><input type="checkbox" id="sc-fx-wave"></label>
-      <label class="row"><span>Accent glow</span><input type="checkbox" id="sc-fx-glow"></label>
-      <label class="row"><span>Speaker pulse</span><input type="checkbox" id="sc-fx-pulse"></label>
-      <label class="row"><span>Rounded</span><input type="checkbox" id="sc-fx-round"></label>
-      <label class="row"><span>Row hover</span><input type="checkbox" id="sc-fx-hover"></label>
-      <label class="row"><span>Frosted bars</span><input type="checkbox" id="sc-fx-frost"></label>
-      <label class="row"><span>Animations</span><input type="checkbox" id="sc-fx-anim"></label>
-      <label class="row"><span>Grayscale</span><input type="checkbox" id="sc-fx-gray"></label>
-    </div>
-    <div class="section-label">Theme</div>
-    <div class="row"><span>Song list zoom</span><span class="zoomctl">
-      <button class="zmb" data-z="-1">&minus;</button><b id="sc-zoomval">100%</b><button class="zmb" data-z="1">+</button>
-    </span></div>
+    <h4>Appearance</h4>
+
+    <div class="section-label">Color</div>
     <div class="pal-grid">
       <div class="row"><span>Primary</span><input type="color" id="sc-c1"></div>
       <div class="row"><span>Gradient</span><span class="gradctl">
         <input type="color" id="sc-c2"><input type="checkbox" id="sc-grad"></span></div>
     </div>
+    <label class="row"><span>Match song cover</span><input type="checkbox" id="sc-match"></label>
+
     <div class="section-label">Background</div>
-    <input type="text" id="sc-bgurl" class="bgurl" placeholder="Paste image / GIF URL…">
+    <label class="row"><span>Blurred cover</span><input type="checkbox" id="sc-coverbg"></label>
+    <input type="text" id="sc-bgurl" class="bgurl" placeholder="…or paste an image / GIF URL">
     <div class="btn-2up">
       <button class="bgpick">Choose image</button>
       <button class="bgclear">Clear bg</button>
     </div>
-    <div class="section-label">Reset</div>
+
+    <div class="section-label">Motion</div>
+    <div class="pal-grid">
+      <label class="row"><span>Visualizer</span><input type="checkbox" id="sc-fx-viz"></label>
+      <label class="row"><span>Interactive wave</span><input type="checkbox" id="sc-fx-wave"></label>
+      <label class="row"><span>3D tilt</span><input type="checkbox" id="sc-fx-tilt"></label>
+      <label class="row"><span>Speaker pulse</span><input type="checkbox" id="sc-fx-pulse"></label>
+      <label class="row"><span>Animations</span><input type="checkbox" id="sc-fx-anim"></label>
+    </div>
+
+    <div class="section-label">Look</div>
+    <div class="pal-grid">
+      <label class="row"><span>Accent glow</span><input type="checkbox" id="sc-fx-glow"></label>
+      <label class="row"><span>Rounded</span><input type="checkbox" id="sc-fx-round"></label>
+      <label class="row"><span>Row hover</span><input type="checkbox" id="sc-fx-hover"></label>
+      <label class="row"><span>Frosted bars</span><input type="checkbox" id="sc-fx-frost"></label>
+      <label class="row"><span>Grayscale covers</span><input type="checkbox" id="sc-fx-gray"></label>
+    </div>
+
+    <div class="section-label">Display</div>
+    <div class="row"><span>Song list zoom</span><span class="zoomctl">
+      <button class="zmb" data-z="-1">&minus;</button><b id="sc-zoomval">100%</b><button class="zmb" data-z="1">+</button>
+    </span></div>
+
+    <div class="section-label">Trouble</div>
     <div class="btn-2up">
-      <button class="reset">Reset color</button>
-      <button class="fixblock" title="Reset to SoundCloud orange · clears cookies / Cloudflare block state and reloads">Fix &quot;blocked&quot;</button>
+      <button class="reset" title="Put the accent back to SoundCloud orange">Reset color</button>
+      <button class="fixblock" title="Clears cookies and Cloudflare block state, then reloads">Fix &quot;blocked&quot;</button>
     </div>
   `;
   document.body.appendChild(panel);
