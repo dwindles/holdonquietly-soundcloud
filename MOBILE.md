@@ -40,6 +40,43 @@ matches.
 
 First Share to Discord asks once for your webhook URL and keeps it on the device.
 
+## No-install option — bookmarklet
+
+If you can't install a userscript manager, a `javascript:` bookmark is the only
+remaining way to get code onto the page. It gives up less than you'd think — see
+"How it is built" for why.
+
+The bookmark is a 242-char loader (a 284 KB `javascript:` URL is not a thing).
+It is in `dist/bookmarklet.txt`:
+
+```
+javascript:(function(){if(window.__hoqLoaded)return;var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/gh/dwindles/holdonquietly-soundcloud@master/dist/holdonquietly.boot.js?v='+Date.now();document.body.appendChild(s);})()
+```
+
+Adding it on iOS, which is fiddly:
+
+1. In Safari bookmark any page (Share → Add Bookmark → Favorites).
+2. Copy the line above.
+3. Bookmarks → **Edit** → tap that bookmark → clear the URL field and **paste**.
+   Rename it something short like `hoq`. Paste rather than type — Safari strips a
+   typed `javascript:` prefix.
+4. Open soundcloud.com (with Request Desktop Website on), then tap the bookmark.
+
+You tap it **once per page load**. SoundCloud is a single-page app, so it
+survives normal navigation within a session — but a hard reload needs another
+tap. That is the real cost of this route versus the extension.
+
+It loads from jsDelivr, not GitHub raw: raw sends `text/plain` with `nosniff`, so
+a browser refuses to execute it as a script.
+
+### What the bookmarklet keeps and loses
+
+Keeps the full theme, the cover-matched accent, and Discord share/queue.
+
+Loses the **friends feed** — that backend is plain `http://`, and fetching http
+from an https page is mixed content and blocked. `GM_xmlhttpRequest` is exempt
+from that rule, which is the one real reason to prefer the extension.
+
 ## Install — Android
 
 Kiwi Browser or Firefox, install Tampermonkey, open the raw URL above and accept
@@ -97,11 +134,19 @@ silently shipping a stale bridge.
 
 ## Status
 
-Built and syntax-verified at both layers (the outer userscript, and the payload
-string that `Function.toString()` produces at runtime), with every host callback
-— `__scCoverColors`, `__hoqFriends`, `__hoqDcWidget` — wired to a replacement.
+**The bookmarklet build has been run for real** — loaded from jsDelivr into a
+desktop Chromium on soundcloud.com. It executed clean: `hoq-mobile` applied, our
+stylesheets injected, the `#sc-bg` layer created, the titlebar hidden, the
+viewport rewritten, `__scCoverColors` and `__hoqSend` both live, the nav renamed
+to Discover / Stream / Collection / Social/Settings, and **no console errors from
+our code** (only SoundCloud's own logged-out Google-auth noise).
 
-**It has not been run on a phone.** Everything else in this repo was verified
-against the running app; this was not, because there is no device here. Expect
-the first real problem to be layout, not logic: it is a desktop layout on a
-phone screen, and no amount of porting fixes that without a mobile stylesheet.
+The **userscript** build is syntax-verified at both layers (the outer script, and
+the payload string `Function.toString()` produces at runtime), with the transport
+and storage fallbacks unit-tested with no `GM_*` defined at all. Its GM bridge
+specifically has not been exercised, since that needs a real manager.
+
+**Neither has been run on a phone.** The desktop Chromium run proves the code
+executes and binds; it says nothing about how a 1280px layout feels at 390px.
+Expect the first real problem to be layout, not logic — and that needs a mobile
+stylesheet, not more porting.
