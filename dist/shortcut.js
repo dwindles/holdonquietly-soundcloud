@@ -1,0 +1,4 @@
+var s = document.createElement("script");
+s.src = 'https://cdn.jsdelivr.net/gh/dwindles/holdonquietly-soundcloud@master/dist/holdonquietly.boot.js?v=' + Date.now();
+document.body.appendChild(s);
+completion("hoq loaded");
