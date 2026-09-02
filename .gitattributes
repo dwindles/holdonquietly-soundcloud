@@ -1,0 +1,8 @@
+# Files that are consumed on Linux must stay LF. Git's autocrlf was rewriting
+# install.sh to CRLF on checkout, and bash reads "set -euo pipefail\r" as an
+# invalid option — the script died on line 9 before doing anything.
+*.sh            text eol=lf
+*.conf          text eol=lf
+proxy/*         text eol=lf
+dist/*.user.js  text eol=lf
+dist/*.js       text eol=lf
