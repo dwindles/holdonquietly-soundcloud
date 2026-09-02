@@ -451,6 +451,39 @@ const BASE_CSS = `
     background: url("${HOQ_LOGO}") center/contain no-repeat !important;
     filter: drop-shadow(0 0 4px rgba(90,160,255,0.3)) !important;
   }
+  /* Wordmark. The link's own text node still reads "SoundCloud" and is hidden by
+     SoundCloud's .sc-ir image-replacement, so undo that and zero the font instead
+     — then ::after can carry our name. Done in CSS so a React re-render can't
+     revert it (and buildDiscordTab still matches nav items by textContent). */
+  .header__logo .header__logoLink-iconOnly {
+    text-indent: 0 !important; overflow: visible !important;
+    white-space: nowrap !important; font-size: 0 !important; gap: 9px !important;
+    /* SoundCloud stacks this link's contents (flex-direction: column), which put
+       the wordmark under the header and clipped the mark. */
+    flex-direction: row !important; line-height: 1 !important;
+  }
+  .header__logo .header__logoLink-iconOnly::after {
+    content: 'holdonquietly' !important;
+    font: 700 15px/1 Inter, -apple-system, Arial, sans-serif !important;
+    letter-spacing: -0.2px !important; color: #f2f2f4 !important;
+  }
+  .header__logo .header__logoLink-iconOnly:hover::after { color: var(--sc-accent, #ff5500) !important; }
+
+  /* Nav labels, renamed the same way. Scoped by data-menu-name so the injected
+     Social/Settings tab (no such attribute) is left alone. */
+  .header__navMenuItem[data-menu-name="home"],
+  .header__navMenuItem[data-menu-name="stream"],
+  .header__navMenuItem[data-menu-name="library"] { font-size: 0 !important; }
+  .header__navMenuItem[data-menu-name]::after {
+    font-size: 14px !important; font-weight: inherit !important; letter-spacing: normal !important;
+  }
+  .header__navMenuItem[data-menu-name="home"]::after { content: 'Discover' !important; }
+  .header__navMenuItem[data-menu-name="stream"]::after { content: 'Stream' !important; }
+  .header__navMenuItem[data-menu-name="library"]::after { content: 'Collection' !important; }
+
+  /* Upsells: hidden for good rather than left in the row to flash on load. */
+  .header__upsellWrapper, .header__fanUpsell, .creatorSubscriptionsButton,
+  .header__forArtistsButton { display: none !important; }
 
   /* Vertically center the Upload button with the rest of the header row */
   .header__inner, .header__soundInput, .header__soundInput.left {
@@ -2146,7 +2179,7 @@ function recolorOrange() {
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette')) {
+    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton')) {
       continue;
     }
     _seenOrange.add(el);
