@@ -15,22 +15,35 @@ That writes `dist/holdonquietly.user.js`. **Do not edit that file** — it is
 overwritten on every build. Change `preload.js` (or the shim inside
 `tools/build-userscript.js`) and rebuild, so desktop and mobile never drift.
 
-## Install
+## Install — iPhone
 
-**iPhone** — install [Userscripts](https://apps.apple.com/app/userscripts/id1463298887)
-(free, open source), enable it in Settings → Safari → Extensions, then add
-`dist/holdonquietly.user.js` to its scripts folder.
+Userscripts has no "install from URL" prompt like Tampermonkey. It watches a
+folder, so the file has to land in that folder.
 
-**Android** — Kiwi Browser or Firefox, install Tampermonkey, then open the
-`.user.js` file and accept the install prompt.
+1. App Store → **Userscripts** (free, open source).
+2. Open it and pick a scripts directory when asked — e.g. iCloud Drive →
+   `Userscripts`.
+3. Settings → Apps → Safari → Extensions → **Userscripts** → on, and set
+   soundcloud.com to **Allow**.
+4. In Safari open the raw file:
+   `https://raw.githubusercontent.com/dwindles/holdonquietly-soundcloud/master/dist/holdonquietly.user.js`
+   then Share → **Save to Files** → the directory from step 2. The name must
+   still end in `.user.js`.
+5. Reopen Userscripts; the script should be listed and enabled.
+6. On soundcloud.com tap **aA** → Request Desktop Website. Use *Website
+   Settings* → Request Desktop Website so it sticks across visits.
 
-Then, on `soundcloud.com`, turn on **Request Desktop Website**. This is not
-optional: SoundCloud serves a completely different DOM to phones, and the theme
-binds to desktop selectors (`playbackSoundBadge` ×36, `playControls` ×27,
-`headerSearch` ×12). Without desktop mode almost nothing will match.
+Step 6 is not optional: SoundCloud serves a completely different DOM to phones,
+and the theme binds to desktop selectors (`playbackSoundBadge` ×36,
+`playControls` ×27, `headerSearch` ×12). Without desktop mode almost nothing
+matches.
 
-First time you tap Share to Discord it asks once for your webhook URL and stores
-it on the device.
+First Share to Discord asks once for your webhook URL and keeps it on the device.
+
+## Install — Android
+
+Kiwi Browser or Firefox, install Tampermonkey, open the raw URL above and accept
+the install prompt. Same Request Desktop Site requirement.
 
 ## What works, and what can't
 
@@ -63,6 +76,21 @@ GM calls stay in the sandbox, the payload is injected into the page, and
 host because SoundCloud's CDN taints the canvas. `GM_xmlhttpRequest` is not bound
 by CORS, so the sandbox refetches the image, hands back a `data:` URL — which is
 same-origin, so untainted — and `preload.js`'s own extractor runs unchanged.
+
+**Managers disagree about `GM_*`, so nothing is assumed.** Tampermonkey has the
+classic synchronous `GM_xmlhttpRequest`; the iOS Userscripts app implements the
+promise-style `GM.xmlHttpRequest` and largely cannot offer the sync
+`GM_getValue`/`GM_setValue` at all, since its values come from an async native
+call. So the bridge resolves whichever transport exists and falls back to plain
+`fetch`, and storage falls back to `localStorage`. Both paths are unit-tested in
+this repo with no `GM_*` present at all.
+
+The `fetch` fallback is viable because **SoundCloud ships no `script-src` or
+`connect-src` CSP** — the only policy anywhere is `frame-ancestors 'self'` on the
+webi route, which governs framing, not scripts. That is also why injecting the
+payload as an inline `<script>` is safe. What `fetch` *cannot* do is read the
+artwork CDN: that is a CORS wall, and getting past it is the whole reason
+`GM.xmlHttpRequest` is preferred when available.
 
 The build fails loudly if `scPost()` in `preload.js` stops matching, rather than
 silently shipping a stale bridge.

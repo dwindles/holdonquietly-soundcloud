@@ -11,6 +11,7 @@
 // @run-at       document-start
 // @inject-into  auto
 // @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @connect      discord.com
@@ -42,10 +43,39 @@
     } catch (e) {}
   };
 
-  const req = (opts) => {
-    try { GM_xmlhttpRequest(opts); }
-    catch (e) { reply('toast', { text: 'request failed: ' + e.message }); }
-  };
+  // Managers disagree on this one. Tampermonkey (Android) has the classic
+  // sync GM_xmlhttpRequest; the iOS Userscripts app implements the newer
+  // promise-style GM.xmlHttpRequest instead. Resolve whichever exists, and
+  // fall back to plain fetch — SoundCloud ships no script-src/connect-src CSP,
+  // so fetch reaches the webhook fine. It cannot read the artwork CDN (that is
+  // a CORS wall, which is the whole reason GM is preferred).
+  function req(opts) {
+    try {
+      if (typeof GM_xmlhttpRequest === 'function') return GM_xmlhttpRequest(opts);
+    } catch (e) {}
+    try {
+      if (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function') {
+        return GM.xmlHttpRequest(opts);
+      }
+    } catch (e) {}
+    try {
+      fetch(opts.url, {
+        method: opts.method || 'GET',
+        headers: opts.headers || undefined,
+        body: opts.data || undefined,
+      })
+        .then((r) => (
+          opts.responseType === 'blob'
+            ? r.blob().then((b) => ({ status: r.status, response: b, responseText: '' }))
+            : r.text().then((t) => ({ status: r.status, responseText: t }))
+        ))
+        .then((res) => { if (opts.onload) opts.onload(res); })
+        .catch((err) => {
+          if (opts.onerror) opts.onerror(err);
+          reply('toast', { text: 'request failed: ' + err.message });
+        });
+    } catch (e) { reply('toast', { text: 'no transport available: ' + e.message }); }
+  }
 
   // Byte-for-byte the embed the C# host builds, so the Quiet bot sees an
   // identical message (it keys off embed.url and the "hoq-play" footer).
