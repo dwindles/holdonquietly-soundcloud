@@ -5106,7 +5106,11 @@ if (document.readyState === 'loading') {
   const setViewport = () => {
     let m = document.querySelector('meta[name="viewport"]');
     if (!m) { m = document.createElement('meta'); m.name = 'viewport'; (document.head || H).appendChild(m); }
-    m.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover');
+    const want = 'width=device-width, initial-scale=1, viewport-fit=cover';
+    // Only write when it actually differs. The observer below watches head
+    // attributes, so an unconditional setAttribute retriggers it forever and
+    // the page never finishes loading.
+    if (m.getAttribute('content') !== want) m.setAttribute('content', want);
   };
   setViewport();
   window.addEventListener('orientationchange', () => setTimeout(setViewport, 150));
@@ -5115,7 +5119,7 @@ if (document.readyState === 'loading') {
   // anything rewrites this meta the page snaps back to the 1280px desktop
   // canvas and every rule silently stops matching.
   try {
-    new MutationObserver(setViewport).observe(document.head || H, { childList: true, subtree: true, attributes: true });
+    new MutationObserver(setViewport).observe(document.head || H, { childList: true });
   } catch (e) {}
   let vTicks = 0;
   const vTimer = setInterval(() => { setViewport(); if (++vTicks > 20) clearInterval(vTimer); }, 500);
