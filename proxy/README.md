@@ -20,7 +20,7 @@ Two facts worth knowing, both checked rather than assumed:
 ## Deploy
 
 Everything runs on the VPS (155.138.222.253, ssh port 2222). Pick a hostname,
-e.g. `sc.devuandoru.com`, and point an A record at the box first.
+e.g. `sc.holdonquietly.com`, and point an A record at the box first.
 
 **1. Check nginx has the sub_filter module** — the whole design depends on it:
 
@@ -39,7 +39,7 @@ scp -P 2222 proxy/hoq-proxy.conf dist/holdonquietly.proxy.js root@155.138.222.25
 **3. On the VPS, set your hostname and install:**
 
 ```bash
-export H=sc.devuandoru.com
+export H=sc.holdonquietly.com
 mkdir -p /var/www/hoq && mv /tmp/holdonquietly.proxy.js /var/www/hoq/
 sed -i "s/__PROXY_HOST__/$H/g" /tmp/hoq-proxy.conf
 mv /tmp/hoq-proxy.conf /etc/nginx/sites-available/hoq-proxy
@@ -49,7 +49,7 @@ ln -sf /etc/nginx/sites-available/hoq-proxy /etc/nginx/sites-enabled/hoq-proxy
 **4. Get a certificate** (the conf references it, so do this before reloading):
 
 ```bash
-certbot certonly --webroot -w /var/www/html -d sc.devuandoru.com
+certbot certonly --webroot -w /var/www/html -d sc.holdonquietly.com
 ```
 
 **5. Test the config, then reload — never reload blind:**
@@ -70,10 +70,10 @@ sed -i 's/    http2 on;//; s/listen 443 ssl;/listen 443 ssl http2;/' /etc/nginx/
 Each step isolates one layer, so a failure tells you where it is.
 
 ```bash
-curl -sI https://sc.devuandoru.com/ | head -1
-curl -s https://sc.devuandoru.com/ | grep -c 'hoq.js'
-curl -s https://sc.devuandoru.com/ | grep -c 'a-v2.sndcdn.com'
-curl -sI https://sc.devuandoru.com/hoq.js | grep -i content-type
+curl -sI https://sc.holdonquietly.com/ | head -1
+curl -s https://sc.holdonquietly.com/ | grep -c 'hoq.js'
+curl -s https://sc.holdonquietly.com/ | grep -c 'a-v2.sndcdn.com'
+curl -sI https://sc.holdonquietly.com/hoq.js | grep -i content-type
 ```
 
 - Line 1 should be `200`.
