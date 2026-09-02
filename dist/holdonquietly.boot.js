@@ -5103,7 +5103,12 @@ if (document.readyState === 'loading') {
   // Keep the desktop layout legible instead of letting the browser scale it
   // down. You still need the browser's "Request Desktop Website" — a
   // userscript cannot change the UA of a request that already happened.
+  let vCalls = 0;
   const setViewport = () => {
+    // Circuit breaker. A runaway viewport loop blocks the main thread and the
+    // page never finishes loading -- it took the whole site down once. No
+    // legitimate reason to write this more than a handful of times.
+    if (++vCalls > 60) return;
     let m = document.querySelector('meta[name="viewport"]');
     if (!m) { m = document.createElement('meta'); m.name = 'viewport'; (document.head || H).appendChild(m); }
     const want = 'width=device-width, initial-scale=1, viewport-fit=cover';
