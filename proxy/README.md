@@ -42,7 +42,8 @@ and then verifies the result.
 
 That self-fetch is deliberate. Every deploy failure in this project came from the
 hand-off rather than the config: files scp'd from Windows arrive with CRLF and
-bash reads `set -euo pipefail` as an invalid option; commands get pasted into
+bash reads `set -euo pipefail
+` as an invalid option; commands get pasted into
 the wrong machine's shell; a previous run has already consumed a staged file.
 Fetching over https removes all three.
 
@@ -62,42 +63,51 @@ SoundCloud host escaping the rewrite, and that is always the next thing to fix.
 
 ## When something breaks
 
-Almost every failure is *a host that isn't proxied yet*. SoundCloud adds one,
-the browser tries to reach it directly, and it fails.
+Almost every failure is *a host that isn't proxied yet*. SoundCloud loads one we
+don't rewrite, the browser reaches for it directly, and it dies on CORS. That is
+how `api-auth`, `secure.sndcdn.com`, `wave` and `pushers` were each found.
 
-Find it in the browser console / network tab — look for a request to anything
-`*.soundcloud.com` or `*.sndcdn.com` that isn't on your domain. Then add a block
-for it in `hoq-proxy.conf`, following the pattern:
+To find the next one, fetch what the app actually loads and look for stragglers:
 
-```nginx
-location ^~ /__u/NAME/ {
-    proxy_pass https://REAL-HOST/;
-    proxy_set_header Host REAL-HOST;
-}
+```bash
+curl -s https://sc.holdonquietly.com/ | grep -oE '[a-z0-9-]+\.(soundcloud|sndcdn)\.com' | sort -u
 ```
 
-and a matching `sub_filter` pair (plain and `\/`-escaped) in the `location /`
-block. Then `nginx -t && systemctl reload nginx`.
+Anything functional in that list needs three lines, in three files:
 
-## Known limits — read before you rely on it
+1. `hoq-rewrites.conf` — `sub_filter 'NAME.soundcloud.com' 'NAME.__PROXY_HOST__';`
+2. `hoq-proxy.conf` — an entry in the `$hoq_upstream` map, and the name added to
+   the `server_name` regex
+3. `install.sh` — the name in `SUBS`, so the certificate covers it
 
-- **Login is the fragile part.** Cookie domains are rewritten
-  (`proxy_cookie_domain`), which is what makes a session stick, but OAuth
-  ("continue with Google/Apple") redirects to hosts that will bounce you back to
-  the real soundcloud.com. Sign in with **email and password** if you hit that.
-- **Playback may need another host added.** HLS manifests are rewritten, but
-  SoundCloud hands out media hosts at play time and not all of them are in the
-  conf yet. If audio is silent, that is the first thing to check.
-- **It will break when SoundCloud ships changes.** This is the real cost of the
-  approach: a rewrite list is a snapshot of their infrastructure. The upside is
-  that fixes are usually one `location` block.
-- **Everything routes through your VPS**, so audio bandwidth is yours, and
+Then re-run the installer. It checks all three stay in sync implicitly: a name
+missing from `SUBS` gets no certificate and fails TLS immediately.
+
+**Never add a bare `soundcloud.com` or `sndcdn.com` rewrite** — both are
+substrings of every host above and would corrupt all of them.
+
+## Known limits
+
+- **OAuth sign-in cannot work.** "Continue with Google/Apple/Facebook" sends you
+  to the provider with a `redirect_uri` registered to `soundcloud.com`, so it
+  redirects back *there*, not here — you get a blank popup. Only SoundCloud can
+  whitelist another host. **Use email and password.** If the account was created
+  through Apple and has no password, set one on real soundcloud.com first.
+- **It will break when SoundCloud ships changes.** A rewrite list is a snapshot
+  of their infrastructure. The upside is that fixes are three lines.
+- **Everything routes through the VPS**, so audio bandwidth is yours and
   SoundCloud sees one IP for all of it.
 - **Rich Presence and account switching still can't work** — the first needs
   Discord's local IPC, the second swaps WebView2 profile directories.
 
-## Not yet deployed
+## Status
 
-The config and the script are written and the script is syntax-checked, but
-**this has not been run against a live nginx**. The smoke test above exists
-because the first deploy is where the rewrite list gets corrected.
+Deployed and serving: the themed app loads on a phone, content renders, playback
+runs, and the accent tracks the cover art. 18 upstreams are proxied.
+
+Verified server-side: every bundle the shell loads comes back with zero
+un-proxied functional hosts, the API returns 200 with correct CORS, phone
+user-agents no longer bounce to m.soundcloud.com, and the auth iframe renders.
+
+Not yet confirmed: a real end-to-end sign-in, which needs credentials and so has
+to be done by hand.
