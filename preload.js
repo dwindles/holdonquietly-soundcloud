@@ -619,30 +619,41 @@ const BASE_CSS = `
      player bar. Sits above the content but leaves the real player bar visible at
      the bottom, and mirrors the current track (art/title/artist/progress) with
      controls wired to the real transport buttons. ===== */
-  #hoq-np { position: fixed; inset: 0 0 66px 0; z-index: 9990; display: none; overflow: hidden;
+  #hoq-np { position: fixed; inset: 0; z-index: 9990; display: none; overflow: hidden;
     color: #fff; background: #0b0b0e; }
-  #hoq-np.on { display: flex; align-items: center; justify-content: center; gap: 56px; }
+  #hoq-np.on { display: flex; align-items: center; justify-content: center; gap: 64px; }
+  /* keep the real player bar visible on top of the full-screen overlay */
+  html.hoq-np-open .playControls { z-index: 9995 !important; }
   #hoq-np .np-bg { position: absolute; inset: -10%; background-size: cover; background-position: center;
-    filter: blur(70px) saturate(1.5) brightness(.55); transform: scale(1.15); }
+    filter: blur(72px) saturate(1.7) brightness(.72); transform: scale(1.15); }
   #hoq-np .np-scrim { position: absolute; inset: 0;
-    background: radial-gradient(120% 100% at 50% 30%, rgba(10,10,12,.35), rgba(10,10,12,.82)); }
-  #hoq-np .np-art { position: relative; width: 340px; height: 340px; border-radius: 18px;
+    background:
+      radial-gradient(60% 60% at 50% 42%, transparent 30%, rgba(8,8,11,.55) 100%),
+      radial-gradient(45% 50% at 50% 120%, color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent), transparent 70%); }
+  #hoq-np .np-art { position: relative; width: 380px; height: 380px; border-radius: 20px;
     background-size: cover; background-position: center; background-color: rgba(255,255,255,.04);
-    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); }
-  #hoq-np .np-side { position: relative; width: 420px; max-width: 44vw; }
-  #hoq-np .np-title { font-size: 34px; font-weight: 800; line-height: 1.15; margin: 0 0 8px;
-    max-height: 4.6em; overflow: hidden; }
-  #hoq-np .np-artist { font-size: 17px; opacity: .72; margin: 0 0 26px; }
-  #hoq-np .np-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; cursor: pointer; }
-  #hoq-np .np-bar i { display: block; height: 100%; background: var(--sc-accent, #ff5500); width: 0%; }
-  #hoq-np .np-times { display: flex; justify-content: space-between; font-size: 12px; opacity: .7; margin-top: 7px; }
-  #hoq-np .np-ctrls { display: flex; align-items: center; gap: 22px; margin-top: 26px; }
+    box-shadow: 0 40px 90px rgba(0,0,0,.55),
+      0 0 90px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent),
+      0 0 0 1px rgba(255,255,255,.1); }
+  #hoq-np .np-side { position: relative; width: 460px; max-width: 46vw; }
+  #hoq-np .np-eyebrow { font-size: 12px; letter-spacing: .22em; font-weight: 700; text-transform: uppercase;
+    color: var(--sc-accent, #ff5500); margin: 0 0 14px; opacity: .95; }
+  #hoq-np .np-title { font-size: 40px; font-weight: 800; line-height: 1.12; letter-spacing: -.01em;
+    margin: 0 0 10px; max-height: 4.6em; overflow: hidden; }
+  #hoq-np .np-artist { font-size: 18px; opacity: .72; margin: 0 0 30px; }
+  #hoq-np .np-bar { height: 7px; border-radius: 4px; background: rgba(255,255,255,.16); overflow: hidden; cursor: pointer; }
+  #hoq-np .np-bar i { display: block; height: 100%; background: var(--sc-accent, #ff5500); width: 0%;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--sc-accent,#ff5500) 70%, transparent); }
+  #hoq-np .np-times { display: flex; justify-content: space-between; font-size: 12px; opacity: .7; margin-top: 8px; }
+  #hoq-np .np-ctrls { display: flex; align-items: center; gap: 26px; margin-top: 30px; }
   #hoq-np .np-ctrls button { background: none; border: 0; color: #fff; cursor: pointer; opacity: .85; padding: 0; display: flex; }
   #hoq-np .np-ctrls button:hover { opacity: 1; }
-  #hoq-np .np-play { width: 60px; height: 60px; border-radius: 50%; background: #fff !important; color: #111 !important;
+  #hoq-np .np-play { width: 62px; height: 62px; border-radius: 50%; background: #fff !important; color: #111 !important;
     align-items: center; justify-content: center; }
   #hoq-np .np-play svg { width: 26px; height: 26px; }
-  #hoq-np .np-close { position: absolute; top: 20px; right: 24px; width: 40px; height: 40px; border-radius: 50%;
+  #hoq-np .np-like { margin-left: 8px; }
+  #hoq-np .np-like svg { width: 24px; height: 24px; }
+  #hoq-np .np-close { position: absolute; top: 44px; left: 24px; width: 40px; height: 40px; border-radius: 50%;
     background: rgba(255,255,255,.1); border: 0; color: #fff; cursor: pointer; font-size: 20px; line-height: 40px; }
   #hoq-np .np-close:hover { background: rgba(255,255,255,.2); }
   /* the trigger button we add into the player bar */
@@ -4769,12 +4780,13 @@ function setupAmbientMode() {
     '<div class="np-bg"></div><div class="np-scrim"></div>' +
     '<button class="np-close" title="Close (Esc)">✕</button>' +
     '<div class="np-art"></div>' +
-    '<div class="np-side"><h1 class="np-title"></h1><div class="np-artist"></div>' +
+    '<div class="np-side"><div class="np-eyebrow">Now playing</div><h1 class="np-title"></h1><div class="np-artist"></div>' +
     '<div class="np-bar"><i></i></div><div class="np-times"><span class="np-cur">0:00</span><span class="np-dur">0:00</span></div>' +
     '<div class="np-ctrls">' +
       '<button class="np-prev" title="Previous"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>' +
       '<button class="np-play" title="Play/Pause"></button>' +
       '<button class="np-next" title="Next"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>' +
+      '<button class="np-like" title="Like"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 21s-7.5-4.9-10-9.2C.3 8.6 2 5 5.5 5c2 0 3.4 1.1 4.5 2.6C11.1 6.1 12.5 5 14.5 5 18 5 19.7 8.6 22 11.8 19.5 16.1 12 21 12 21z"/></svg></button>' +
     '</div></div>';
   (document.body || document.documentElement).appendChild(np);
 
@@ -4791,11 +4803,17 @@ function setupAmbientMode() {
     np.querySelector('.np-play').innerHTML = playing
       ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    // reflect like state: accent + full opacity when the track is liked
+    const liked = !!document.querySelector('.playbackSoundBadge__like.sc-button-selected');
+    const lk = np.querySelector('.np-like');
+    lk.style.color = liked ? 'var(--sc-accent, #ff5500)' : '#fff';
+    lk.style.opacity = liked ? '1' : '.85';
   };
   const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); setTimeout(sync, 120); };
   np.querySelector('.np-play').onclick = () => click('.playControls__play');
   np.querySelector('.np-prev').onclick = () => click('.skipControl__previous');
   np.querySelector('.np-next').onclick = () => click('.skipControl__next');
+  np.querySelector('.np-like').onclick = () => click('.playbackSoundBadge__like');
   np.querySelector('.np-close').onclick = () => close();
   // click the empty backdrop (not the art/controls) to close
   np.querySelector('.np-scrim').onclick = () => close();
@@ -4813,8 +4831,8 @@ function setupAmbientMode() {
   };
 
   let iv = 0;
-  const open = () => { sync(); np.classList.add('on'); if (!iv) iv = setInterval(() => { if (np.classList.contains('on')) sync(); }, 500); };
-  const close = () => { np.classList.remove('on'); };
+  const open = () => { sync(); np.classList.add('on'); document.documentElement.classList.add('hoq-np-open'); if (!iv) iv = setInterval(() => { if (np.classList.contains('on')) sync(); }, 500); };
+  const close = () => { np.classList.remove('on'); document.documentElement.classList.remove('hoq-np-open'); };
   window.__hoqNpToggle = () => (np.classList.contains('on') ? close() : open());
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && np.classList.contains('on')) close(); });
 
