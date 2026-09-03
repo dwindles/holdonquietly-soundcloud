@@ -1042,6 +1042,13 @@ const BASE_CSS = `
     -webkit-mask-image: linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.35) 66%,transparent 100%) !important;
     mask-image: linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.35) 66%,transparent 100%) !important;
   }
+  /* Side fade on the image child. Nested inside the container's bottom-fade, the
+     two single-layer masks combine visually — both edges dissolve without the
+     mask-composite:intersect that failed to paint here. */
+  .l-user-hero .profileHeaderBackground__visual {
+    -webkit-mask-image: linear-gradient(90deg,transparent 0%,#000 11%,#000 89%,transparent 100%) !important;
+    mask-image: linear-gradient(90deg,transparent 0%,#000 11%,#000 89%,transparent 100%) !important;
+  }
   .l-user-hero .profileHeaderInfo { position: relative; z-index: 2; }
   .l-user-hero .profileHeaderInfo__userName,
   .l-user-hero .profileHeaderInfo__additional {
