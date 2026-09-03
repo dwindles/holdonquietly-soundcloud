@@ -4797,6 +4797,9 @@ function setupAmbientMode() {
   np.querySelector('.np-prev').onclick = () => click('.skipControl__previous');
   np.querySelector('.np-next').onclick = () => click('.skipControl__next');
   np.querySelector('.np-close').onclick = () => close();
+  // click the empty backdrop (not the art/controls) to close
+  np.querySelector('.np-scrim').onclick = () => close();
+  np.querySelector('.np-bg').onclick = () => close();
   // seek: click the overlay bar → click the same fraction on the real timeline
   np.querySelector('.np-bar').onclick = (e) => {
     const wrap = document.querySelector('.playbackTimeline__progressWrapper');
