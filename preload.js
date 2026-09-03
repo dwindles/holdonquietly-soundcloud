@@ -1043,21 +1043,15 @@ const BASE_CSS = `
     padding-left: calc(50vw - 50% + 16px) !important;
     padding-right: calc(50vw - 50% + 16px) !important;
   }
-  /* Cover the full width (the visual defaults to auto 100%, leaving a grey gap
-     on the right once the hero is full-bleed) and clip the blur overlay. */
-  .l-user-hero .profileHeaderBackground { background-color: #0b0b0e !important; overflow: hidden !important; }
+  /* Cover the full width — the visual defaults to auto 100%, leaving a grey gap
+     on the right once the hero is full-bleed. */
   .l-user-hero .profileHeaderBackground__visual { background-size: cover !important; background-position: center !important; }
-  /* Bottom blur: a blurred clone of the banner image (see paintBannerBlur),
-     masked to fade in over the lower half so the banner softens into the
-     content instead of ending on a hard line. scale(1.06) hides the blur's
-     transparent edges. */
-  .l-user-hero .profileHeaderBackground .hoq-banner-blur {
-    position: absolute !important; inset: 0 !important;
-    background-size: cover !important; background-position: center !important;
-    filter: blur(16px) !important; transform: scale(1.06) !important;
-    -webkit-mask-image: linear-gradient(180deg, transparent 50%, #000 100%) !important;
-    mask-image: linear-gradient(180deg, transparent 50%, #000 100%) !important;
-    pointer-events: none !important;
+  /* Fade the bottom of the banner out so it dissolves into the content/mica
+     instead of ending on a hard line. */
+  .l-user-hero .profileHeaderBackground {
+    background-color: transparent !important;
+    -webkit-mask-image: linear-gradient(180deg,#000 0%,#000 68%,transparent 100%) !important;
+    mask-image: linear-gradient(180deg,#000 0%,#000 68%,transparent 100%) !important;
   }
 
   /* ===== Profile tabs (All / Popular tracks / Tracks / …) — accent active + hover glow ===== */
@@ -5024,22 +5018,6 @@ function boot() {
   // Same cadence for the top frame's own rows (feed, search, library, legacy pages).
   addQueueButtons(document);
   setInterval(() => { try { addQueueButtons(document); } catch (e) {} }, 1200);
-  // Blur the bottom of the profile-hero banner. SoundCloud paints it as a
-  // background-image; backdrop-filter here samples the page mica, not the
-  // banner, so instead we clone the image into an overlay we can filter:blur.
-  // Re-run on the interval: the visual mounts late and swaps per profile.
-  function paintBannerBlur() {
-    var bg = document.querySelector('.l-user-hero .profileHeaderBackground');
-    var v = bg && bg.querySelector('.profileHeaderBackground__visual');
-    if (!v) return;
-    var img = getComputedStyle(v).backgroundImage;
-    if (!img || img === 'none') return;
-    var b = bg.querySelector('.hoq-banner-blur');
-    if (!b) { b = document.createElement('div'); b.className = 'hoq-banner-blur'; bg.appendChild(b); }
-    if (b.dataset.img !== img) { b.style.backgroundImage = img; b.dataset.img = img; }
-  }
-  paintBannerBlur();
-  setInterval(() => { try { paintBannerBlur(); } catch (e) {} }, 1000);
   setInterval(() => { try { tuneNowPlayingMarquee(); } catch (e) {} }, 1500);
   setInterval(() => { try { hoqStatsTick(); } catch (e) {} }, 4000);
   // The player bar appears/disappears with playback, so keep the tab's bottom
