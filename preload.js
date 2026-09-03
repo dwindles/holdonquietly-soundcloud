@@ -12,6 +12,32 @@ function scPost(cmd) {
   try { window.chrome.webview.postMessage(cmd); } catch (e) {}
 }
 
+// --- Audio tap for the visualizer / ambient nebula ---------------------------
+// SoundCloud plays through Web Audio and makes exactly ONE MediaElementSource on
+// its audio element (a same-origin blob: with crossOrigin=anonymous, so it is
+// NOT CORS-tainted). We can't create a second source on that element, but this
+// runs before SoundCloud's code, so we patch createMediaElementSource to hang an
+// AnalyserNode off their source the moment they make it — giving us real
+// frequency data. Purely a tap: the analyser is never connected to a destination.
+(() => {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC || AC.prototype.__hoqTapped) return;
+    AC.prototype.__hoqTapped = true;
+    const orig = AC.prototype.createMediaElementSource;
+    AC.prototype.createMediaElementSource = function (el) {
+      const node = orig.call(this, el);
+      try {
+        const an = this.createAnalyser();
+        an.fftSize = 512; an.smoothingTimeConstant = 0.82;
+        node.connect(an);
+        window.__hoqAudioAnalyser = an;
+      } catch (e) {}
+      return node;
+    };
+  } catch (e) {}
+})();
+
 // --- Anti-bot-detection (does NOT clobber chrome.webview) ---
 (() => {
   try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch (e) {}
@@ -628,7 +654,10 @@ const BASE_CSS = `
     filter: blur(72px) saturate(1.7) brightness(.72); transform: scale(1.15); }
   #hoq-np .np-scrim { position: absolute; inset: 0;
     background:
-      radial-gradient(60% 60% at 50% 42%, transparent 30%, rgba(8,8,11,.55) 100%),
+      /* a soft dark pool behind the text keeps the inverted letters crisp
+         instead of muddy over the busy particles */
+      radial-gradient(46% 58% at 74% 52%, rgba(8,8,11,.7), transparent 72%),
+      radial-gradient(60% 60% at 50% 42%, transparent 30%, rgba(8,8,11,.5) 100%),
       radial-gradient(45% 50% at 50% 120%, color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent), transparent 70%); }
   #hoq-np .np-art { position: relative; width: 380px; height: 380px; border-radius: 20px;
     background-size: cover; background-position: center; background-color: rgba(255,255,255,.04);
@@ -671,11 +700,22 @@ const BASE_CSS = `
   html.hoq-no-anim #hoq-np .np-art { transition: none !important; }
   /* WebGL 3D backdrop (Three.js): a rotating accent crystal + starfield behind
      the card. Sits at the back; the cover wash dims when it's live. */
-  #hoq-np-gl { position: absolute; inset: 0; z-index: 0; }
-  #hoq-np .np-bg { z-index: 0; }
+  /* Backdrop layers sit at NEGATIVE z so the card + text are normal-flow content
+     above them WITHOUT a stacking context of their own — that's what lets the
+     text's blend mode reach the nebula behind it. */
+  #hoq-np-gl { position: absolute; inset: 0; z-index: -3; }
+  #hoq-np .np-bg { z-index: -2; }
   html.hoq-np-gl #hoq-np .np-bg { opacity: .16 !important; }
-  #hoq-np .np-scrim { z-index: 1; }
-  #hoq-np .np-art, #hoq-np .np-side, #hoq-np .np-close { position: relative; z-index: 3; }
+  #hoq-np .np-scrim { z-index: -1; }
+  #hoq-np .np-art, #hoq-np .np-side, #hoq-np .np-close { position: relative; }
+  /* Invert the text against whatever's behind it: where the bright nebula passes
+     under the title/artist/times they flip dark, over the dark ground they stay
+     light — always readable, and a cool live effect. isolation keeps the blend
+     inside the overlay so it never touches the page. */
+  #hoq-np { isolation: isolate; }
+  #hoq-np .np-title, #hoq-np .np-artist, #hoq-np .np-times {
+    mix-blend-mode: difference; color: #fff !important; -webkit-text-fill-color: #fff !important;
+    opacity: 1 !important; text-shadow: none !important; }
 
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
@@ -4930,18 +4970,35 @@ function setupAmbientMode() {
   };
   const glFrame = () => {
     if (!gl) return; const t = gl.clock.getElapsedTime();
-    // flow: displace each particle from its base along a smooth drifting field
+    // real audio: bass energy drives the pulse; smoothed, with a gentle idle
+    // fallback when there's no analyser yet.
+    let bass = 0, lvl = 0;
+    const an = window.__hoqAudioAnalyser;
+    if (an) {
+      if (!gl.freq) gl.freq = new Uint8Array(an.frequencyBinCount);
+      an.getByteFrequencyData(gl.freq);
+      let bs = 0; for (let i = 1; i < 10; i++) bs += gl.freq[i]; bass = bs / (9 * 255);
+      let s = 0; for (let i = 0; i < gl.freq.length; i++) s += gl.freq[i]; lvl = s / (gl.freq.length * 255);
+    }
+    gl.bass = (gl.bass || 0) + (bass - (gl.bass || 0)) * 0.25;      // fast attack
+    gl.lvl  = (gl.lvl  || 0) + (lvl  - (gl.lvl  || 0)) * 0.1;
+    const beat = an ? gl.bass : (0.35 + Math.sin(t * 1.4) * 0.12);   // idle pulse w/o audio
+    const spread = 0.14 + beat * 0.34;
+    // flow: displace each particle from its base along a drifting field, pushed
+    // outward on the beat
     const p = gl.cloud.geometry.attributes.position.array, b = gl.base, n = b.length / 3;
     for (let i = 0; i < n; i++) {
       const bx = b[i*3], by = b[i*3+1], bz = b[i*3+2];
-      p[i*3]   = bx + Math.sin(t * 0.5 + by * 1.5) * 0.16;
-      p[i*3+1] = by + Math.cos(t * 0.4 + bx * 1.5) * 0.16;
-      p[i*3+2] = bz + Math.sin(t * 0.45 + bx * 1.2 + by * 0.8) * 0.16;
+      p[i*3]   = bx * (1 + beat * 0.16) + Math.sin(t * 0.5 + by * 1.5) * spread;
+      p[i*3+1] = by * (1 + beat * 0.16) + Math.cos(t * 0.4 + bx * 1.5) * spread;
+      p[i*3+2] = bz * (1 + beat * 0.16) + Math.sin(t * 0.45 + bx * 1.2 + by * 0.8) * spread;
     }
     gl.cloud.geometry.attributes.position.needsUpdate = true;
     gl.cloud.rotation.y = t * 0.05;
+    gl.cloudMat.opacity = 0.7 + Math.min(0.3, (an ? gl.lvl : 0.2) * 0.9);
     gl.core.rotation.y = -t * 0.15;
-    gl.core.scale.setScalar(1 + Math.sin(t * 1.4) * 0.12);
+    gl.core.scale.setScalar(1 + beat * 0.9);
+    gl.coreMat.opacity = 0.55 + beat * 0.45;
     gl.camera.position.x += (tpx * 0.9 - gl.camera.position.x) * 0.05;
     gl.camera.position.y += (-tpy * 0.9 - gl.camera.position.y) * 0.05;
     gl.camera.lookAt(0, 0, 0);
