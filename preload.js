@@ -1027,25 +1027,20 @@ const BASE_CSS = `
   .userInfoBar__buttons .sc-button svg { fill: currentColor !important; }
 
   /* ===== Profile hero — melt the banner into the mica background =====
-     The banner (.profileHeaderBackground__visual) is a hard-edged rectangle
-     of the user's chosen visual. Mask its bottom + side edges to transparent
-     so the blurred cover-bg (#sc-bg) shows through and it reads as part of the
-     page, not a pasted-on strip. The name/location get a soft shadow so they
-     stay crisp over the now-faded art. */
-  .l-user-hero .profileHeaderBackground__visual {
-    -webkit-mask-image:
-      linear-gradient(180deg,#000 0%,#000 40%,rgba(0,0,0,.5) 74%,transparent 100%),
-      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%) !important;
-    -webkit-mask-composite: source-in !important;
-    mask-image:
-      linear-gradient(180deg,#000 0%,#000 40%,rgba(0,0,0,.5) 74%,transparent 100%),
-      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%) !important;
-    mask-composite: intersect !important;
-    opacity: .9 !important;
-  }
-  .l-user-hero .profileHeaderBackground::after {
-    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
-    background: linear-gradient(180deg, rgba(10,10,12,0) 42%, rgba(10,10,12,.5) 100%);
+     Mask the whole banner CONTAINER (.profileHeaderBackground), not the image
+     child. Two bugs made the child-only mask do nothing visible:
+       1. the child's parent carries its own light-grey background, so fading
+          the child just exposed a grey patch, not the page;
+       2. mask-composite:intersect (the 2-layer bottom+side fade) rendered
+          inconsistently in this WebView2.
+     Masking the container with a single-layer vertical gradient AND forcing
+     its background transparent fades the entire banner into the blurred
+     cover-bg behind it. The name/location live in a sibling (.profileHeaderInfo)
+     so they are untouched; a soft shadow keeps them crisp over the faded art. */
+  .l-user-hero .profileHeaderBackground {
+    background: transparent !important;
+    -webkit-mask-image: linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.35) 66%,transparent 100%) !important;
+    mask-image: linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.35) 66%,transparent 100%) !important;
   }
   .l-user-hero .profileHeaderInfo { position: relative; z-index: 2; }
   .l-user-hero .profileHeaderInfo__userName,
