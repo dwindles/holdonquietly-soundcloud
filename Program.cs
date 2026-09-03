@@ -142,9 +142,14 @@ class Program
     static async Task Init()
     {
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        string userData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SoundCloudApp");
+        // A second instance can't share the WebView2 user-data folder (it's locked
+        // by the first). Set HOQ_DATADIR to give a test instance its own folder so
+        // it runs alongside the main one instead of forcing a restart.
+        string userData = Environment.GetEnvironmentVariable("HOQ_DATADIR");
+        if (string.IsNullOrWhiteSpace(userData))
+            userData = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SoundCloudApp");
 
         // A LONE single-file exe has no loose files beside it — pull logo.png out
         // of the embedded resources into a writable folder so the virtual host can
@@ -218,12 +223,34 @@ class Program
             OnMessage(m);
         };
 
-        // window.open / OAuth sign-in popups (Google, Facebook, Apple) must open
-        // IN-APP in a WebView2 that shares this cookie store — otherwise the login
-        // can't complete. (Genuinely external links go out via the "open:" message.)
+        // window.open / target="_blank".
+        //   - OAuth sign-in popups (Google, Facebook, Apple, SoundCloud's own
+        //     secure host) MUST open in-app in a WebView2 that shares this cookie
+        //     store, or the login can't complete.
+        //   - Everything else (Artist Studio, "Get unlimited uploads", Insights
+        //     links, etc.) was also opening as a stray popup window. Those should
+        //     just navigate the MAIN window instead.
         core.NewWindowRequested += async (s, e) =>
         {
             e.Handled = true;
+
+            bool isAuth = false;
+            try
+            {
+                var host = new Uri(e.Uri).Host.ToLowerInvariant();
+                isAuth = host.Contains("accounts.google") || host.Contains("appleid")
+                      || host.Contains("facebook.com") || host.Contains("secure.soundcloud")
+                      || host.Contains("api-auth.soundcloud") || host.Contains("oauth");
+            }
+            catch { }
+
+            // Non-auth link: navigate the main window, no popup.
+            if (!isAuth)
+            {
+                try { core.Navigate(e.Uri); } catch { }
+                return;
+            }
+
             var deferral = e.GetDeferral();
             try
             {

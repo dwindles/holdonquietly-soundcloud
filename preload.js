@@ -171,7 +171,7 @@ const BASE_CSS = `
   }
   html.sc-coverbg .playControls {
     background: rgba(12,12,14,0.5) !important;
-    backdrop-filter: blur(26px) saturate(1.4) !important;
+    backdrop-filter: blur(24px) saturate(1.4) !important;
     border-top: 1px solid rgba(255,255,255,0.06) !important;
   }
   html.sc-coverbg .playControls::before,
@@ -672,8 +672,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 12px !important;
     box-shadow: 0 16px 44px rgba(0,0,0,0.55) !important;
-    backdrop-filter: blur(42px) saturate(1.4) !important;
-    -webkit-backdrop-filter: blur(42px) saturate(1.4) !important;
+    backdrop-filter: blur(24px) saturate(1.4) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.4) !important;
     overflow: hidden !important; padding: 5px !important;
   }
   .select__list li, .select__option, .select__list a, .select__list button,
@@ -916,8 +916,8 @@ const BASE_CSS = `
     background: rgba(12,12,16,0.42) !important; border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 14px !important; padding: 8px !important;
     overflow: visible !important; box-sizing: border-box !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
   }
   .collectionNav.g-tabs li, .collectionNav.g-tabs .g-tabs-item {
@@ -1069,7 +1069,7 @@ const BASE_CSS = `
     background: rgba(12,12,16,0.42) !important;
     border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 14px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important; -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     padding: 8px !important;
   }
   /* "Search results for …" title bar — was a solid black block; make it see-through. */
@@ -1096,7 +1096,7 @@ const BASE_CSS = `
     background: rgba(12,12,16,0.5) !important;
     border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 12px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
-    backdrop-filter: blur(42px) saturate(1.5) !important; -webkit-backdrop-filter: blur(42px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
   }
   #searchMenuList, #searchMenuList li, .autosuggests li { background: transparent !important; }
@@ -1501,8 +1501,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 14px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
   }
   /* clear the inner solid wrappers SoundCloud paints (the "double layer") */
@@ -1562,8 +1562,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.12) !important;
     border-radius: 14px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.10) !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
     padding: 5px !important;
   }
@@ -1613,8 +1613,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 16px !important;
     box-shadow: 0 26px 74px rgba(0,0,0,0.62) !important;
-    backdrop-filter: blur(48px) saturate(1.45) !important;
-    -webkit-backdrop-filter: blur(48px) saturate(1.45) !important;
+    backdrop-filter: blur(24px) saturate(1.45) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.45) !important;
   }
   /* dim + blur the page behind the modal */
   .modal__background, .modalBackground, .g-modal-overlay, .modal__overlay {
@@ -1796,8 +1796,8 @@ const MUI_CSS = `
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiCard-root,
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiPaper-contained {
     background: rgba(12,12,14,0.3) !important;
-    backdrop-filter: blur(26px) saturate(1.35) !important;
-    -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+    backdrop-filter: blur(24px) saturate(1.35) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.35) !important;
     border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
     border-radius: 14px !important;
   }
@@ -1945,8 +1945,8 @@ const MUI_CSS = `
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiStack-root:has(> .MuiStack-root > a > img[sizes="64px"]),
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiStack-root:has(> .MuiTypography-h2) {
     background: rgba(12,12,14,0.3) !important;
-    backdrop-filter: blur(26px) saturate(1.35) !important;
-    -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+    backdrop-filter: blur(24px) saturate(1.35) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.35) !important;
     border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
     border-radius: 14px !important;
   }
@@ -2803,7 +2803,7 @@ function buildTitlebar() {
       #sc-palette {
         position: fixed; top: 52px; right: 12px; z-index: 2147483647;
         background: rgba(14,14,18,0.55);
-        backdrop-filter: blur(46px) saturate(1.5); -webkit-backdrop-filter: blur(46px) saturate(1.5);
+        backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
         border: 1px solid rgba(255,255,255,0.10); border-radius: 16px;
         padding: 12px 14px; width: 470px; display: none;
         max-height: calc(100vh - 66px); overflow-y: auto; overscroll-behavior: contain;
