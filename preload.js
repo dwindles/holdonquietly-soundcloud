@@ -1026,59 +1026,38 @@ const BASE_CSS = `
   }
   .userInfoBar__buttons .sc-button svg { fill: currentColor !important; }
 
-  /* ===== Profile hero — melt the banner into the mica background =====
-     Mask the whole banner CONTAINER (.profileHeaderBackground), not the image
-     child. Two bugs made the child-only mask do nothing visible:
-       1. the child's parent carries its own light-grey background, so fading
-          the child just exposed a grey patch, not the page;
-       2. mask-composite:intersect (the 2-layer bottom+side fade) rendered
-          inconsistently in this WebView2.
-     Masking the container with a single-layer vertical gradient AND forcing
-     its background transparent fades the entire banner into the blurred
-     cover-bg behind it. The name/location live in a sibling (.profileHeaderInfo)
-     so they are untouched; a soft shadow keeps them crisp over the faded art. */
-  .l-user-hero .profileHeaderBackground {
-    background: transparent !important;
-    -webkit-mask-image: linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.35) 66%,transparent 100%) !important;
-    mask-image: linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.35) 66%,transparent 100%) !important;
+  /* ===== Profile hero — stock banner, full-bleed edge to edge =====
+     No fade/mask, no avatar or name restyling: the banner shows as SoundCloud
+     draws it. The one change is width — break the hero out of the container's
+     side padding so the cover spans the whole window, edge to edge, then push
+     the avatar/name/buttons back to the normal content inset so only the banner
+     goes full width. */
+  .l-user-hero {
+    margin-left: calc(50% - 50vw) !important;
+    margin-right: calc(50% - 50vw) !important;
+    width: 100vw !important; max-width: 100vw !important;
+    padding-left: 0 !important; padding-right: 0 !important;
   }
-  /* Side fade on the image child. Nested inside the container's bottom-fade, the
-     two single-layer masks combine visually — both edges dissolve without the
-     mask-composite:intersect that failed to paint here. */
-  .l-user-hero .profileHeaderBackground__visual {
-    -webkit-mask-image: linear-gradient(90deg,transparent 0%,#000 11%,#000 89%,transparent 100%) !important;
-    mask-image: linear-gradient(90deg,transparent 0%,#000 11%,#000 89%,transparent 100%) !important;
+  .l-user-hero .profileHeader__info,
+  .l-user-hero .profileHeader__edit {
+    padding-left: calc(50vw - 50% + 16px) !important;
+    padding-right: calc(50vw - 50% + 16px) !important;
   }
-  .l-user-hero .profileHeaderInfo { position: relative; z-index: 2; }
-  /* Drop SoundCloud's g-type-shrinkwrap chip (the boxy dark rectangle it wraps
-     round names over images) — it read as a slapped-on sticker against the soft
-     banner. Plain white text + the shadow below keeps it legible and clean. */
-  .l-user-hero .profileHeaderInfo__userName,
-  .l-user-hero .profileHeaderInfo__additional,
-  .l-user-hero .profileHeaderInfo__content .g-type-shrinkwrap-block {
-    background: transparent !important; padding: 0 !important;
-  }
-  .l-user-hero .profileHeaderInfo__userName,
-  .l-user-hero .profileHeaderInfo__additional {
-    text-shadow: 0 1px 14px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
-  }
-  /* Avatar: now that the banner is soft, the flat 8px sticker clashed. Round it
-     to the theme's panel radius, drop a soft shadow so it seats into the scene,
-     and add a faint frosted ring instead of the hard light outline.
-     Round the edit layers too — on your own profile SoundCloud lays a square
-     "Update image" button and a 50%-circle hover tint over the avatar, so the
-     circle showed inside the rounded square. Clip them to the 16px shape. */
-  .l-user-hero .profileHeaderInfo__avatar .image,
-  .l-user-hero .profileHeaderInfo__avatar .sc-artwork,
-  .l-user-hero .profileHeaderInfo__avatar .editImage,
-  .l-user-hero .profileHeaderInfo__avatar .editImage__select,
-  .l-user-hero .profileHeaderInfo__avatar .editImage__Overlay { border-radius: 16px !important; }
-  .l-user-hero .profileHeaderInfo__avatar .editImage__select { overflow: hidden !important; }
-  /* Shadow on .image for other people's profiles (the outer node there) and on
-     .editImage for your own (where .image sits inside the clipped select). */
-  .l-user-hero .profileHeaderInfo__avatar .image,
-  .l-user-hero .profileHeaderInfo__avatar .editImage {
-    box-shadow: 0 12px 36px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.10) !important;
+  /* Cover the full width (the visual defaults to auto 100%, leaving a grey gap
+     on the right once the hero is full-bleed) and clip the blur overlay. */
+  .l-user-hero .profileHeaderBackground { background-color: #0b0b0e !important; overflow: hidden !important; }
+  .l-user-hero .profileHeaderBackground__visual { background-size: cover !important; background-position: center !important; }
+  /* Bottom blur: a blurred clone of the banner image (see paintBannerBlur),
+     masked to fade in over the lower half so the banner softens into the
+     content instead of ending on a hard line. scale(1.06) hides the blur's
+     transparent edges. */
+  .l-user-hero .profileHeaderBackground .hoq-banner-blur {
+    position: absolute !important; inset: 0 !important;
+    background-size: cover !important; background-position: center !important;
+    filter: blur(16px) !important; transform: scale(1.06) !important;
+    -webkit-mask-image: linear-gradient(180deg, transparent 50%, #000 100%) !important;
+    mask-image: linear-gradient(180deg, transparent 50%, #000 100%) !important;
+    pointer-events: none !important;
   }
 
   /* ===== Profile tabs (All / Popular tracks / Tracks / …) — accent active + hover glow ===== */
@@ -5045,6 +5024,22 @@ function boot() {
   // Same cadence for the top frame's own rows (feed, search, library, legacy pages).
   addQueueButtons(document);
   setInterval(() => { try { addQueueButtons(document); } catch (e) {} }, 1200);
+  // Blur the bottom of the profile-hero banner. SoundCloud paints it as a
+  // background-image; backdrop-filter here samples the page mica, not the
+  // banner, so instead we clone the image into an overlay we can filter:blur.
+  // Re-run on the interval: the visual mounts late and swaps per profile.
+  function paintBannerBlur() {
+    var bg = document.querySelector('.l-user-hero .profileHeaderBackground');
+    var v = bg && bg.querySelector('.profileHeaderBackground__visual');
+    if (!v) return;
+    var img = getComputedStyle(v).backgroundImage;
+    if (!img || img === 'none') return;
+    var b = bg.querySelector('.hoq-banner-blur');
+    if (!b) { b = document.createElement('div'); b.className = 'hoq-banner-blur'; bg.appendChild(b); }
+    if (b.dataset.img !== img) { b.style.backgroundImage = img; b.dataset.img = img; }
+  }
+  paintBannerBlur();
+  setInterval(() => { try { paintBannerBlur(); } catch (e) {} }, 1000);
   setInterval(() => { try { tuneNowPlayingMarquee(); } catch (e) {} }, 1500);
   setInterval(() => { try { hoqStatsTick(); } catch (e) {} }, 4000);
   // The player bar appears/disappears with playback, so keep the tab's bottom
