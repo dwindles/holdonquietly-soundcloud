@@ -1064,10 +1064,20 @@ const BASE_CSS = `
   }
   /* Avatar: now that the banner is soft, the flat 8px sticker clashed. Round it
      to the theme's panel radius, drop a soft shadow so it seats into the scene,
-     and add a faint frosted ring instead of the hard light outline. */
+     and add a faint frosted ring instead of the hard light outline.
+     Round the edit layers too — on your own profile SoundCloud lays a square
+     "Update image" button and a 50%-circle hover tint over the avatar, so the
+     circle showed inside the rounded square. Clip them to the 16px shape. */
   .l-user-hero .profileHeaderInfo__avatar .image,
-  .l-user-hero .profileHeaderInfo__avatar .sc-artwork { border-radius: 16px !important; }
-  .l-user-hero .profileHeaderInfo__avatar .image {
+  .l-user-hero .profileHeaderInfo__avatar .sc-artwork,
+  .l-user-hero .profileHeaderInfo__avatar .editImage,
+  .l-user-hero .profileHeaderInfo__avatar .editImage__select,
+  .l-user-hero .profileHeaderInfo__avatar .editImage__Overlay { border-radius: 16px !important; }
+  .l-user-hero .profileHeaderInfo__avatar .editImage__select { overflow: hidden !important; }
+  /* Shadow on .image for other people's profiles (the outer node there) and on
+     .editImage for your own (where .image sits inside the clipped select). */
+  .l-user-hero .profileHeaderInfo__avatar .image,
+  .l-user-hero .profileHeaderInfo__avatar .editImage {
     box-shadow: 0 12px 36px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.10) !important;
   }
 
