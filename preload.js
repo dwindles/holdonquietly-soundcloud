@@ -940,15 +940,17 @@ const BASE_CSS = `
     color: #fff !important;
     box-shadow: 0 0 13px color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
   }
+  /* Selected item: ONE clear indicator instead of bg + border + inset bar +
+     outer glow + text glow all stacked (which read as boxy). A soft accent
+     wash, the left accent bar, and accent text — nothing else. */
   .collectionNav.g-tabs .active a, .collectionNav.g-tabs a.active,
   .collectionNav.g-tabs li.active a, .collectionNav.g-tabs [aria-current] a,
   .collectionNav.g-tabs a[aria-current] {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
-    color: var(--sc-accent, #ff5500) !important; font-weight: 800 !important;
-    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important;
-    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500),
-                0 0 16px color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent) !important;
-    text-shadow: 0 0 10px color-mix(in srgb, var(--sc-accent, #ff5500) 60%, transparent) !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 70%, #ffffff) !important;
+    font-weight: 700 !important; border: 0 !important;
+    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important;
+    text-shadow: none !important;
   }
 
   /* ===== Library "Filter" input — themed field with accent focus glow ===== */
