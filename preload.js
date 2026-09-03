@@ -656,9 +656,17 @@ const BASE_CSS = `
   #hoq-np .np-close { position: absolute; top: 44px; left: 24px; width: 40px; height: 40px; border-radius: 50%;
     background: rgba(255,255,255,.1); border: 0; color: #fff; cursor: pointer; font-size: 20px; line-height: 40px; }
   #hoq-np .np-close:hover { background: rgba(255,255,255,.2); }
-  /* the trigger button we add into the player bar */
-  #hoq-ambient-btn { background: none; border: 0; color: currentColor; cursor: pointer; opacity: .7; padding: 4px; display: flex; }
-  #hoq-ambient-btn:hover { opacity: 1; color: var(--sc-accent, #ff5500); }
+  /* trigger button in the player bar — matched to our Discord play/share buttons
+     (and SoundCloud's own icon buttons): 26x26 box, 15px icon, secondary grey,
+     accent on hover. */
+  #hoq-ambient-btn { display: none; }
+  .playbackSoundBadge__actions #hoq-ambient-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; margin-left: 10px; padding: 0; background: none; border: 0;
+    border-radius: 7px; cursor: pointer; color: #b4b4b8; flex: 0 0 auto;
+    transition: color .15s ease, background .15s ease; }
+  .playbackSoundBadge__actions #hoq-ambient-btn:hover { color: var(--sc-accent, #ff5500); background: rgba(255,255,255,0.09); }
+  .playbackSoundBadge__actions #hoq-ambient-btn svg { width: 15px; height: 15px; flex: 0 0 auto; }
 
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
@@ -4808,6 +4816,8 @@ function setupAmbientMode() {
     const lk = np.querySelector('.np-like');
     lk.style.color = liked ? 'var(--sc-accent, #ff5500)' : '#fff';
     lk.style.opacity = liked ? '1' : '.85';
+    // match the real Like button's accent glow when liked
+    lk.style.filter = liked ? 'drop-shadow(0 0 5px color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent))' : 'none';
   };
   const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); setTimeout(sync, 120); };
   np.querySelector('.np-play').onclick = () => click('.playControls__play');
