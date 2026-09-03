@@ -662,11 +662,13 @@ const BASE_CSS = `
   #hoq-ambient-btn { display: none; }
   .playbackSoundBadge__actions #hoq-ambient-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 26px; height: 26px; margin-left: 10px; padding: 0; background: none; border: 0;
+    width: 30px; height: 30px; margin-left: 10px; padding: 0; background: none; border: 0;
     border-radius: 7px; cursor: pointer; color: #b4b4b8; flex: 0 0 auto;
     transition: color .15s ease, background .15s ease; }
   .playbackSoundBadge__actions #hoq-ambient-btn:hover { color: var(--sc-accent, #ff5500); background: rgba(255,255,255,0.09); }
-  .playbackSoundBadge__actions #hoq-ambient-btn svg { width: 15px; height: 15px; flex: 0 0 auto; }
+  .playbackSoundBadge__actions #hoq-ambient-btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
+  #hoq-np .np-art { transition: transform .14s ease; }
+  html.hoq-no-anim #hoq-np .np-art { transition: none !important; }
 
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
@@ -4123,11 +4125,11 @@ function startShareButton() {
       // icon buttons there. Hidden while unmounted so it can never float loose.
       '#hoq-share{display:none}' +
       '.playbackSoundBadge__actions #hoq-share{display:inline-flex;align-items:center;justify-content:center;' +
-      'width:26px;height:26px;margin-left:10px;padding:0;background:none;border:0;' +
+      'width:30px;height:30px;margin-left:10px;padding:0;background:none;border:0;' +
       'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
       'transition:color .15s ease,background .15s ease}' +
       '.playbackSoundBadge__actions #hoq-share:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
-      '.playbackSoundBadge__actions #hoq-share svg{width:15px;height:15px;flex:0 0 auto}' +
+      '.playbackSoundBadge__actions #hoq-share svg{width:16px;height:16px;flex:0 0 auto}' +
       // The label becomes the tooltip once we're icon-only.
       '.playbackSoundBadge__actions #hoq-share span{display:none}' +
       '.playbackSoundBadge__actions #hoq-share.done{color:var(--sc-accent,#ff5500);cursor:default}' +
@@ -4328,7 +4330,7 @@ function startPlayButton() {
       // icon buttons there. Hidden while unmounted so it can never float loose.
       '#hoq-playbtn{display:none}' +
       '.playbackSoundBadge__actions #hoq-playbtn{display:inline-flex;align-items:center;justify-content:center;' +
-      'width:26px;height:26px;margin-left:10px;padding:0;background:none;border:0;' +
+      'width:30px;height:30px;margin-left:10px;padding:0;background:none;border:0;' +
       'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
       'transition:color .15s ease,background .15s ease}' +
       '.playbackSoundBadge__actions #hoq-playbtn:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
@@ -4337,7 +4339,7 @@ function startPlayButton() {
       '.playbackSoundBadge__actions #hoq-playbtn{position:relative;margin-left:17px}' +
       '.playbackSoundBadge__actions #hoq-playbtn::before{content:"";position:absolute;left:-9px;' +
       'top:5px;bottom:5px;width:1px;background:rgba(255,255,255,0.15)}' +
-      '.playbackSoundBadge__actions #hoq-playbtn svg{width:15px;height:15px;flex:0 0 auto}' +
+      '.playbackSoundBadge__actions #hoq-playbtn svg{width:16px;height:16px;flex:0 0 auto}' +
       // The label becomes the tooltip once we're icon-only.
       '.playbackSoundBadge__actions #hoq-playbtn span{display:none}' +
       '.playbackSoundBadge__actions #hoq-playbtn.done{color:var(--sc-accent,#ff5500);cursor:default}' +
@@ -4794,7 +4796,7 @@ function setupAmbientMode() {
       '<button class="np-prev" title="Previous"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>' +
       '<button class="np-play" title="Play/Pause"></button>' +
       '<button class="np-next" title="Next"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>' +
-      '<button class="np-like" title="Like"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 21s-7.5-4.9-10-9.2C.3 8.6 2 5 5.5 5c2 0 3.4 1.1 4.5 2.6C11.1 6.1 12.5 5 14.5 5 18 5 19.7 8.6 22 11.8 19.5 16.1 12 21 12 21z"/></svg></button>' +
+      '<button class="np-like" title="Like"><svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor"><path d="M7.978 5c.653-1.334 1.644-2 2.972-2 1.992 0 3.405 1.657 2.971 4-.289 1.561-2.27 3.895-5.943 7C4.19 10.895 2.21 8.561 2.035 7c-.26-2.343.947-4 2.972-4 1.35 0 2.34.666 2.971 2z"/></svg></button>' +
     '</div></div>';
   (document.body || document.documentElement).appendChild(np);
 
@@ -4839,6 +4841,24 @@ function setupAmbientMode() {
     wrap.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, clientX: wr.left + frac * wr.width, clientY: wr.top + wr.height / 2 }));
     setTimeout(sync, 150);
   };
+
+  // Subtle 3D: the art tilts toward the cursor and the blurred background
+  // parallaxes the other way for depth. rAF-throttled; honours the tilt effect.
+  let tpx = 0, tpy = 0, traf = 0;
+  const tiltApply = () => {
+    traf = 0;
+    const art = np.querySelector('.np-art'), bg = np.querySelector('.np-bg');
+    if (art) art.style.transform = 'perspective(900px) rotateY(' + (tpx * 14).toFixed(1) + 'deg) rotateX(' + (-tpy * 10).toFixed(1) + 'deg)';
+    if (bg) bg.style.transform = 'scale(1.15) translate(' + (-tpx * 2.4).toFixed(1) + '%,' + (-tpy * 2.4).toFixed(1) + '%)';
+  };
+  np.addEventListener('mousemove', (e) => {
+    if (typeof effectOn === 'function' && !effectOn('tilt')) return;
+    const r = np.getBoundingClientRect();
+    tpx = (e.clientX - r.left) / r.width - 0.5;
+    tpy = (e.clientY - r.top) / r.height - 0.5;
+    if (!traf) traf = requestAnimationFrame(tiltApply);
+  }, { passive: true });
+  np.addEventListener('mouseleave', () => { const art = np.querySelector('.np-art'); if (art) art.style.transform = ''; });
 
   let iv = 0;
   const open = () => { sync(); np.classList.add('on'); document.documentElement.classList.add('hoq-np-open'); if (!iv) iv = setInterval(() => { if (np.classList.contains('on')) sync(); }, 500); };
