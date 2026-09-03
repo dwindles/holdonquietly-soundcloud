@@ -1035,12 +1035,12 @@ const BASE_CSS = `
   .l-user-hero .profileHeaderBackground__visual {
     -webkit-mask-image:
       linear-gradient(180deg,#000 0%,#000 40%,rgba(0,0,0,.5) 74%,transparent 100%),
-      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%);
-    -webkit-mask-composite: source-in;
+      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%) !important;
+    -webkit-mask-composite: source-in !important;
     mask-image:
       linear-gradient(180deg,#000 0%,#000 40%,rgba(0,0,0,.5) 74%,transparent 100%),
-      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%);
-    mask-composite: intersect;
+      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%) !important;
+    mask-composite: intersect !important;
     opacity: .9 !important;
   }
   .l-user-hero .profileHeaderBackground::after {
