@@ -1050,6 +1050,14 @@ const BASE_CSS = `
     mask-image: linear-gradient(90deg,transparent 0%,#000 11%,#000 89%,transparent 100%) !important;
   }
   .l-user-hero .profileHeaderInfo { position: relative; z-index: 2; }
+  /* Drop SoundCloud's g-type-shrinkwrap chip (the boxy dark rectangle it wraps
+     round names over images) — it read as a slapped-on sticker against the soft
+     banner. Plain white text + the shadow below keeps it legible and clean. */
+  .l-user-hero .profileHeaderInfo__userName,
+  .l-user-hero .profileHeaderInfo__additional,
+  .l-user-hero .profileHeaderInfo__content .g-type-shrinkwrap-block {
+    background: transparent !important; padding: 0 !important;
+  }
   .l-user-hero .profileHeaderInfo__userName,
   .l-user-hero .profileHeaderInfo__additional {
     text-shadow: 0 1px 14px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
