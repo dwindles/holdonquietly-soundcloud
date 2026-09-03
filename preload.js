@@ -614,6 +614,41 @@ const BASE_CSS = `
   html.hoq-no-anim #hoq-ambient::before, html.hoq-no-anim #hoq-ambient::after { animation: none !important; }
   @keyframes hoqAmb  { from { transform: translateY(0) scale(1); } to { transform: translateY(-3%) scale(1.06); } }
   @keyframes hoqAmb2 { from { transform: translate(0,0); }        to { transform: translate(3%,2%); } }
+
+  /* ===== Ambient mode — a big now-playing view (Spotify-ish), toggled from the
+     player bar. Sits above the content but leaves the real player bar visible at
+     the bottom, and mirrors the current track (art/title/artist/progress) with
+     controls wired to the real transport buttons. ===== */
+  #hoq-np { position: fixed; inset: 0 0 66px 0; z-index: 9990; display: none; overflow: hidden;
+    color: #fff; background: #0b0b0e; }
+  #hoq-np.on { display: flex; align-items: center; justify-content: center; gap: 56px; }
+  #hoq-np .np-bg { position: absolute; inset: -10%; background-size: cover; background-position: center;
+    filter: blur(70px) saturate(1.5) brightness(.55); transform: scale(1.15); }
+  #hoq-np .np-scrim { position: absolute; inset: 0;
+    background: radial-gradient(120% 100% at 50% 30%, rgba(10,10,12,.35), rgba(10,10,12,.82)); }
+  #hoq-np .np-art { position: relative; width: 340px; height: 340px; border-radius: 18px;
+    background-size: cover; background-position: center; background-color: rgba(255,255,255,.04);
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); }
+  #hoq-np .np-side { position: relative; width: 420px; max-width: 44vw; }
+  #hoq-np .np-title { font-size: 34px; font-weight: 800; line-height: 1.15; margin: 0 0 8px;
+    max-height: 4.6em; overflow: hidden; }
+  #hoq-np .np-artist { font-size: 17px; opacity: .72; margin: 0 0 26px; }
+  #hoq-np .np-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; cursor: pointer; }
+  #hoq-np .np-bar i { display: block; height: 100%; background: var(--sc-accent, #ff5500); width: 0%; }
+  #hoq-np .np-times { display: flex; justify-content: space-between; font-size: 12px; opacity: .7; margin-top: 7px; }
+  #hoq-np .np-ctrls { display: flex; align-items: center; gap: 22px; margin-top: 26px; }
+  #hoq-np .np-ctrls button { background: none; border: 0; color: #fff; cursor: pointer; opacity: .85; padding: 0; display: flex; }
+  #hoq-np .np-ctrls button:hover { opacity: 1; }
+  #hoq-np .np-play { width: 60px; height: 60px; border-radius: 50%; background: #fff !important; color: #111 !important;
+    align-items: center; justify-content: center; }
+  #hoq-np .np-play svg { width: 26px; height: 26px; }
+  #hoq-np .np-close { position: absolute; top: 20px; right: 24px; width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(255,255,255,.1); border: 0; color: #fff; cursor: pointer; font-size: 20px; line-height: 40px; }
+  #hoq-np .np-close:hover { background: rgba(255,255,255,.2); }
+  /* the trigger button we add into the player bar */
+  #hoq-ambient-btn { background: none; border: 0; color: currentColor; cursor: pointer; opacity: .7; padding: 4px; display: flex; }
+  #hoq-ambient-btn:hover { opacity: 1; color: var(--sc-accent, #ff5500); }
+
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
   /* Waveform is a <canvas> (orange played + grey unplayed). Hue-rotate just the
@@ -3047,7 +3082,7 @@ function buildTitlebar() {
       <label class="row"><span>Row hover</span><input type="checkbox" id="sc-fx-hover"></label>
       <label class="row"><span>Frosted bars</span><input type="checkbox" id="sc-fx-frost"></label>
       <label class="row"><span>Grayscale covers</span><input type="checkbox" id="sc-fx-gray"></label>
-      <label class="row"><span>Ambient glow</span><input type="checkbox" id="sc-fx-ambient"></label>
+      <label class="row"><span>Room glow</span><input type="checkbox" id="sc-fx-ambient"></label>
     </div>
 
     <div class="section-label">Display</div>
@@ -4709,6 +4744,92 @@ function setupCoverTilt() {
   }, { passive: true });
 }
 
+// Ambient mode: a big Spotify-style now-playing view. Reads the current track
+// from the real player bar and mirrors it; controls call the real transport
+// buttons so we never touch playback state directly. Toggled by a button we add
+// into the player bar (and Esc to close).
+function setupAmbientMode() {
+  if (window.__hoqNp) return;
+  window.__hoqNp = true;
+  const big = (u) => u ? u.replace(/-t\d+x\d+\./, '-t500x500.') : '';
+  const artUrl = () => {
+    const el = document.querySelector('.playbackSoundBadge__avatar span.sc-artwork')
+            || document.querySelector('.playControls .playbackSoundBadge__avatar span')
+            || document.querySelector('.playControls .sc-artwork span');
+    if (!el) return '';
+    const bi = getComputedStyle(el).backgroundImage || '';
+    const m = bi.match(/url\(["']?(.*?)["']?\)/);
+    return m ? m[1] : '';
+  };
+  const txt = (sel, attr) => { const e = document.querySelector(sel); return e ? (attr ? (e.getAttribute(attr) || '') : e.textContent || '') : ''; };
+
+  const np = document.createElement('div');
+  np.id = 'hoq-np';
+  np.innerHTML =
+    '<div class="np-bg"></div><div class="np-scrim"></div>' +
+    '<button class="np-close" title="Close (Esc)">✕</button>' +
+    '<div class="np-art"></div>' +
+    '<div class="np-side"><h1 class="np-title"></h1><div class="np-artist"></div>' +
+    '<div class="np-bar"><i></i></div><div class="np-times"><span class="np-cur">0:00</span><span class="np-dur">0:00</span></div>' +
+    '<div class="np-ctrls">' +
+      '<button class="np-prev" title="Previous"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>' +
+      '<button class="np-play" title="Play/Pause"></button>' +
+      '<button class="np-next" title="Next"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>' +
+    '</div></div>';
+  (document.body || document.documentElement).appendChild(np);
+
+  let lastArt = '';
+  const sync = () => {
+    const u = big(artUrl());
+    if (u && u !== lastArt) { lastArt = u; np.querySelector('.np-art').style.backgroundImage = 'url("' + u + '")'; np.querySelector('.np-bg').style.backgroundImage = 'url("' + u + '")'; }
+    np.querySelector('.np-title').textContent = (txt('.playbackSoundBadge__titleLink', 'title') || txt('.playbackSoundBadge__titleLink')).trim();
+    np.querySelector('.np-artist').textContent = (txt('.playbackSoundBadge__lightLink', 'title') || txt('.playbackSoundBadge__lightLink')).trim();
+    np.querySelector('.np-bar i').style.width = (document.querySelector('.playbackTimeline__progressBar') || {}).style && document.querySelector('.playbackTimeline__progressBar').style.width || '0%';
+    np.querySelector('.np-cur').textContent = txt('.playbackTimeline__timePassed span[aria-hidden]');
+    np.querySelector('.np-dur').textContent = txt('.playbackTimeline__duration span[aria-hidden]');
+    const playing = !!document.querySelector('.playControls__play.playing');
+    np.querySelector('.np-play').innerHTML = playing
+      ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  };
+  const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); setTimeout(sync, 120); };
+  np.querySelector('.np-play').onclick = () => click('.playControls__play');
+  np.querySelector('.np-prev').onclick = () => click('.skipControl__previous');
+  np.querySelector('.np-next').onclick = () => click('.skipControl__next');
+  np.querySelector('.np-close').onclick = () => close();
+  // seek: click the overlay bar → click the same fraction on the real timeline
+  np.querySelector('.np-bar').onclick = (e) => {
+    const wrap = document.querySelector('.playbackTimeline__progressWrapper');
+    if (!wrap) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const wr = wrap.getBoundingClientRect();
+    wrap.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: wr.left + frac * wr.width, clientY: wr.top + wr.height / 2 }));
+    wrap.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, clientX: wr.left + frac * wr.width, clientY: wr.top + wr.height / 2 }));
+    setTimeout(sync, 150);
+  };
+
+  let iv = 0;
+  const open = () => { sync(); np.classList.add('on'); if (!iv) iv = setInterval(() => { if (np.classList.contains('on')) sync(); }, 500); };
+  const close = () => { np.classList.remove('on'); };
+  window.__hoqNpToggle = () => (np.classList.contains('on') ? close() : open());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && np.classList.contains('on')) close(); });
+
+  // Add the trigger button into the player bar; re-add on the interval since the
+  // badge re-renders per track.
+  const addBtn = () => {
+    const actions = document.querySelector('.playbackSoundBadge__actions');
+    if (!actions || actions.querySelector('#hoq-ambient-btn')) return;
+    const b = document.createElement('button');
+    b.id = 'hoq-ambient-btn'; b.title = 'Ambient mode';
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M4 4h7v2H6v5H4V4zm9 0h7v7h-2V6h-5V4zM6 13v5h5v2H4v-7h2zm12 0h2v7h-7v-2h5v-5z"/></svg>';
+    b.onclick = () => window.__hoqNpToggle();
+    actions.appendChild(b);
+  };
+  addBtn();
+  setInterval(addBtn, 1200);
+}
+
 // Push the "FANS / leaderboard" module to the BOTTOM of the right sidebar (under
 // Related Tracks / In Playlists / Reposts) so it's out of the way.
 
@@ -5013,6 +5134,7 @@ function boot() {
   setupTilt();          // 3D tilt on home tiles
   setupWaveInteract();  // waveform bars rise toward the cursor
   setupCoverTilt();     // track cover follows the mouse in 3D
+  setupAmbientMode();   // big now-playing view (button in the player bar)
   removeClutter();
   // Debounced + on a gentle interval instead of firing on every mutation — a
   // constant stream of DOM writes looks like bot activity to SoundCloud.
