@@ -4623,27 +4623,41 @@ function setupTilt() {
   const MAX_Y = 20; // strong left/right lean (very visible, doesn't overflow the top)
   const MAX_X = 7;  // gentle up/down (kept small so tiles don't poke over the row above)
   const onHome = () => /^\/(discover|stream|home)?$/.test(location.pathname) || location.pathname === '/';
-  let cur = null;
+  let cur = null, px = 0, py = 0, raf = 0;
   const reset = (t) => { if (!t) return; t.style.transform = ''; t.style.transition = 'transform .35s ease'; t.classList.remove('hoq-tilt'); };
+  // Write the transform at most once per frame. The old code set it synchronously
+  // on every mousemove event (dozens/sec), thrashing layout+paint on the whole
+  // tile subtree — that was the lag. rAF coalesces it to one write per frame.
+  const apply = () => {
+    raf = 0;
+    if (!cur) return;
+    cur.style.transform =
+      'perspective(700px) rotateX(' + (-py * MAX_X).toFixed(2) + 'deg) rotateY(' +
+      (px * MAX_Y).toFixed(2) + 'deg)';
+  };
 
   document.addEventListener('mousemove', (e) => {
     if (!effectOn('tilt')) { if (cur) { reset(cur); cur = null; } return; }
     if (!onHome()) { if (cur) { reset(cur); cur = null; } return; }
     const tile = e.target.closest && e.target.closest(SEL);
-    if (tile !== cur) { reset(cur); cur = tile; }
-    if (!tile) return;
-    const r = tile.getBoundingClientRect();
+    if (tile !== cur) {
+      reset(cur);
+      cur = tile;
+      // Class + transition change only when the hovered tile changes, not every move.
+      if (cur) { cur.classList.add('hoq-tilt'); cur.style.transition = 'transform .05s linear'; }
+    }
+    if (!cur) return;
+    const r = cur.getBoundingClientRect();
     if (!r.width) return;
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    tile.classList.add('hoq-tilt');
-    tile.style.transition = 'transform .05s linear';
-    tile.style.transform =
-      'perspective(700px) rotateX(' + (-py * MAX_X).toFixed(2) + 'deg) rotateY(' +
-      (px * MAX_Y).toFixed(2) + 'deg)';
+    px = (e.clientX - r.left) / r.width - 0.5;
+    py = (e.clientY - r.top) / r.height - 0.5;
+    if (!raf) raf = requestAnimationFrame(apply);
   }, { passive: true });
 
-  document.addEventListener('mouseleave', () => { if (cur) { reset(cur); cur = null; } }, true);
+  document.addEventListener('mouseleave', () => {
+    if (cur) { reset(cur); cur = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  }, true);
 }
 
 // Track-page cover: follows the mouse in 3D. Only sets transform/transition — no
