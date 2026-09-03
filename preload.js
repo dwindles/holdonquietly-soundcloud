@@ -591,6 +591,29 @@ const BASE_CSS = `
   /* Grayscale covers ON (opt-in) */
   html.hoq-gray .image span, html.hoq-gray .sc-artwork, html.hoq-gray .sound__coverArt span,
   html.hoq-gray .fullHero__artwork span, html.hoq-gray .playableTile__image span { filter: grayscale(1) !important; }
+
+  /* Ambient glow ON (opt-in): a soft bloom of the current track's accent light,
+     screen-blended over the UI, drifting up from the player + bottom corners. */
+  #hoq-ambient { position: fixed; inset: 0; z-index: 9998; pointer-events: none; opacity: 0;
+    transition: opacity .6s ease; mix-blend-mode: screen; }
+  html.hoq-ambient #hoq-ambient { opacity: 1; }
+  #hoq-ambient::before, #hoq-ambient::after { content: ''; position: absolute; inset: -15%; }
+  #hoq-ambient::before {
+    background:
+      radial-gradient(30% 34% at 8% 104%,  color-mix(in srgb, var(--sc-accent,#ff5500) 85%, transparent), transparent 66%),
+      radial-gradient(34% 38% at 92% 104%, color-mix(in srgb, var(--sc-accent,#ff5500) 70%, transparent), transparent 68%),
+      radial-gradient(46% 40% at 50% 116%, color-mix(in srgb, var(--sc-accent,#ff5500) 62%, transparent), transparent 70%);
+    filter: blur(50px) saturate(1.4); animation: hoqAmb 15s ease-in-out infinite alternate;
+  }
+  #hoq-ambient::after {
+    background:
+      radial-gradient(40% 34% at 10% -8%, color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent), transparent 66%),
+      radial-gradient(40% 34% at 90% -8%, color-mix(in srgb, var(--sc-accent,#ff5500) 30%, transparent), transparent 66%);
+    filter: blur(60px); animation: hoqAmb2 21s ease-in-out infinite alternate;
+  }
+  html.hoq-no-anim #hoq-ambient::before, html.hoq-no-anim #hoq-ambient::after { animation: none !important; }
+  @keyframes hoqAmb  { from { transform: translateY(0) scale(1); } to { transform: translateY(-3%) scale(1.06); } }
+  @keyframes hoqAmb2 { from { transform: translate(0,0); }        to { transform: translate(3%,2%); } }
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
   /* Waveform is a <canvas> (orange played + grey unplayed). Hue-rotate just the
@@ -2348,7 +2371,7 @@ function applyVizState() {
 // CSS-gated optional effects. Default-ON ones: OFF adds html.hoq-no-<name> to
 // revert. Opt-in ones (default OFF): ON adds html.hoq-<name> to apply.
 const HOQ_CSS_FX = ['pulse', 'round', 'hover', 'anim', 'frost', 'glow'];
-const HOQ_OPTIN_FX = ['gray'];
+const HOQ_OPTIN_FX = ['gray', 'ambient'];
 function applyFxClasses() {
   HOQ_CSS_FX.forEach((n) => document.documentElement.classList.toggle('hoq-no-' + n, !effectOn(n)));
   HOQ_OPTIN_FX.forEach((n) => document.documentElement.classList.toggle('hoq-' + n, localStorage.getItem('scFx_' + n) === '1'));
@@ -3024,6 +3047,7 @@ function buildTitlebar() {
       <label class="row"><span>Row hover</span><input type="checkbox" id="sc-fx-hover"></label>
       <label class="row"><span>Frosted bars</span><input type="checkbox" id="sc-fx-frost"></label>
       <label class="row"><span>Grayscale covers</span><input type="checkbox" id="sc-fx-gray"></label>
+      <label class="row"><span>Ambient glow</span><input type="checkbox" id="sc-fx-ambient"></label>
     </div>
 
     <div class="section-label">Display</div>
@@ -3126,7 +3150,7 @@ function buildTitlebar() {
   [['viz', 'sc-fx-viz'], ['tilt', 'sc-fx-tilt'], ['wave', 'sc-fx-wave'],
    ['pulse', 'sc-fx-pulse'], ['round', 'sc-fx-round'], ['hover', 'sc-fx-hover'],
    ['anim', 'sc-fx-anim'], ['frost', 'sc-fx-frost'], ['glow', 'sc-fx-glow'],
-   ['gray', 'sc-fx-gray']].forEach(([name, id]) => {
+   ['gray', 'sc-fx-gray'], ['ambient', 'sc-fx-ambient']].forEach(([name, id]) => {
     const cb = panel.querySelector('#' + id);
     if (!cb) return;
     // opt-in effects default OFF; everything else defaults ON.
@@ -5030,6 +5054,12 @@ function boot() {
   }, 1000);
   setInterval(() => { try { buildCustomWave(); } catch (e) {} }, 600); // our waveform + playhead
   applyVizState();  // apply saved "song visualizer bar" on/off before it draws
+  // Ambient-glow layer (opt-in effect): one fixed div the CSS lights up when
+  // html.hoq-ambient is set. Created once; the accent it uses is the live var.
+  if (!document.getElementById('hoq-ambient')) {
+    const amb = document.createElement('div'); amb.id = 'hoq-ambient';
+    (document.body || document.documentElement).appendChild(amb);
+  }
   applyFxClasses(); // apply saved CSS-gated optional effects
   startPlayerViz(); // bottom-player seek bar → flowing bouncy accent visualizer
   startOverlayScrollbar(); // custom floating accent scrollbar (no side gutter)
