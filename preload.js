@@ -4869,9 +4869,10 @@ function setupAmbientMode() {
   np.addEventListener('mouseleave', () => { const art = np.querySelector('.np-art'); if (art) art.style.transform = ''; });
 
   // --- WebGL 3D backdrop (Three.js, lazy-loaded on first open) -----------------
-  // A rotating faceted crystal in the track's accent colour, wireframe + lights +
-  // a starfield, with the camera parallaxing to the cursor. If Three.js can't
-  // load, the blurred-cover background stays and nothing breaks.
+  // A flowing particle nebula in the track's accent colour: a soft cloud of
+  // additive-blended points that breathe and drift, over a faint far starfield,
+  // with the camera parallaxing to the cursor. If Three.js can't load, the
+  // blurred-cover background stays and nothing breaks.
   let gl = null, glRaf = 0, glAccent = '', glBusy = false;
   const loadThree = () => new Promise((res) => {
     if (window.THREE) return res(true);
@@ -4885,42 +4886,66 @@ function setupAmbientMode() {
     if (!gl) return; const acc = accentColor(); if (acc === glAccent) return; glAccent = acc;
     const T = gl.T; let col; try { col = new T.Color(acc); } catch (e) { return; }
     const hsl = {}; col.getHSL(hsl);
-    gl.mat.color = col.clone().offsetHSL(0, 0, -0.15);
-    gl.wire.material.color = col.clone();
-    gl.l1.color = col.clone();
-    gl.l2.color = new T.Color().setHSL((hsl.h + 0.5) % 1, 0.7, 0.55);
+    gl.cloudMat.color = col.clone();
+    gl.coreMat.color = new T.Color().setHSL(hsl.h, Math.min(1, hsl.s + 0.1), Math.min(0.85, hsl.l + 0.35));
+    gl.starMat.color = new T.Color().setHSL(hsl.h, 0.4, 0.7);
   };
   const buildGL = () => {
     const T = window.THREE, cv = np.querySelector('#hoq-np-gl');
     const renderer = new T.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(np.clientWidth, np.clientHeight);
     const scene = new T.Scene();
-    const camera = new T.PerspectiveCamera(55, np.clientWidth / np.clientHeight, 0.1, 100); camera.position.z = 4.4;
-    const geo = new T.IcosahedronGeometry(1.5, 1);
-    const mat = new T.MeshStandardMaterial({ metalness: 0.9, roughness: 0.25, flatShading: true });
-    const mesh = new T.Mesh(geo, mat); scene.add(mesh);
-    const wire = new T.LineSegments(new T.WireframeGeometry(geo), new T.LineBasicMaterial({ transparent: true, opacity: 0.4 }));
-    mesh.add(wire);
-    scene.add(new T.AmbientLight(0x404060, 1.1));
-    const l1 = new T.PointLight(0xffffff, 2.6, 60); l1.position.set(5, 4, 5); scene.add(l1);
-    const l2 = new T.PointLight(0xffffff, 1.8, 60); l2.position.set(-5, -3, 3); scene.add(l2);
-    const l3 = new T.PointLight(0xffffff, 1.0, 60); l3.position.set(0, 5, -4); scene.add(l3);
-    const N = 800, pos = new Float32Array(N * 3); for (let i = 0; i < N * 3; i++) pos[i] = (Math.random() - 0.5) * 42;
-    const sg = new T.BufferGeometry(); sg.setAttribute('position', new T.BufferAttribute(pos, 3));
-    const stars = new T.Points(sg, new T.PointsMaterial({ color: 0x9fb0ff, size: 0.06, transparent: true, opacity: 0.6 })); scene.add(stars);
-    gl = { renderer, scene, camera, mesh, mat, wire, l1, l2, stars, clock: new T.Clock(), T };
+    const camera = new T.PerspectiveCamera(55, np.clientWidth / np.clientHeight, 0.1, 100); camera.position.z = 4.6;
+    // soft round glowing dot texture so particles read as a nebula, not squares
+    const dc = document.createElement('canvas'); dc.width = dc.height = 64;
+    const dx = dc.getContext('2d'); const rg = dx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.35, 'rgba(255,255,255,0.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    dx.fillStyle = rg; dx.fillRect(0, 0, 64, 64);
+    const dot = new T.CanvasTexture(dc);
+    // nebula: N particles in a soft flattened cloud; keep base positions to flow from
+    const N = 3600, pos = new Float32Array(N * 3), base = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const r = Math.pow(Math.random(), 0.55) * 2.9;
+      const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+      const x = r * Math.sin(ph) * Math.cos(th), y = r * Math.sin(ph) * Math.sin(th) * 0.62, z = r * Math.cos(ph);
+      pos[i*3] = base[i*3] = x; pos[i*3+1] = base[i*3+1] = y; pos[i*3+2] = base[i*3+2] = z;
+    }
+    const cg = new T.BufferGeometry(); cg.setAttribute('position', new T.BufferAttribute(pos, 3));
+    const cloudMat = new T.PointsMaterial({ size: 0.13, map: dot, transparent: true, opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false });
+    const cloud = new T.Points(cg, cloudMat); scene.add(cloud);
+    // a small bright core for a glowing centre
+    const coreMat = new T.PointsMaterial({ size: 0.3, map: dot, transparent: true, opacity: 0.8, blending: T.AdditiveBlending, depthWrite: false });
+    const coreN = 300, cpos = new Float32Array(coreN * 3);
+    for (let i = 0; i < coreN * 3; i++) cpos[i] = (Math.random() - 0.5) * 1.1;
+    const coreG = new T.BufferGeometry(); coreG.setAttribute('position', new T.BufferAttribute(cpos, 3));
+    const core = new T.Points(coreG, coreMat); scene.add(core);
+    // faint far starfield for depth
+    const sN = 600, spos = new Float32Array(sN * 3); for (let i = 0; i < sN * 3; i++) spos[i] = (Math.random() - 0.5) * 44;
+    const sg = new T.BufferGeometry(); sg.setAttribute('position', new T.BufferAttribute(spos, 3));
+    const starMat = new T.PointsMaterial({ size: 0.12, map: dot, transparent: true, opacity: 0.5, blending: T.AdditiveBlending, depthWrite: false });
+    const stars = new T.Points(sg, starMat); scene.add(stars);
+    gl = { renderer, scene, camera, cloud, cloudMat, core, coreMat, base, stars, starMat, clock: new T.Clock(), T };
     recolorGL();
     addEventListener('resize', () => { if (!gl) return; gl.camera.aspect = np.clientWidth / np.clientHeight; gl.camera.updateProjectionMatrix(); gl.renderer.setSize(np.clientWidth, np.clientHeight); });
   };
   const glFrame = () => {
     if (!gl) return; const t = gl.clock.getElapsedTime();
-    gl.mesh.rotation.y = t * 0.22; gl.mesh.rotation.x = t * 0.11;
-    gl.mesh.scale.setScalar(1 + Math.sin(t * 1.1) * 0.04);
-    gl.mesh.position.x = Math.sin(t * 0.3) * 0.6;
-    gl.camera.position.x += (tpx * 0.8 - gl.camera.position.x) * 0.05;
-    gl.camera.position.y += (-tpy * 0.8 - gl.camera.position.y) * 0.05;
+    // flow: displace each particle from its base along a smooth drifting field
+    const p = gl.cloud.geometry.attributes.position.array, b = gl.base, n = b.length / 3;
+    for (let i = 0; i < n; i++) {
+      const bx = b[i*3], by = b[i*3+1], bz = b[i*3+2];
+      p[i*3]   = bx + Math.sin(t * 0.5 + by * 1.5) * 0.16;
+      p[i*3+1] = by + Math.cos(t * 0.4 + bx * 1.5) * 0.16;
+      p[i*3+2] = bz + Math.sin(t * 0.45 + bx * 1.2 + by * 0.8) * 0.16;
+    }
+    gl.cloud.geometry.attributes.position.needsUpdate = true;
+    gl.cloud.rotation.y = t * 0.05;
+    gl.core.rotation.y = -t * 0.15;
+    gl.core.scale.setScalar(1 + Math.sin(t * 1.4) * 0.12);
+    gl.camera.position.x += (tpx * 0.9 - gl.camera.position.x) * 0.05;
+    gl.camera.position.y += (-tpy * 0.9 - gl.camera.position.y) * 0.05;
     gl.camera.lookAt(0, 0, 0);
-    gl.stars.rotation.y = t * 0.02;
+    gl.stars.rotation.y = t * 0.015;
     gl.renderer.render(gl.scene, gl.camera);
   };
   const ensureGL = async () => {
