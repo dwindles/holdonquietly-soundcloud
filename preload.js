@@ -1026,32 +1026,21 @@ const BASE_CSS = `
   }
   .userInfoBar__buttons .sc-button svg { fill: currentColor !important; }
 
-  /* ===== Profile hero — stock banner, full-bleed edge to edge =====
-     No fade/mask, no avatar or name restyling: the banner shows as SoundCloud
-     draws it. The one change is width — break the hero out of the container's
-     side padding so the cover spans the whole window, edge to edge, then push
-     the avatar/name/buttons back to the normal content inset so only the banner
-     goes full width. */
-  .l-user-hero {
-    margin-left: calc(50% - 50vw) !important;
-    margin-right: calc(50% - 50vw) !important;
-    width: 100vw !important; max-width: 100vw !important;
-    padding-left: 0 !important; padding-right: 0 !important;
-  }
-  .l-user-hero .profileHeader__info,
-  .l-user-hero .profileHeader__edit {
-    padding-left: calc(50vw - 50% + 16px) !important;
-    padding-right: calc(50vw - 50% + 16px) !important;
-  }
-  /* Cover the full width — the visual defaults to auto 100%, leaving a grey gap
-     on the right once the hero is full-bleed. */
-  .l-user-hero .profileHeaderBackground__visual { background-size: cover !important; background-position: center !important; }
-  /* Fade the bottom of the banner out so it dissolves into the content/mica
-     instead of ending on a hard line. */
-  .l-user-hero .profileHeaderBackground {
+  /* ===== Profile hero — bottom fade =====
+     Full-bleed (width:100vw + negative margins) was destabilising some profiles:
+     on open, their content column collapsed to 0 height (a SoundCloud layout
+     timing bug the extra reflow tipped over). So keep the banner at its normal
+     width and only fade its bottom. Everything is scoped to .m-visualLoaded so
+     profiles with no banner — and the brief pre-load state — are left untouched. */
+  .l-user-hero .profileHeaderBackground.m-visualLoaded {
     background-color: transparent !important;
     -webkit-mask-image: linear-gradient(180deg,#000 0%,#000 68%,transparent 100%) !important;
     mask-image: linear-gradient(180deg,#000 0%,#000 68%,transparent 100%) !important;
+  }
+  /* Cover the width — the visual defaults to auto 100%, leaving a small grey gap
+     on the right otherwise. */
+  .l-user-hero .profileHeaderBackground.m-visualLoaded .profileHeaderBackground__visual {
+    background-size: cover !important; background-position: center !important;
   }
 
   /* ===== Profile tabs (All / Popular tracks / Tracks / …) — accent active + hover glow ===== */
