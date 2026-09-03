@@ -1026,6 +1026,33 @@ const BASE_CSS = `
   }
   .userInfoBar__buttons .sc-button svg { fill: currentColor !important; }
 
+  /* ===== Profile hero — melt the banner into the mica background =====
+     The banner (.profileHeaderBackground__visual) is a hard-edged rectangle
+     of the user's chosen visual. Mask its bottom + side edges to transparent
+     so the blurred cover-bg (#sc-bg) shows through and it reads as part of the
+     page, not a pasted-on strip. The name/location get a soft shadow so they
+     stay crisp over the now-faded art. */
+  .l-user-hero .profileHeaderBackground__visual {
+    -webkit-mask-image:
+      linear-gradient(180deg,#000 0%,#000 40%,rgba(0,0,0,.5) 74%,transparent 100%),
+      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(180deg,#000 0%,#000 40%,rgba(0,0,0,.5) 74%,transparent 100%),
+      linear-gradient(90deg,transparent 0%,#000 10%,#000 90%,transparent 100%);
+    mask-composite: intersect;
+    opacity: .9 !important;
+  }
+  .l-user-hero .profileHeaderBackground::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background: linear-gradient(180deg, rgba(10,10,12,0) 42%, rgba(10,10,12,.5) 100%);
+  }
+  .l-user-hero .profileHeaderInfo { position: relative; z-index: 2; }
+  .l-user-hero .profileHeaderInfo__userName,
+  .l-user-hero .profileHeaderInfo__additional {
+    text-shadow: 0 1px 14px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  }
+
   /* ===== Profile tabs (All / Popular tracks / Tracks / …) — accent active + hover glow ===== */
   .profileTabs.g-tabs .g-tabs-link {
     color: #b7b7ba !important; border: 0 !important; box-shadow: none !important;
@@ -4435,7 +4462,8 @@ function removeClutter() {
   // e.g. the profile header lives in an .l-container).
   const STRUCT_SEL =
     '.l-container, .l-content, #content, main, .header, .l-fixed-top, ' +
-    '.l-listen-wrapper, .l-about, .l-user, .userInfoBar, [class*="profileHead" i]';
+    '.l-listen-wrapper, .l-about, .l-user, .userInfoBar, ' +
+    '.l-user-hero, .profileHeader, .profileHeaderBackground, .profileHeaderInfo';
   const isStruct = (el) => !!(el && el.matches && el.matches(STRUCT_SEL));
   // Hide + tag so diagnostics can tell OUR hides from SoundCloud's own.
   const kill = (el) => {
