@@ -1054,6 +1054,14 @@ const BASE_CSS = `
   .l-user-hero .profileHeaderInfo__additional {
     text-shadow: 0 1px 14px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
   }
+  /* Avatar: now that the banner is soft, the flat 8px sticker clashed. Round it
+     to the theme's panel radius, drop a soft shadow so it seats into the scene,
+     and add a faint frosted ring instead of the hard light outline. */
+  .l-user-hero .profileHeaderInfo__avatar .image,
+  .l-user-hero .profileHeaderInfo__avatar .sc-artwork { border-radius: 16px !important; }
+  .l-user-hero .profileHeaderInfo__avatar .image {
+    box-shadow: 0 12px 36px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.10) !important;
+  }
 
   /* ===== Profile tabs (All / Popular tracks / Tracks / …) — accent active + hover glow ===== */
   .profileTabs.g-tabs .g-tabs-link {
