@@ -653,6 +653,61 @@ const BASE_CSS = `
      (opacity, NOT display:none) and behind the overlay so the ambient seek can
      still read the real timeline's geometry to scrub. */
   html.hoq-np-open .playControls { opacity: 0 !important; pointer-events: none !important; z-index: 1 !important; }
+  /* ===== "Next up" queue panel =====
+     The queue's buttons (play/like/more/Clear) read as DEAD — clicks fell right
+     through. Root cause: .playControls / .playControls__inner carry
+     overflow-x:clip (to hide the bar's h-scroll), which clips the queue's
+     HIT-TEST region down to the 49px bar. The panel still PAINTS above the bar
+     (it's a composited transform layer), so it looked fine but nothing above the
+     bar's height was clickable. While the queue is open, un-clip the bar so the
+     panel is hit-testable, lift it above the page, and drop the overlapping
+     right sidebar out of hit-testing for good measure. Plus give the flat black
+     panel the app's frosted-glass look (it had none). */
+  html.hoq-queue-open .playControls,
+  html.hoq-queue-open .playControls__inner,
+  html:has(.queue.m-visible) .playControls,
+  html:has(.queue.m-visible) .playControls__inner { overflow: visible !important; }
+  html.hoq-queue-open .playControls,
+  html:has(.queue.m-visible) .playControls { z-index: 100000 !important; }
+  html.hoq-queue-open .l-sidebar-right,
+  html:has(.queue.m-visible) .l-sidebar-right { pointer-events: none !important; }
+  /* our liquid-glass panel look: diagonal shimmer sweep + fine fractal-noise
+     grain over the translucent dark base, real backdrop blur behind it, and the
+     lit top/left inset edges. Base kept ~0.82/0.86 (a touch over the 0.78/0.82
+     used on transparent surfaces) since this floats over page content. */
+  .playControls__queue {
+    background:
+      linear-gradient(115deg, transparent 20%, rgba(255,255,255,0.09) 44%, rgba(255,255,255,0.04) 52%, transparent 68%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E"),
+      linear-gradient(145deg, rgba(38,38,48,0.82) 0%, rgba(22,22,30,0.86) 100%) !important;
+    background-size: 400% 100%, 180px 180px, 100% 100% !important;
+    animation: glassFlow 35s ease-in-out infinite !important;
+    border-left: 1px solid rgba(255,255,255,0.35) !important;
+    border-top-left-radius: 20px !important; border-bottom-left-radius: 20px !important;
+    box-shadow: -20px 0 64px rgba(0,0,0,0.55),
+      inset 1px 0 0 rgba(255,255,255,0.4), inset 0 1px 0 rgba(255,255,255,0.28) !important;
+    backdrop-filter: blur(30px) saturate(1.4) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(1.4) !important; }
+  @keyframes glassFlow {
+    0%, 100% { background-position: -200% 0, 0px 0px, 0 0; }
+    50%      { background-position: 250% 0, 40px 40px, 0 0; }
+  }
+  html.hoq-no-anim .playControls__queue { animation: none !important; }
+  /* theme the panel chrome to the accent so it matches the rest of the app */
+  .playControls__queue .queue__title { color: #fff !important; }
+  .playControls__queue .queueItemView.m-playing .queueItemView__title a,
+  .playControls__queue .queueItemView.m-active .queueItemView__title a { color: var(--sc-accent, #ff5500) !important; }
+  .playControls__queue .queue__clear:hover { color: var(--sc-accent, #ff5500) !important; }
+  .playControls__queue .queue,
+  .playControls__queue .queue__panel,
+  .playControls__queue .queue__scrollable,
+  .playControls__queue .queue__scrollableInner,
+  .playControls__queue .queue__itemsHeight,
+  .playControls__queue .queueFallback { background: transparent !important; }
+  .playControls__queue .queueItemView { border-radius: 10px !important; }
+  html.hoq-no-frost .playControls__queue {
+    background: rgba(14,14,18,0.97) !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
   #hoq-np .np-bg { position: absolute; inset: -10%; background-size: cover; background-position: center;
     filter: blur(72px) saturate(1.7) brightness(.72); transform: scale(1.15); }
   #hoq-np .np-scrim { position: absolute; inset: 0;
@@ -5361,8 +5416,25 @@ function boot() {
       removeClutter();
     }, performance.now() < 5000 ? 150 : 800);
   };
-  const obs = new MutationObserver(schedule);
+  // The "Next up" queue is a plain class toggle on SC's side; mirror it onto
+  // <html> so our CSS can lift the player bar above the page while it's open
+  // (the right sidebar otherwise overlaps the queue and steals its clicks).
+  const syncQueueOpen = () => { try { document.documentElement.classList.toggle('hoq-queue-open', !!document.querySelector('.queue.m-visible')); } catch (e) {} };
+  // The queue shows/hides by toggling `m-visible` on the existing .queue node —
+  // an attribute change, which a childList observer misses. Attach a narrow
+  // attribute observer to the queue container once it mounts.
+  let queueAttrObs = null;
+  const watchQueue = () => {
+    const q = document.querySelector('.playControls__queue');
+    if (q && !queueAttrObs) {
+      queueAttrObs = new MutationObserver(syncQueueOpen);
+      queueAttrObs.observe(q, { attributes: true, attributeFilter: ['class'], subtree: true });
+      syncQueueOpen();
+    }
+  };
+  const obs = new MutationObserver(() => { watchQueue(); syncQueueOpen(); schedule(); });
   obs.observe(document.body, { childList: true, subtree: true });
+  watchQueue(); syncQueueOpen();
   // Cold load shows a burst of SoundCloud orange (follow buttons, badges) before
   // the first debounced pass lands. These few extra early passes close that window
   // without turning into the sustained write stream the debounce exists to avoid.
