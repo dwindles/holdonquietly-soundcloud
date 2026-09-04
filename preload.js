@@ -670,7 +670,7 @@ const BASE_CSS = `
   #hoq-np .np-eyebrow { font-size: 12px; letter-spacing: .22em; font-weight: 700; text-transform: uppercase;
     color: var(--sc-accent, #ff5500); margin: 0 0 14px; opacity: .95; }
   #hoq-np .np-title { font-size: 40px; font-weight: 800; line-height: 1.12; letter-spacing: -.01em;
-    margin: 0 0 10px; max-height: 4.6em; overflow: hidden; }
+    margin: 0 0 10px; }
   #hoq-np .np-artist { font-size: 18px; opacity: .72; margin: 0 0 30px; }
   #hoq-np .np-bar { height: 7px; border-radius: 4px; background: rgba(255,255,255,.16); overflow: hidden; cursor: pointer; }
   #hoq-np .np-bar i { display: block; height: 100%; background: var(--sc-accent, #ff5500); width: 0%;
