@@ -671,28 +671,14 @@ const BASE_CSS = `
   html:has(.queue.m-visible) .playControls { z-index: 100000 !important; }
   html.hoq-queue-open .l-sidebar-right,
   html:has(.queue.m-visible) .l-sidebar-right { pointer-events: none !important; }
-  /* our liquid-glass panel look: diagonal shimmer sweep + fine fractal-noise
-     grain over the translucent dark base, real backdrop blur behind it, and the
-     lit top/left inset edges. Base kept ~0.82/0.86 (a touch over the 0.78/0.82
-     used on transparent surfaces) since this floats over page content. */
+  /* match the app's own dark-frosted panels (header / dropdowns): a translucent
+     dark ground with the same backdrop blur — no shimmer, no glass. */
   .playControls__queue {
-    background:
-      linear-gradient(115deg, transparent 20%, rgba(255,255,255,0.09) 44%, rgba(255,255,255,0.04) 52%, transparent 68%),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E"),
-      linear-gradient(145deg, rgba(38,38,48,0.82) 0%, rgba(22,22,30,0.86) 100%) !important;
-    background-size: 400% 100%, 180px 180px, 100% 100% !important;
-    animation: glassFlow 35s ease-in-out infinite !important;
-    border-left: 1px solid rgba(255,255,255,0.35) !important;
-    border-top-left-radius: 20px !important; border-bottom-left-radius: 20px !important;
-    box-shadow: -20px 0 64px rgba(0,0,0,0.55),
-      inset 1px 0 0 rgba(255,255,255,0.4), inset 0 1px 0 rgba(255,255,255,0.28) !important;
-    backdrop-filter: blur(30px) saturate(1.4) !important;
-    -webkit-backdrop-filter: blur(30px) saturate(1.4) !important; }
-  @keyframes glassFlow {
-    0%, 100% { background-position: -200% 0, 0px 0px, 0 0; }
-    50%      { background-position: 250% 0, 40px 40px, 0 0; }
-  }
-  html.hoq-no-anim .playControls__queue { animation: none !important; }
+    background: rgba(12,12,16,0.5) !important;
+    border-left: 1px solid rgba(255,255,255,0.08) !important;
+    box-shadow: -18px 0 52px rgba(0,0,0,0.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important; }
   /* theme the panel chrome to the accent so it matches the rest of the app */
   .playControls__queue .queue__title { color: #fff !important; }
   .playControls__queue .queueItemView.m-playing .queueItemView__title a,
