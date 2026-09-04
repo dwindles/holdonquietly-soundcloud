@@ -648,17 +648,19 @@ const BASE_CSS = `
   #hoq-np { position: fixed; inset: 0; z-index: 9990; display: none; overflow: hidden;
     color: #fff; background: #0b0b0e; }
   #hoq-np.on { display: flex; align-items: center; justify-content: center; gap: 64px; }
-  /* keep the real player bar visible on top of the full-screen overlay */
-  html.hoq-np-open .playControls { z-index: 9995 !important; }
+  /* ambient mode has its own transport (prev/play/next/like/seek), so the real
+     player bar is redundant while it's open — hide it. Keep it in layout
+     (opacity, NOT display:none) and behind the overlay so the ambient seek can
+     still read the real timeline's geometry to scrub. */
+  html.hoq-np-open .playControls { opacity: 0 !important; pointer-events: none !important; z-index: 1 !important; }
   #hoq-np .np-bg { position: absolute; inset: -10%; background-size: cover; background-position: center;
     filter: blur(72px) saturate(1.7) brightness(.72); transform: scale(1.15); }
   #hoq-np .np-scrim { position: absolute; inset: 0;
     background:
-      /* a soft dark pool behind the text keeps the inverted letters crisp
-         instead of muddy over the busy particles */
-      radial-gradient(46% 58% at 74% 52%, rgba(8,8,11,.7), transparent 72%),
-      radial-gradient(60% 60% at 50% 42%, transparent 30%, rgba(8,8,11,.5) 100%),
-      radial-gradient(45% 50% at 50% 120%, color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent), transparent 70%); }
+      /* even edge vignette for depth (keeps particles from washing out at the
+         borders) + a soft accent bloom rising from the bottom */
+      radial-gradient(125% 105% at 50% 48%, transparent 42%, rgba(8,8,11,.5) 100%),
+      radial-gradient(50% 55% at 50% 120%, color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent), transparent 70%); }
   #hoq-np .np-art { position: relative; width: 380px; height: 380px; border-radius: 20px;
     background-size: cover; background-position: center; background-color: rgba(255,255,255,.04);
     box-shadow: 0 40px 90px rgba(0,0,0,.55),
@@ -708,14 +710,16 @@ const BASE_CSS = `
   html.hoq-np-gl #hoq-np .np-bg { opacity: .16 !important; }
   #hoq-np .np-scrim { z-index: -1; }
   #hoq-np .np-art, #hoq-np .np-side, #hoq-np .np-close { position: relative; }
-  /* Invert the text against whatever's behind it: where the bright nebula passes
-     under the title/artist/times they flip dark, over the dark ground they stay
-     light — always readable, and a cool live effect. isolation keeps the blend
-     inside the overlay so it never touches the page. */
+  /* Text legibility over the busy nebula: solid white with a layered dark halo
+     (a tight shadow for edge contrast + a wide soft one to lift it off bright
+     particles). Reads cleanly on any part of the backdrop — no muddy blend.
+     isolation still keeps our layers self-contained. */
   #hoq-np { isolation: isolate; }
   #hoq-np .np-title, #hoq-np .np-artist, #hoq-np .np-times {
-    mix-blend-mode: difference; color: #fff !important; -webkit-text-fill-color: #fff !important;
-    opacity: 1 !important; text-shadow: none !important; }
+    color: #fff !important; -webkit-text-fill-color: #fff !important; opacity: 1 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.72), 0 4px 26px rgba(0,0,0,.6); }
+  #hoq-np .np-eyebrow { text-shadow: 0 1px 10px rgba(0,0,0,.55); }
+  #hoq-np .np-artist { opacity: .82 !important; }
 
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
