@@ -4870,6 +4870,16 @@ function removeClutter() {
 // 3D tilt: home tiles lean toward the cursor for a "3D site" feel.
 // Event-delegated (tiles load lazily) + only on the home/discover pages.
 // ---------------------------------------------------------------------------
+// Ctrl+Shift+C forwards to the host, which opens the real DevTools and turns on
+// its element inspector (Overlay.setInspectMode) so hover/click selects nodes in
+// the Elements panel. (Ctrl+Shift+E was dropped — it's AMD ReLive's record key.)
+function setupInspectKey() {
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
+      e.preventDefault(); e.stopPropagation(); scPost('inspect');
+    }
+  }, true);
+}
 // The profile-tab bar and the library/collection nav lean toward the cursor
 // with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
 // it survives SoundCloud's re-renders; gated by the "3D tab bars" toggle.
@@ -5492,6 +5502,7 @@ function boot() {
   buildContextMenu();   // custom right-click menu (native one is off)
   setupTilt();          // 3D tilt on home tiles
   setupTabTilt();       // 3D lift on profile/library tab bars
+  setupInspectKey();    // Ctrl+Shift+C -> real DevTools element inspector
   setupWaveInteract();  // waveform bars rise toward the cursor
   setupCoverTilt();     // track cover follows the mouse in 3D
   setupAmbientMode();   // big now-playing view (button in the player bar)
