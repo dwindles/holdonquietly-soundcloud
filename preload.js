@@ -3126,10 +3126,6 @@ function buildTitlebar() {
       #sc-palette .pal-grid .row span {
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
       }
-      /* slightly smaller switches so label + toggle never touch in a cell */
-      #sc-palette .pal-grid input[type=checkbox] { width: 34px; height: 18px; flex: none; }
-      #sc-palette .pal-grid input[type=checkbox]::after { width: 14px; height: 14px; }
-      #sc-palette .pal-grid input[type=checkbox]:checked::after { transform: translateX(16px); }
       #sc-palette input[type=color] {
         width: 34px; height: 24px; border: 1px solid rgba(255,255,255,0.15);
         border-radius: 6px; background: none; cursor: pointer; padding: 0;
@@ -3138,29 +3134,33 @@ function buildTitlebar() {
       #sc-palette input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
       #sc-palette label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
       #sc-palette label { justify-content: space-between; width: 100%; }
-      /* ===== toggle switch: recessed groove when off, lit accent + glow when on,
-         white knob with a springy travel. Matched to the app's accent + frost. ===== */
+      /* ===== toggle: a hollow OUTLINED pill when OFF (dim recessed dot) that snaps
+         to a clean SOLID accent when ON (the dot grows into a bright white knob).
+         No glow bloom — reads crisp against the frosted rows. ===== */
       #sc-palette input[type=checkbox] {
         appearance: none; -webkit-appearance: none; flex: none; cursor: pointer;
-        width: 38px; height: 20px; border-radius: 20px; position: relative; margin: 0;
-        background: rgba(255,255,255,0.10);
-        box-shadow: inset 0 1px 2px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.04);
-        transition: background .2s ease, box-shadow .2s ease;
+        box-sizing: border-box; width: 42px; height: 23px; border-radius: 23px;
+        position: relative; margin: 0; background: rgba(255,255,255,0.04);
+        border: 1.5px solid rgba(255,255,255,0.24);
+        transition: background .2s ease, border-color .2s ease;
       }
-      #sc-palette input[type=checkbox]:hover { background: rgba(255,255,255,0.16); }
+      #sc-palette input[type=checkbox]:hover { border-color: rgba(255,255,255,0.44); background: rgba(255,255,255,0.07); }
       #sc-palette input[type=checkbox]::after {
-        content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-        border-radius: 50%; background: linear-gradient(180deg, #ffffff, #e6e6ee);
-        box-shadow: 0 1px 2px rgba(0,0,0,0.5), 0 0 0 0.5px rgba(0,0,0,0.08);
-        transition: transform .22s cubic-bezier(.34,1.56,.64,1), width .12s ease;
+        content: ''; position: absolute; top: 4px; left: 4px; width: 11px; height: 11px;
+        border-radius: 50%; background: rgba(255,255,255,0.5);
+        transition: transform .26s cubic-bezier(.34,1.55,.64,1),
+          width .16s ease, height .16s ease, top .16s ease, left .16s ease, background .2s ease;
       }
       #sc-palette input[type=checkbox]:checked {
-        background: var(--sc-accent-bg, var(--sc-accent, #ff5500));
-        box-shadow: inset 0 1px 2px rgba(0,0,0,0.22),
-          0 0 10px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent);
+        background: var(--sc-accent, #ff5500);
+        border-color: var(--sc-accent, #ff5500);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent);
       }
-      #sc-palette input[type=checkbox]:checked::after { transform: translateX(18px); }
-      #sc-palette input[type=checkbox]:active::after { width: 18px; }
+      #sc-palette input[type=checkbox]:checked::after {
+        width: 16px; height: 16px; top: 2px; left: 2px; background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        transform: translateX(19px);
+      }
       #sc-palette input[type=checkbox]:focus-visible {
         outline: 2px solid color-mix(in srgb, var(--sc-accent, #ff5500) 70%, transparent); outline-offset: 2px;
       }
