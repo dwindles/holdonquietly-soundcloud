@@ -1340,7 +1340,13 @@ const BASE_CSS = `
      that hid our frosted glass — make it (and its list wrapper) see-through so the
      .dropdownMenu acrylic shows. */
   .dropdownMenu .searchAutocomplete, .dropdownMenu .lazyLoadingList,
-  .dropdownMenu .combox-box-content, .dropdownMenu .searchMenu__searchFor { background: transparent !important; }
+  .dropdownMenu .lazyLoadingList__list,
+  .dropdownMenu .combox-box-content, .dropdownMenu .searchMenu__searchFor {
+    background: transparent !important;
+    /* SC draws rgb(48,48,48) grey top/bottom borders + a box-shadow on these —
+       those are the stray grey outlines. Remove them for a clean frosted panel. */
+    border: 0 !important; box-shadow: none !important;
+  }
   /* the auto-highlighted first row -> accent wash instead of SC's solid grey */
   .dropdownMenu .searchMenu__searchFor:hover,
   .dropdownMenu .searchMenu__searchFor.m-active,
