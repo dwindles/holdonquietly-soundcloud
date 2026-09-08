@@ -1081,6 +1081,53 @@ const BASE_CSS = `
   .l-collection:has(.collectionNav) .l-main {
     flex: 1 1 auto !important; min-width: 0 !important; margin: 0 !important;
   }
+  /* ===== 3D lift on tab bars (profile tabs + library/collection nav) =====
+     JS tilts the hovered tab toward the cursor; CSS gives it a lit accent lift.
+     Gated by the "3D tab bars" toggle (html.hoq-no-tabtilt) and Low-end mode. */
+  .userInfoBar__tabs .profileTabs, .l-nav .collectionNav.g-tabs { perspective: 900px; }
+  .userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link {
+    transform-style: preserve-3d;
+    transition: transform .16s cubic-bezier(.2,.7,.2,1), background .14s ease, color .14s ease, box-shadow .18s ease !important; }
+  .userInfoBar__tabs .g-tabs-link.hoq-tt, .l-nav .collectionNav.g-tabs .g-tabs-link.hoq-tt {
+    position: relative; z-index: 3;
+    box-shadow: 0 14px 30px rgba(0,0,0,.5),
+      0 0 22px color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent) !important; }
+  html.hoq-no-tabtilt .userInfoBar__tabs .g-tabs-link,
+  html.hoq-no-tabtilt .l-nav .collectionNav.g-tabs .g-tabs-link { transform: none !important; }
+
+  /* ===== Profile dropbar (sticky mini-header on scroll) → themed frost ===== */
+  .dropbar.m-active, .dropbar__content {
+    background: rgba(12,12,16,0.6) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.45) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important; }
+  .userDropbar { border-bottom: 0 !important; }
+  .userDropbar__title { color: #fff !important; letter-spacing: -.01em !important; }
+  .userDropbar .sc-media-image .image {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent) !important; }
+  html.hoq-no-frost .dropbar.m-active, html.hoq-no-frost .dropbar__content {
+    background: rgba(14,14,18,0.97) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+  /* ===== Low-end mode: strip GPU/CPU-heavy work ===== */
+  html.hoq-lowend *, html.hoq-lowend *::before, html.hoq-lowend *::after {
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    animation: none !important; }
+  html.hoq-lowend #hoq-np .np-bg { filter: brightness(.55) !important; }
+  html.hoq-lowend #hoq-np .np-scrim, html.hoq-lowend #hoq-ambient { display: none !important; }
+  html.hoq-lowend .playControls__queue, html.hoq-lowend .collectionNav.g-tabs,
+  html.hoq-lowend .dropbar.m-active, html.hoq-lowend .dropbar__content,
+  html.hoq-lowend #sc-palette, html.hoq-lowend .dropdownMenu, html.hoq-lowend .linkMenu {
+    background: rgba(16,16,20,0.98) !important; }
+
+  /* toggle: scroll long titles (marquee) */
+  html.hoq-no-mq .hoq-mq { animation: none !important; transform: none !important; }
+  /* toggle: profile banner bottom fade */
+  html.hoq-no-herofade .l-user-hero .profileHeaderBackground.m-visualLoaded {
+    -webkit-mask-image: none !important; mask-image: none !important; }
+  /* settings note line */
+  #sc-palette .pal-note { font-size: 11px; color: #8a8a90; line-height: 1.35; margin: 2px 2px 6px; }
+
   .collectionNav.g-tabs {
     display: flex !important; flex-direction: column !important;
     align-items: stretch !important; gap: 3px !important;
@@ -2510,7 +2557,14 @@ function updateWaveProgress() {
 // Optional visual effects, toggled from the palette. Default ON (return true
 // unless explicitly saved '0'). Effects: 'viz' (song bar), 'tilt' (3D tilt),
 // 'wave' (interactive waveform).
-function effectOn(name) { return localStorage.getItem('scFx_' + name) !== '0'; }
+function lowEndOn() { try { return localStorage.getItem('scFx_lowend') === '1'; } catch (e) { return false; } }
+// Under Low-end mode the GPU/CPU-heavy effects are forced off regardless of their
+// own switch (backdrop blur + the WebGL nebula are the big RAM/GPU spenders).
+const HOQ_HEAVY = ['viz', 'wave', 'tilt', 'pulse', 'anim', 'frost', 'tabtilt'];
+function effectOn(name) {
+  if (lowEndOn() && HOQ_HEAVY.indexOf(name) !== -1) return false;
+  return localStorage.getItem('scFx_' + name) !== '0';
+}
 function applyVizState() {
   const on = effectOn('viz');
   window.__hoqVizOn = on;
@@ -2518,8 +2572,8 @@ function applyVizState() {
 }
 // CSS-gated optional effects. Default-ON ones: OFF adds html.hoq-no-<name> to
 // revert. Opt-in ones (default OFF): ON adds html.hoq-<name> to apply.
-const HOQ_CSS_FX = ['pulse', 'round', 'hover', 'anim', 'frost', 'glow'];
-const HOQ_OPTIN_FX = ['gray', 'ambient'];
+const HOQ_CSS_FX = ['pulse', 'round', 'hover', 'anim', 'frost', 'glow', 'mq', 'herofade', 'tabtilt'];
+const HOQ_OPTIN_FX = ['gray', 'ambient', 'lowend'];
 function applyFxClasses() {
   HOQ_CSS_FX.forEach((n) => document.documentElement.classList.toggle('hoq-no-' + n, !effectOn(n)));
   HOQ_OPTIN_FX.forEach((n) => document.documentElement.classList.toggle('hoq-' + n, localStorage.getItem('scFx_' + n) === '1'));
@@ -3184,8 +3238,10 @@ function buildTitlebar() {
       <label class="row"><span>Visualizer</span><input type="checkbox" id="sc-fx-viz"></label>
       <label class="row"><span>Interactive wave</span><input type="checkbox" id="sc-fx-wave"></label>
       <label class="row"><span>3D tilt</span><input type="checkbox" id="sc-fx-tilt"></label>
+      <label class="row"><span>3D tab bars</span><input type="checkbox" id="sc-fx-tabtilt"></label>
       <label class="row"><span>Speaker pulse</span><input type="checkbox" id="sc-fx-pulse"></label>
       <label class="row"><span>Animations</span><input type="checkbox" id="sc-fx-anim"></label>
+      <label class="row"><span>Scroll long titles</span><input type="checkbox" id="sc-fx-mq"></label>
     </div>
 
     <div class="section-label">Look</div>
@@ -3195,8 +3251,13 @@ function buildTitlebar() {
       <label class="row"><span>Row hover</span><input type="checkbox" id="sc-fx-hover"></label>
       <label class="row"><span>Frosted bars</span><input type="checkbox" id="sc-fx-frost"></label>
       <label class="row"><span>Grayscale covers</span><input type="checkbox" id="sc-fx-gray"></label>
+      <label class="row"><span>Banner fade</span><input type="checkbox" id="sc-fx-herofade"></label>
       <label class="row"><span>Room glow</span><input type="checkbox" id="sc-fx-ambient"></label>
     </div>
+
+    <div class="section-label">Performance</div>
+    <label class="row"><span>Low-end mode</span><input type="checkbox" id="sc-fx-lowend"></label>
+    <div class="pal-note">Turns off the WebGL nebula, frosted blur, the visualizer and animations to cut GPU/RAM use.</div>
 
     <div class="section-label">Display</div>
     <div class="row"><span>Song list zoom</span><span class="zoomctl">
@@ -3298,14 +3359,16 @@ function buildTitlebar() {
   [['viz', 'sc-fx-viz'], ['tilt', 'sc-fx-tilt'], ['wave', 'sc-fx-wave'],
    ['pulse', 'sc-fx-pulse'], ['round', 'sc-fx-round'], ['hover', 'sc-fx-hover'],
    ['anim', 'sc-fx-anim'], ['frost', 'sc-fx-frost'], ['glow', 'sc-fx-glow'],
-   ['gray', 'sc-fx-gray'], ['ambient', 'sc-fx-ambient']].forEach(([name, id]) => {
+   ['mq', 'sc-fx-mq'], ['herofade', 'sc-fx-herofade'], ['tabtilt', 'sc-fx-tabtilt'],
+   ['gray', 'sc-fx-gray'], ['ambient', 'sc-fx-ambient'], ['lowend', 'sc-fx-lowend']].forEach(([name, id]) => {
     const cb = panel.querySelector('#' + id);
     if (!cb) return;
     // opt-in effects default OFF; everything else defaults ON.
     cb.checked = HOQ_OPTIN_FX.includes(name) ? (localStorage.getItem('scFx_' + name) === '1') : effectOn(name);
     cb.addEventListener('change', () => {
       localStorage.setItem('scFx_' + name, cb.checked ? '1' : '0');
-      if (name === 'viz') applyVizState();
+      // Low-end mode flips the heavy effects, so re-sync everything that reads them.
+      if (name === 'viz' || name === 'lowend') applyVizState();
       if (name === 'wave' && !cb.checked) document.querySelectorAll('.hoq-wave .bars i').forEach((b) => b.style.transform = '');
       applyFxClasses();
     });
@@ -4790,6 +4853,31 @@ function removeClutter() {
 // 3D tilt: home tiles lean toward the cursor for a "3D site" feel.
 // Event-delegated (tiles load lazily) + only on the home/discover pages.
 // ---------------------------------------------------------------------------
+// The profile-tab bar and the library/collection nav lean toward the cursor
+// with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
+// it survives SoundCloud's re-renders; gated by the "3D tab bars" toggle.
+function setupTabTilt() {
+  const SEL = '.userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link';
+  const MAX_Y = 12, MAX_X = 7, LIFT = 12;
+  let cur = null, px = 0, py = 0, raf = 0;
+  const reset = (t) => { if (!t) return; t.style.transform = ''; t.style.transition = 'transform .3s ease'; t.classList.remove('hoq-tt'); };
+  const apply = () => {
+    raf = 0; if (!cur) return;
+    cur.style.transform = 'perspective(700px) rotateX(' + (-py * MAX_X).toFixed(2) + 'deg) rotateY(' +
+      (px * MAX_Y).toFixed(2) + 'deg) translateZ(' + LIFT + 'px)';
+  };
+  document.addEventListener('mousemove', (e) => {
+    if (!effectOn('tabtilt')) { if (cur) { reset(cur); cur = null; } return; }
+    const t = e.target.closest && e.target.closest(SEL);
+    if (t !== cur) { reset(cur); cur = t; if (cur) { cur.classList.add('hoq-tt'); cur.style.transition = 'transform .05s linear'; } }
+    if (!cur) return;
+    const r = cur.getBoundingClientRect(); if (!r.width) return;
+    px = (e.clientX - r.left) / r.width - 0.5;
+    py = (e.clientY - r.top) / r.height - 0.5;
+    if (!raf) raf = requestAnimationFrame(apply);
+  }, { passive: true });
+  document.addEventListener('mouseleave', () => { if (cur) { reset(cur); cur = null; } if (raf) { cancelAnimationFrame(raf); raf = 0; } }, true);
+}
 function setupTilt() {
   const SEL = '.playableTile, .audibleTile, .homeShortcutsModule__item, .mixedSelectionModule__item';
   const MAX_Y = 20; // strong left/right lean (very visible, doesn't overflow the top)
@@ -5051,7 +5139,9 @@ function setupAmbientMode() {
     gl.renderer.render(gl.scene, gl.camera);
   };
   const ensureGL = async () => {
-    if (gl || glBusy) return; glBusy = true;
+    if (gl || glBusy) return;
+    if (typeof lowEndOn === 'function' && lowEndOn()) return; // no WebGL nebula on low-end
+    glBusy = true;
     const ok = await loadThree();
     if (ok) { try {
       buildGL(); document.documentElement.classList.add('hoq-np-gl');
@@ -5384,6 +5474,7 @@ function boot() {
   ensureAdBadge(); // the page-world __scAdKiller toggles this
   buildContextMenu();   // custom right-click menu (native one is off)
   setupTilt();          // 3D tilt on home tiles
+  setupTabTilt();       // 3D lift on profile/library tab bars
   setupWaveInteract();  // waveform bars rise toward the cursor
   setupCoverTilt();     // track cover follows the mouse in 3D
   setupAmbientMode();   // big now-playing view (button in the player bar)
