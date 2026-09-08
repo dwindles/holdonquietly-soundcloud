@@ -1334,10 +1334,53 @@ const BASE_CSS = `
     backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
   }
-  #searchMenuList, #searchMenuList li, .autosuggests li { background: transparent !important; }
-  #searchMenuList li a, #searchMenuList li { color: #d4d4d7 !important; }
-  #searchMenuList li:hover, #searchMenuList li.selected, #searchMenuList li[aria-selected="true"] {
+  #searchMenuList, #searchMenuList li, #searchMenuList ul,
+  #searchMenuList .lazyLoadingList__list, .autosuggests li,
+  /* the newer combobox wraps the list in a SOLID rgb(18,18,18) .searchAutocomplete
+     that hid our frosted glass — make it (and its list wrapper) see-through so the
+     .dropdownMenu acrylic shows. */
+  .dropdownMenu .searchAutocomplete, .dropdownMenu .lazyLoadingList,
+  .dropdownMenu .combox-box-content, .dropdownMenu .searchMenu__searchFor { background: transparent !important; }
+  /* the auto-highlighted first row -> accent wash instead of SC's solid grey */
+  .dropdownMenu .searchMenu__searchFor:hover,
+  .dropdownMenu .searchMenu__searchFor.m-active,
+  .dropdownMenu [aria-selected="true"] .searchMenu__searchFor {
     background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent) !important;
+    border-radius: 8px !important;
+  }
+  /* SoundCloud's newer "combobox" search list paints its rows with sc-link-primary
+     (the RAW accent) on inner spans — unreadable when the accent is a dark colour.
+     Force light, readable text across the whole list; reserve the accent for the
+     row hover. Covers the "Search for …" item, query suggestions and user rows. */
+  #searchMenuList a, #searchMenuList a *, #searchMenuList li, #searchMenuList span,
+  #searchMenuList .sc-link-primary, #searchMenuList .searchMenu__searchForText {
+    color: #e7e7ed !important; -webkit-text-fill-color: #e7e7ed !important;
+  }
+  #searchMenuList .searchMenu__searchForText,
+  #searchMenuList .searchMenu__searchForText * {
+    color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; font-weight: 600 !important;
+  }
+  #searchMenuList .sc-link-secondary, #searchMenuList .sc-link-light,
+  #searchMenuList .sc-link-secondary * {
+    color: #a6a6ac !important; -webkit-text-fill-color: #a6a6ac !important;
+  }
+  #searchMenuList li:hover, #searchMenuList li.selected, #searchMenuList li[aria-selected="true"],
+  #searchMenuList [role="option"]:hover, #searchMenuList .sc-media:hover {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent) !important;
+    border-radius: 8px !important;
+  }
+  /* the keyboard/hover selection is a DIV.autocompleteItem.selected which SC fills
+     solid grey (rgb(48,48,48)) — that's the grey box left behind on mouse-off.
+     Default it transparent and highlight the selected/hovered one in the accent. */
+  #searchMenuList .autocompleteItem { background: transparent !important; border-radius: 8px !important; }
+  #searchMenuList .autocompleteItem:hover, #searchMenuList .autocompleteItem.selected,
+  #searchMenuList .autocompleteItem.m-active {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent) !important;
+  }
+  /* keep the accent glow on the search box's own icon/border, not the text */
+  #searchMenuList mark, #searchMenuList .g-highlight {
+    color: var(--sc-accent, #ff5500) !important; -webkit-text-fill-color: var(--sc-accent, #ff5500) !important;
+    background: transparent !important; font-weight: 700 !important;
   }
 
   /* ===== GO+ tier badge on covers → more visible / legible ===== */
