@@ -3885,8 +3885,10 @@ function ensureDiscordPanel() {
         color: #fff; border-bottom-color: var(--sc-accent, #ff5500);
       }
       /* One pane at a time; sections are tagged in ensureDiscordPanel(). */
-      #hoq-discord[data-pane="social"] .hoq-pane-set { display: none !important; }
+      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-set,
+      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-feed { display: none !important; }
       #hoq-discord[data-pane="settings"] .hoq-dc-sec:not(.hoq-pane-set) { display: none !important; }
+      #hoq-discord[data-pane="feed"] .hoq-dc-sec:not(.hoq-pane-feed) { display: none !important; }
       #hoq-discord .hoq-acct-new:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 22%, rgba(12,12,14,0.6)); }
     </style>
     <div class="hoq-dc-card">
@@ -3897,6 +3899,7 @@ function ensureDiscordPanel() {
       </div>
       <div class="hoq-sub">
         <button class="hoq-subtab hoq-on" data-pane="social">Social</button>
+        <button class="hoq-subtab" data-pane="feed">Feed</button>
         <button class="hoq-subtab" data-pane="settings">Settings</button>
       </div>
       <div class="hoq-dc-body">
@@ -4007,6 +4010,7 @@ function ensureDiscordPanel() {
     const lab = sec.querySelector('.hoq-dc-label');
     const t = lab ? lab.textContent.trim().toLowerCase() : '';
     if (SET_SECS.indexOf(t) !== -1) sec.classList.add('hoq-pane-set');
+    else if (sec.classList.contains('hoq-feed-sec')) sec.classList.add('hoq-pane-feed');
   });
   // The palette is the point of the Settings pane, so lead with it.
   const setSecs = [...p.querySelectorAll('.hoq-dc-sec.hoq-pane-set')];
@@ -4019,6 +4023,9 @@ function ensureDiscordPanel() {
     const dup = palSec.querySelector('.hoq-dc-label');
     if (dup) dup.remove();
   }
+  // Same for the Feed pane — the sub-tab already says "Feed".
+  const feedSec = p.querySelector('.hoq-dc-sec.hoq-pane-feed');
+  if (feedSec) { const dl = feedSec.querySelector('.hoq-dc-label'); if (dl) dl.remove(); }
   p.dataset.pane = 'social';
   p.querySelectorAll('.hoq-subtab').forEach((b) => {
     b.addEventListener('click', () => {
