@@ -48,4 +48,33 @@ is built yet except where noted; this is a menu to pick from.
 - Ambient glow intensity slider (currently one fixed level).
 - Ambient "source" option: accent-only vs sampled-from-cover palette (2–3 colors).
 - Let the visualizer react to real audio (Web Audio analyser) instead of the seek
-  bar, when playing your own/allowed streams.
+  bar, when playing your own/allowed streams. (DONE for ambient mode's nebula.)
+
+## Social & feed (build on the new feed)
+Now that the feed exists (identity from the logged-in SC handle/avatar, POST/GET
+/feed), these are the natural next steps — most are small backend additions:
+- **Reactions** — ❤️/🔥 on a post. `POST /feed/react {postTs,id,emoji}` + counts
+  in the item; render a little reaction row. Cheap, high-engagement.
+- **Auto-share now-playing (opt-in)** — a toggle that posts a track to the feed
+  when you start it (throttled, dedup). Doubles as the feed's "never empty"
+  engine: an active listener base keeps it alive on its own.
+- **Replies / threads** — one level of replies under a post. Keeps conversation
+  in-app instead of Discord.
+- **New-posts badge on the Feed tab** — count of items newer than last-seen;
+  clears when you open the tab. Makes the feed feel live without being loud.
+- **Feed filters** — All / Just tracks / From people you follow (needs the SC
+  following list, which is on the profile).
+- **Play a shared track inline** — clicking a feed track card already navigates;
+  add a ▶ that queues/plays it without leaving the feed.
+- **@mentions** — link `@handle` to the profile; optional "mentions" filter.
+- **Your posts: edit / delete** — `id`-scoped, since we already key by handle.
+- **Light moderation** — per-id rate limit is in; add a report button + a simple
+  server-side blocklist so one bad actor can't wreck the shared feed.
+
+## Player / client (still open from the original list)
+- **Lyrics panel** — time-synced via LRCLIB (free, no key), highlighted against
+  the waveform. Probably the highest-impact single feature left.
+- **Sleep timer** — "stop after this track" / in 20·30·60 min.
+- **Global media keys** — hardware play/pause/next work when unfocused.
+- **Queue tools** — save queue as playlist, de-dupe, "shuffle rest".
+- **Per-artist saved accent** — remember a chosen accent per artist/profile.
