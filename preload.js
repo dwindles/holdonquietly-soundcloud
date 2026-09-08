@@ -735,7 +735,7 @@ const BASE_CSS = `
   .playbackSoundBadge__actions #hoq-ambient-btn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 30px; height: 30px; margin-left: 10px; padding: 0; background: none; border: 0;
-    border-radius: 7px; cursor: pointer; color: #b4b4b8; flex: 0 0 auto;
+    border-radius: 7px; cursor: pointer; color: #fff; flex: 0 0 auto;
     transition: color .15s ease, background .15s ease; }
   .playbackSoundBadge__actions #hoq-ambient-btn:hover { color: var(--sc-accent, #ff5500); background: rgba(255,255,255,0.09); }
   .playbackSoundBadge__actions #hoq-ambient-btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
@@ -4347,7 +4347,7 @@ function startShareButton() {
       '#hoq-share{display:none}' +
       '.playbackSoundBadge__actions #hoq-share{display:inline-flex;align-items:center;justify-content:center;' +
       'width:30px;height:30px;margin-left:10px;padding:0;background:none;border:0;' +
-      'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
+      'border-radius:7px;cursor:pointer;color:#fff;flex:0 0 auto;' +
       'transition:color .15s ease,background .15s ease}' +
       '.playbackSoundBadge__actions #hoq-share:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
       '.playbackSoundBadge__actions #hoq-share svg{width:16px;height:16px;flex:0 0 auto}' +
@@ -4552,7 +4552,7 @@ function startPlayButton() {
       '#hoq-playbtn{display:none}' +
       '.playbackSoundBadge__actions #hoq-playbtn{display:inline-flex;align-items:center;justify-content:center;' +
       'width:30px;height:30px;margin-left:10px;padding:0;background:none;border:0;' +
-      'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
+      'border-radius:7px;cursor:pointer;color:#fff;flex:0 0 auto;' +
       'transition:color .15s ease,background .15s ease}' +
       '.playbackSoundBadge__actions #hoq-playbtn:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
       // Hairline before the pair so the Discord actions read as ours rather than
