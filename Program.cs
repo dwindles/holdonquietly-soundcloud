@@ -697,6 +697,22 @@ class Program
             case "opendevtools":
                 try { wv.CoreWebView2.OpenDevToolsWindow(); } catch { }
                 break;
+            case "inspect":
+                // Open real DevTools and switch it into element-inspect mode, so
+                // hovering/clicking selects nodes in the Elements panel.
+                try
+                {
+                    wv.CoreWebView2.OpenDevToolsWindow();
+                    await wv.CoreWebView2.CallDevToolsProtocolMethodAsync("Overlay.enable", "{}");
+                    await wv.CoreWebView2.CallDevToolsProtocolMethodAsync("Overlay.setInspectMode",
+                        "{\"mode\":\"searchForNode\",\"highlightConfig\":{\"showInfo\":true,\"showStyles\":true," +
+                        "\"contentColor\":{\"r\":130,\"g\":110,\"b\":247,\"a\":0.35}," +
+                        "\"paddingColor\":{\"r\":147,\"g\":196,\"b\":125,\"a\":0.3}," +
+                        "\"borderColor\":{\"r\":130,\"g\":110,\"b\":247,\"a\":0.85}," +
+                        "\"marginColor\":{\"r\":246,\"g\":178,\"b\":107,\"a\":0.35}}}");
+                }
+                catch { }
+                break;
         }
     }
 
