@@ -290,6 +290,7 @@ class Program
         _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
         _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
         _ = FriendsLoop();          // poll the shared friends backend
+        _ = FeedLoop();             // poll the community feed
         LastFm.Load(userData);      // restore a saved Last.fm session if there is one
         LastFm.OnStatus = (connected, u) => win.Dispatcher.InvokeAsync(() =>
         {
@@ -457,6 +458,34 @@ class Program
             catch { }
             await Task.Delay(15000);
         }
+    }
+
+    // Community feed: post host-side (no mixed-content), then push the fresh feed
+    // straight back so the poster sees their message land immediately.
+    static async Task PostFeed(string json, bool refresh)
+    {
+        try { await http.PostAsync(BACKEND + "/feed", new StringContent(json, Encoding.UTF8, "application/json")); }
+        catch { }
+        if (refresh) await PushFeed();
+    }
+    static async Task PushFeed()
+    {
+        try
+        {
+            string json = await http.GetStringAsync(BACKEND + "/feed");
+            await win.Dispatcher.InvokeAsync(() =>
+            { try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqFeed && window.__hoqFeed(" + json + ")"); } catch { } });
+        }
+        catch
+        {
+            await win.Dispatcher.InvokeAsync(() =>
+            { try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqFeedOffline && window.__hoqFeedOffline()"); } catch { } });
+        }
+    }
+    // Poll the feed and hand it to the page.
+    static async Task FeedLoop()
+    {
+        while (true) { await PushFeed(); await Task.Delay(12000); }
     }
 
     // Fetch the Discord server widget (name + online count) from the host (no CORS)
@@ -659,6 +688,8 @@ class Program
             catch { }
             return;
         }
+        if (m != null && m.StartsWith("feed:post:")) { _ = PostFeed(m.Substring(10), true); return; }
+        if (m == "feed:get") { _ = PushFeed(); return; }
         if (m == "rpcclear") { DiscordRpc.Clear(); return; }
         if (m == "lastfm:connect") { _ = LastFm.Connect(); return; }
         if (m == "lastfm:disconnect") { LastFm.Disconnect(); return; }

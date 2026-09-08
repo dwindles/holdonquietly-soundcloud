@@ -3500,6 +3500,86 @@ function currentNowPlaying() {
   };
 }
 
+// Community feed: composer (message + optional "current track") and the live
+// list. Identity is hoqMe() (public SC handle/avatar). The list is served by the
+// host via window.__hoqFeed; a cached copy + a warm empty state mean the feed
+// never renders blank even if the backend is down (a dead feed makes the whole
+// tab feel dead — that's the failsafe).
+function setupFeed(p) {
+  const list = p.querySelector('.hoq-feed-list');
+  const input = p.querySelector('.hoq-feed-input');
+  const attachBtn = p.querySelector('.hoq-feed-attach');
+  const attachedBox = p.querySelector('.hoq-feed-attached');
+  const postBtn = p.querySelector('.hoq-feed-post');
+  const avatarImg = p.querySelector('.hoq-feed-avatar');
+  if (!list || !input) return;
+  let attached = null, feedItems = [], pending = [];
+
+  const esc = (s) => (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rel = (ts) => { const d = (Date.now() - ts) / 1000; if (d < 60) return 'now'; if (d < 3600) return Math.floor(d / 60) + 'm'; if (d < 86400) return Math.floor(d / 3600) + 'h'; return Math.floor(d / 86400) + 'd'; };
+  const curTrack = () => { const np = currentNowPlaying(); if (!np.title) return null; const l = document.querySelector('.playbackSoundBadge__titleLink'); const href = l && l.getAttribute('href'); return { title: np.title, artist: np.artist, cover: np.cover, url: href ? (href.startsWith('http') ? href : 'https://soundcloud.com' + href) : '' }; };
+  const setMeAvatar = () => { const me = hoqMe(); if (me.avatar && avatarImg) avatarImg.src = me.avatar; };
+  setMeAvatar(); setTimeout(setMeAvatar, 1500);
+
+  const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(140, input.scrollHeight) + 'px'; };
+  input.addEventListener('input', grow);
+
+  const renderAttached = () => {
+    if (!attached) { attachedBox.hidden = true; attachedBox.innerHTML = ''; attachBtn.classList.remove('on'); attachBtn.textContent = '♪ Attach current track'; return; }
+    attachedBox.hidden = false; attachBtn.classList.add('on'); attachBtn.textContent = '♪ Track attached';
+    attachedBox.innerHTML = (attached.cover ? '<img src="' + esc(attached.cover) + '">' : '') +
+      '<div style="min-width:0"><div class="fa-t">' + esc(attached.title) + '</div><div class="fa-a">' + esc(attached.artist) + '</div></div><button class="fa-x" title="Remove">×</button>';
+    attachedBox.querySelector('.fa-x').onclick = () => { attached = null; renderAttached(); };
+  };
+  attachBtn.addEventListener('click', () => {
+    if (attached) { attached = null; renderAttached(); return; }
+    attached = curTrack();
+    if (!attached) { attachBtn.textContent = 'Nothing playing'; setTimeout(() => { if (!attached) attachBtn.textContent = '♪ Attach current track'; }, 1400); return; }
+    renderAttached();
+  });
+
+  const trackCard = (t) => (t && t.title) ? ('<a class="hoq-fi-track"' + (t.url ? ' href="' + esc(t.url) + '"' : '') + '>' + (t.cover ? '<img src="' + esc(t.cover) + '">' : '') + '<div style="min-width:0"><div class="ft-t">' + esc(t.title) + '</div><div class="ft-a">' + esc(t.artist || '') + '</div></div><span class="ft-play">▶</span></a>') : '';
+  const itemHtml = (f, isPending) => {
+    const nameEl = f.url ? '<a class="hoq-fi-name" href="' + esc(f.url) + '">' + esc(f.name) + '</a>' : '<span class="hoq-fi-name">' + esc(f.name) + '</span>';
+    return '<div class="hoq-feed-item' + (f.sys ? ' sys' : '') + (isPending ? ' pending' : '') + '">' +
+      '<img class="hoq-fi-av" src="' + (f.avatar ? esc(f.avatar) : HOQ_LOGO) + '">' +
+      '<div class="hoq-fi-body"><div class="hoq-fi-head">' + nameEl + '<span class="hoq-fi-time">' + (f.sys ? '' : rel(f.ts)) + '</span></div>' +
+      (f.text ? '<div class="hoq-fi-text">' + esc(f.text) + '</div>' : '') + trackCard(f.track) + '</div></div>';
+  };
+  const render = () => {
+    if (!pending.length && !feedItems.length) { list.innerHTML = '<div class="hoq-feed-empty">Nothing here yet.<br>Be the first to say something or share a track.</div>'; return; }
+    list.innerHTML = pending.map((f) => itemHtml(f, true)).join('') + feedItems.map((f) => itemHtml(f, false)).join('');
+    list.querySelectorAll('.hoq-fi-track[href], a.hoq-fi-name[href]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const h = a.getAttribute('href'); if (h) location.href = h; }));
+  };
+
+  window.__hoqFeed = function (arr) {
+    if (!Array.isArray(arr)) return;
+    feedItems = arr;
+    pending = pending.filter((q) => !arr.some((f) => f.id === q.id && f.text === q.text && Math.abs(f.ts - q.ts) < 120000));
+    try { localStorage.setItem('hoqFeedCache', JSON.stringify(arr.slice(0, 30))); } catch (e) {}
+    render();
+  };
+  window.__hoqFeedOffline = function () {
+    if (!feedItems.length) { try { const c = JSON.parse(localStorage.getItem('hoqFeedCache') || '[]'); if (Array.isArray(c) && c.length) feedItems = c; } catch (e) {} }
+    render();
+  };
+
+  const post = () => {
+    const text = input.value.trim();
+    if (!text && !attached) return;
+    const me = hoqMe();
+    const item = { id: me.id, name: me.name, avatar: me.avatar, url: me.url, text, track: attached, ts: Date.now() };
+    pending.unshift(item); render();
+    scPost('feed:post:' + JSON.stringify(item));
+    input.value = ''; grow(); attached = null; renderAttached();
+  };
+  postBtn.addEventListener('click', post);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } });
+
+  try { const c = JSON.parse(localStorage.getItem('hoqFeedCache') || '[]'); if (Array.isArray(c) && c.length) { feedItems = c; render(); } } catch (e) {}
+  scPost('feed:get');
+}
+
 function buildDiscordTab() {
   if (document.querySelector('.hoq-dc-tab')) return;
   const lib = Array.from(document.querySelectorAll('.header__navMenuItem'))
@@ -3678,6 +3758,61 @@ function ensureDiscordPanel() {
         padding: 1px 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: .6px;
         color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); }
       #hoq-discord .hoq-dc-friend.is-me { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); }
+      /* ===== Community feed ===== */
+      #hoq-discord .hoq-feed-composer { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 14px; }
+      #hoq-discord .hoq-feed-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none;
+        background: rgba(255,255,255,0.06); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      #hoq-discord .hoq-feed-cwrap { flex: 1; min-width: 0; }
+      #hoq-discord .hoq-feed-input { width: 100%; box-sizing: border-box; resize: none; overflow: hidden;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09); border-radius: 12px;
+        color: #fff; font: 500 13px Inter, system-ui, sans-serif; padding: 10px 12px; min-height: 40px; line-height: 1.4;
+        transition: border-color .14s ease, background .14s ease; }
+      #hoq-discord .hoq-feed-input:focus { outline: none; border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent);
+        background: rgba(255,255,255,0.06); }
+      #hoq-discord .hoq-feed-input::placeholder { color: #8a8a90; }
+      #hoq-discord .hoq-feed-attached { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 7px 9px;
+        background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; position: relative; }
+      #hoq-discord .hoq-feed-attached img { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; flex: none; }
+      #hoq-discord .hoq-feed-attached .fa-t { color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-feed-attached .fa-a { color: #b0b0b6; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-feed-attached .fa-x { margin-left: auto; background: none; border: 0; color: #b0b0b6; cursor: pointer; font-size: 16px; padding: 2px 6px; }
+      #hoq-discord .hoq-feed-attached .fa-x:hover { color: #fff; }
+      #hoq-discord .hoq-feed-crow { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+      #hoq-discord .hoq-feed-attach { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+        color: #cfcfd4; font: 600 12px Inter, system-ui, sans-serif; padding: 7px 12px; border-radius: 9px; cursor: pointer;
+        transition: background .14s ease, color .14s ease, border-color .14s ease; }
+      #hoq-discord .hoq-feed-attach:hover { color: #fff; border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
+      #hoq-discord .hoq-feed-attach.on { color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 20%, transparent);
+        border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
+      #hoq-discord .hoq-feed-post { margin-left: auto; background: var(--sc-accent,#ff5500); border: 0; color: #fff;
+        font: 700 12.5px Inter, system-ui, sans-serif; padding: 8px 18px; border-radius: 9px; cursor: pointer;
+        box-shadow: 0 0 12px color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); transition: filter .14s ease, opacity .14s ease; }
+      #hoq-discord .hoq-feed-post:hover { filter: brightness(1.08); }
+      #hoq-discord .hoq-feed-post:disabled { opacity: .45; cursor: default; box-shadow: none; }
+      #hoq-discord .hoq-feed-list { display: flex; flex-direction: column; gap: 10px; }
+      #hoq-discord .hoq-feed-item { display: flex; gap: 11px; align-items: flex-start; padding: 11px 12px;
+        background: rgba(12,12,14,0.5); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px;
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); animation: hoqIn .2s ease; }
+      #hoq-discord .hoq-feed-item.sys { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 28%, transparent);
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 8%, rgba(12,12,14,0.5)); }
+      #hoq-discord .hoq-feed-item.pending { opacity: .6; }
+      #hoq-discord .hoq-fi-av { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex: none; background: rgba(255,255,255,0.06); }
+      #hoq-discord .hoq-fi-body { flex: 1; min-width: 0; }
+      #hoq-discord .hoq-fi-head { display: flex; align-items: baseline; gap: 8px; }
+      #hoq-discord .hoq-fi-name { color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord a.hoq-fi-name:hover { color: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-fi-time { color: #7f7f86; font-size: 11px; flex: none; margin-left: auto; }
+      #hoq-discord .hoq-fi-text { color: #dcdce0; font-size: 13px; line-height: 1.45; margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+      #hoq-discord .hoq-fi-track { display: flex; gap: 10px; align-items: center; margin-top: 8px; padding: 8px 9px;
+        background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; cursor: pointer;
+        text-decoration: none; transition: background .14s ease; }
+      #hoq-discord .hoq-fi-track:hover { background: rgba(255,255,255,0.08); }
+      #hoq-discord .hoq-fi-track img { width: 40px; height: 40px; border-radius: 7px; object-fit: cover; flex: none; }
+      #hoq-discord .hoq-fi-track .ft-t { color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-fi-track .ft-a { color: #b0b0b6; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-fi-track .ft-play { margin-left: auto; color: var(--sc-accent,#ff5500); flex: none; }
+      #hoq-discord .hoq-feed-empty { text-align: center; color: #9a9aa0; font-size: 12.5px; padding: 18px 10px; line-height: 1.5; }
+      #hoq-discord .hoq-feed-off { color: #8a8a90; font-size: 11.5px; margin-top: 4px; }
       #hoq-discord .hoq-dc-sclink { color: var(--sc-accent,#ff5500); font-size: 11px; cursor: pointer; text-decoration: none; }
       #hoq-discord .hoq-dc-sclink:hover { text-decoration: underline; }
       #hoq-discord .hoq-dc-open { width: 100%; padding: 11px; border-radius: 10px; cursor: pointer;
@@ -3784,6 +3919,21 @@ function ensureDiscordPanel() {
           <button data-act="server">Open server</button>
         </div>
       </div>
+      <div class="hoq-dc-sec hoq-wide hoq-feed-sec">
+        <div class="hoq-dc-label">Feed</div>
+        <div class="hoq-feed-composer">
+          <img class="hoq-feed-avatar" src="${HOQ_LOGO}" alt="">
+          <div class="hoq-feed-cwrap">
+            <textarea class="hoq-feed-input" rows="1" maxlength="500" placeholder="Say something, or share what you’re playing…"></textarea>
+            <div class="hoq-feed-attached" hidden></div>
+            <div class="hoq-feed-crow">
+              <button class="hoq-feed-attach" type="button">♪ Attach current track</button>
+              <button class="hoq-feed-post" type="button">Post</button>
+            </div>
+          </div>
+        </div>
+        <div class="hoq-feed-list"><div class="hoq-dc-hint">Loading the feed…</div></div>
+      </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Last.fm scrobbling</div>
         <div class="hoq-lf">
@@ -3878,6 +4028,7 @@ function ensureDiscordPanel() {
     });
   });
   document.body.appendChild(p);
+  setupFeed(p);
 
   // Quick actions just drive the controls that already exist, so there's one
   // implementation of each behaviour rather than two.
@@ -4187,10 +4338,27 @@ if (window.top === window) {
     const t = e.target;
     if (!t || !t.closest) return;
     if (t.closest('#hoq-discord') || t.closest('.hoq-dc-tab')) return;
-    if (t.closest('.header__navMenuItem, .header__logo, .headerSearch, a[href^="/"]')) closeDiscord();
+    // NOTE: not .headerSearch — clicking the search box just focuses it to type;
+    // closing the tab there dropped you onto the page underneath (discover). The
+    // tab now closes on the actual route change when you submit a search.
+    if (t.closest('.header__navMenuItem, .header__logo, a[href^="/"]')) closeDiscord();
   }, true);
   // Any real navigation should drop the tab, whichever way it was triggered.
-  window.addEventListener('popstate', () => closeDiscord());
+  // SoundCloud navigates client-side with pushState (which doesn't fire
+  // popstate), so patch those too — otherwise submitting a search left the
+  // results hidden behind the still-open tab.
+  (function () {
+    let last = location.pathname + location.search;
+    const check = () => {
+      const now = location.pathname + location.search;
+      if (now !== last) { last = now; if (document.documentElement.classList.contains('hoq-tab')) closeDiscord(); }
+    };
+    ['pushState', 'replaceState'].forEach((m) => {
+      const orig = history[m];
+      if (typeof orig === 'function') history[m] = function () { const r = orig.apply(this, arguments); try { check(); } catch (e) {} return r; };
+    });
+    window.addEventListener('popstate', check);
+  })();
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDiscord(); });
   window.addEventListener('resize', () => {
     if (document.documentElement.classList.contains('hoq-tab')) hoqTabMetrics();
@@ -4201,6 +4369,33 @@ function myId() {
   let id = localStorage.getItem('hoqId');
   if (!id) { id = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('hoqId', id); }
   return id;
+}
+
+// The social identity: the logged-in user's PUBLIC SoundCloud handle + avatar —
+// no accounts, no private data (never an email or anything private). Pulled from
+// the page and cached; a stable id is derived from the profile slug (or avatar
+// token) so posts stay attributed across sessions.
+function hoqMe() {
+  const av = (typeof findUserAvatar === 'function' ? findUserAvatar() : '') || '';
+  let name = '';
+  const nb = document.querySelector('.userNav__usernameButton, .header__userNavButton, .profileMenu__username');
+  if (nb) name = (nb.getAttribute('title') || nb.textContent || '').trim();
+  if (!name) name = (localStorage.getItem('hoqDiscord') || '').trim();
+  if (!name) name = 'Someone';
+  let url = (localStorage.getItem('hoqSC') || '').trim();
+  if (!url || /\/you$/.test(url)) {
+    const prof = document.querySelector('.profileMenu a.headerMenu__link[href^="/"]:not([href="/you"])');
+    const href = prof ? prof.getAttribute('href') : '';
+    if (href) url = 'https://soundcloud.com' + href;
+  }
+  let id = '';
+  const slug = ((url || '').match(/soundcloud\.com\/([^\/?#]+)/) || [])[1];
+  if (slug && slug !== 'you') id = 'sc_' + slug;
+  if (!id) { const m = av.match(/avatars-([A-Za-z0-9]+)/); if (m) id = 'sc_' + m[1]; }
+  if (!id) id = localStorage.getItem('hoqUid') || myId();
+  if (id.indexOf('sc_') === 0) localStorage.setItem('hoqUid', id);
+  url = (url || '').split('?')[0].split('#')[0]; // drop utm/share query junk
+  return { id, name, avatar: av, url };
 }
 
 // Real song position / duration / play-state from the player UI.
