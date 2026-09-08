@@ -3505,7 +3505,7 @@ function ensureDiscordPanel() {
          real settings page instead of one long 540px ribbon. */
       /* Page content, not a dialog — no panel gradient, border or drop shadow.
          The individual sections keep their own surfaces, same as SoundCloud's. */
-      #hoq-discord .hoq-dc-card { max-width: 940px; margin: 0 auto;
+      #hoq-discord .hoq-dc-card { max-width: min(1320px, 94vw); margin: 0 auto;
         background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
       /* While the tab is the current page, SoundCloud's content is not on screen
          (this is what a route swap does); the header and player stay untouched. */
