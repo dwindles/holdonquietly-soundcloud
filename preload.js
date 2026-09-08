@@ -3515,7 +3515,7 @@ function setupFeed(p) {
   if (!list || !input) return;
   let attached = null, feedItems = [], pending = [];
 
-  const esc = (s) => (s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = hoqEsc; // reuse the shared HTML-escape helper
   const rel = (ts) => { const d = (Date.now() - ts) / 1000; if (d < 60) return 'now'; if (d < 3600) return Math.floor(d / 60) + 'm'; if (d < 86400) return Math.floor(d / 3600) + 'h'; return Math.floor(d / 86400) + 'd'; };
   const curTrack = () => { const np = currentNowPlaying(); if (!np.title) return null; const l = document.querySelector('.playbackSoundBadge__titleLink'); const href = l && l.getAttribute('href'); return { title: np.title, artist: np.artist, cover: np.cover, url: href ? (href.startsWith('http') ? href : 'https://soundcloud.com' + href) : '' }; };
   const setMeAvatar = () => { const me = hoqMe(); if (me.avatar && avatarImg) avatarImg.src = me.avatar; };
