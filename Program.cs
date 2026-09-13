@@ -290,6 +290,7 @@ class Program
         _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
         _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
         _ = FriendsLoop();          // poll the shared friends backend
+        _ = ReadWebhook();          // warm the cache, so a later failed read still has a URL
         _ = FeedLoop();             // poll the community feed
         LastFm.Load(userData);      // restore a saved Last.fm session if there is one
         LastFm.OnStatus = (connected, u) => win.Dispatcher.InvokeAsync(() =>
@@ -354,19 +355,27 @@ class Program
 
     static async Task<string> ReadWebhook()
     {
-        for (int attempt = 1; attempt <= 2; attempt++)
+        // Every failed attempt records WHICH check failed. The old version only
+        // logged exceptions, so "file not found" / "empty" / "not a URL" all
+        // collapsed into one "not configured" line — and on 2026-09-13 that line
+        // fired while the file sat there valid, with nothing to say why.
+        string why = "";
+        for (int attempt = 1; attempt <= 3; attempt++)
         {
             try
             {
                 string path = WebhookPath();
-                if (File.Exists(path))
+                if (!File.Exists(path)) why = "File.Exists returned false";
+                else
                 {
                     string t = File.ReadAllText(path).Trim();
-                    if (t.StartsWith("http")) { _webhookCache = t; return t; }
+                    if (t.StartsWith("http", StringComparison.Ordinal)) { _webhookCache = t; return t; }
+                    why = t.Length == 0 ? "file is empty" : "file does not start with http (" + t.Length + " chars)";
                 }
             }
-            catch (Exception ex) { Log("webhook read attempt " + attempt + " failed: " + ex.Message); }
-            if (attempt == 1) await Task.Delay(150);
+            catch (Exception ex) { why = ex.GetType().Name + ": " + ex.Message; }
+            Log("webhook read attempt " + attempt + " failed: " + why);
+            if (attempt < 3) await Task.Delay(300 * attempt);
         }
         if (!string.IsNullOrEmpty(_webhookCache))
         {
@@ -374,6 +383,18 @@ class Program
             return _webhookCache;
         }
         return "";
+    }
+
+    // Tell the page how a play request went. The button shows "Queued" the
+    // moment it's clicked, so without this a request that never reached
+    // Discord looked like it worked, and the one-per-track lock blocked a retry.
+    static void PlayResult(bool ok, string reason)
+    {
+        string r = (reason ?? "").Replace("\\", "").Replace("\"", "'").Replace("\r", " ").Replace("\n", " ");
+        win?.Dispatcher.InvokeAsync(() =>
+        {
+            try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqPlayResult && window.__hoqPlayResult(" + (ok ? "true" : "false") + ",\"" + r + "\")"); } catch { }
+        });
     }
 
     static async Task PostWebhook(string json, bool play = false)
@@ -384,6 +405,7 @@ class Program
             if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http"))
             {
                 Log((play ? "playreq" : "share") + " ABORT: webhook not configured at " + WebhookPath());
+                if (play) PlayResult(false, "no webhook set up");
                 return;
             }
 
@@ -393,6 +415,7 @@ class Program
             if (string.IsNullOrEmpty(title))
             {
                 Log((play ? "playreq" : "share") + " ABORT: payload had no title");
+                if (play) PlayResult(false, "no track info");
                 return;
             }
             Log((play ? "playreq" : "share") + " -> title=\"" + title + "\" url=" + (string.IsNullOrEmpty(url) ? "(none)" : url));
@@ -438,8 +461,13 @@ class Program
             // malformed embed) used to fail completely silently.
             Log((play ? "playreq" : "share") + " <- HTTP " + (int)resp.StatusCode +
                 (resp.IsSuccessStatusCode ? "" : " " + await resp.Content.ReadAsStringAsync()));
+            if (play) PlayResult(resp.IsSuccessStatusCode, "discord refused it (" + (int)resp.StatusCode + ")");
         }
-        catch (Exception ex) { Log((play ? "playreq" : "share") + " FAILED: " + ex.Message); }
+        catch (Exception ex)
+        {
+            Log((play ? "playreq" : "share") + " FAILED: " + ex.Message);
+            if (play) PlayResult(false, "couldn't reach discord");
+        }
     }
 
     // Poll everyone's presence and hand it to the page to render the friends feed.
