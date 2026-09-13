@@ -739,6 +739,36 @@ const BASE_CSS = `
     transition: color .15s ease, background .15s ease; }
   .playbackSoundBadge__actions #hoq-ambient-btn:hover { color: var(--sc-accent, #ff5500); background: rgba(255,255,255,0.09); }
   .playbackSoundBadge__actions #hoq-ambient-btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
+
+  /* ===== Mobile (the userscript build sets html.hoq-mobile — desktop never
+     does, so these are phone-only) — adapt this session's features that the
+     base mobile stylesheet predates: ambient mode, the feed, and the extra
+     player-bar buttons. ===== */
+  /* Ambient now-playing: the desktop 380px art + 460px text row overflows a
+     390px phone. Stack it, shrink the art, centre the text. */
+  html.hoq-mobile #hoq-np.on { flex-direction: column !important; gap: 22px !important; padding: 0 18px !important; }
+  html.hoq-mobile #hoq-np .np-art { width: min(64vw, 260px) !important; height: min(64vw, 260px) !important; }
+  html.hoq-mobile #hoq-np .np-side { width: 100% !important; max-width: 100% !important; text-align: center !important; }
+  html.hoq-mobile #hoq-np .np-ctrls { justify-content: center !important; }
+  html.hoq-mobile #hoq-np .np-title { font-size: 25px !important; }
+  html.hoq-mobile #hoq-np .np-close { top: 16px !important; left: 16px !important; }
+  html.hoq-mobile #hoq-np-gl { display: none !important; } /* skip the WebGL nebula on a phone GPU */
+  html.hoq-mobile #hoq-np .np-bg { opacity: .32 !important; }
+  /* Player bar: it was fit to Play+Share; the later Ambient button made three,
+     which overflows 390px. Shrink all three so the whole set fits. */
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-ambient-btn,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-playbtn,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-share {
+    width: 26px !important; height: 26px !important; margin-left: 0 !important; }
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-ambient-btn svg,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-playbtn svg,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-share svg { width: 15px !important; height: 15px !important; }
+  /* Feed composer/list: keep it from overflowing at phone width. */
+  html.hoq-mobile #hoq-discord .hoq-feed-crow { flex-wrap: wrap !important; row-gap: 6px !important; }
+  html.hoq-mobile #hoq-discord .hoq-feed-post { margin-left: auto !important; }
+  html.hoq-mobile #hoq-discord .hoq-feed-avatar { width: 34px !important; height: 34px !important; }
+  html.hoq-mobile #hoq-discord .hoq-sub { flex-wrap: wrap !important; }
+
   #hoq-np .np-art { transition: transform .14s ease; }
   html.hoq-no-anim #hoq-np .np-art { transition: none !important; }
   /* WebGL 3D backdrop (Three.js): a rotating accent crystal + starfield behind
