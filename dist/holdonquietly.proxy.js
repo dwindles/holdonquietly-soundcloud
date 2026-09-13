@@ -23,6 +23,32 @@ function scPost(cmd) {
   } catch (e) {}
 }
 
+// --- Audio tap for the visualizer / ambient nebula ---------------------------
+// SoundCloud plays through Web Audio and makes exactly ONE MediaElementSource on
+// its audio element (a same-origin blob: with crossOrigin=anonymous, so it is
+// NOT CORS-tainted). We can't create a second source on that element, but this
+// runs before SoundCloud's code, so we patch createMediaElementSource to hang an
+// AnalyserNode off their source the moment they make it — giving us real
+// frequency data. Purely a tap: the analyser is never connected to a destination.
+(() => {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC || AC.prototype.__hoqTapped) return;
+    AC.prototype.__hoqTapped = true;
+    const orig = AC.prototype.createMediaElementSource;
+    AC.prototype.createMediaElementSource = function (el) {
+      const node = orig.call(this, el);
+      try {
+        const an = this.createAnalyser();
+        an.fftSize = 512; an.smoothingTimeConstant = 0.82;
+        node.connect(an);
+        window.__hoqAudioAnalyser = an;
+      } catch (e) {}
+      return node;
+    };
+  } catch (e) {}
+})();
+
 // --- Anti-bot-detection (does NOT clobber chrome.webview) ---
 (() => {
   try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch (e) {}
@@ -182,7 +208,7 @@ const BASE_CSS = `
   }
   html.sc-coverbg .playControls {
     background: rgba(12,12,14,0.5) !important;
-    backdrop-filter: blur(26px) saturate(1.4) !important;
+    backdrop-filter: blur(24px) saturate(1.4) !important;
     border-top: 1px solid rgba(255,255,255,0.06) !important;
   }
   html.sc-coverbg .playControls::before,
@@ -602,6 +628,181 @@ const BASE_CSS = `
   /* Grayscale covers ON (opt-in) */
   html.hoq-gray .image span, html.hoq-gray .sc-artwork, html.hoq-gray .sound__coverArt span,
   html.hoq-gray .fullHero__artwork span, html.hoq-gray .playableTile__image span { filter: grayscale(1) !important; }
+
+  /* Ambient glow ON (opt-in): a soft bloom of the current track's accent light,
+     screen-blended over the UI, drifting up from the player + bottom corners. */
+  #hoq-ambient { position: fixed; inset: 0; z-index: 9998; pointer-events: none; opacity: 0;
+    transition: opacity .6s ease; mix-blend-mode: screen; }
+  html.hoq-ambient #hoq-ambient { opacity: 1; }
+  #hoq-ambient::before, #hoq-ambient::after { content: ''; position: absolute; inset: -15%; }
+  #hoq-ambient::before {
+    background:
+      radial-gradient(30% 34% at 8% 104%,  color-mix(in srgb, var(--sc-accent,#ff5500) 85%, transparent), transparent 66%),
+      radial-gradient(34% 38% at 92% 104%, color-mix(in srgb, var(--sc-accent,#ff5500) 70%, transparent), transparent 68%),
+      radial-gradient(46% 40% at 50% 116%, color-mix(in srgb, var(--sc-accent,#ff5500) 62%, transparent), transparent 70%);
+    filter: blur(50px) saturate(1.4); animation: hoqAmb 15s ease-in-out infinite alternate;
+  }
+  #hoq-ambient::after {
+    background:
+      radial-gradient(40% 34% at 10% -8%, color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent), transparent 66%),
+      radial-gradient(40% 34% at 90% -8%, color-mix(in srgb, var(--sc-accent,#ff5500) 30%, transparent), transparent 66%);
+    filter: blur(60px); animation: hoqAmb2 21s ease-in-out infinite alternate;
+  }
+  html.hoq-no-anim #hoq-ambient::before, html.hoq-no-anim #hoq-ambient::after { animation: none !important; }
+  @keyframes hoqAmb  { from { transform: translateY(0) scale(1); } to { transform: translateY(-3%) scale(1.06); } }
+  @keyframes hoqAmb2 { from { transform: translate(0,0); }        to { transform: translate(3%,2%); } }
+
+  /* ===== Ambient mode — a big now-playing view (Spotify-ish), toggled from the
+     player bar. Sits above the content but leaves the real player bar visible at
+     the bottom, and mirrors the current track (art/title/artist/progress) with
+     controls wired to the real transport buttons. ===== */
+  #hoq-np { position: fixed; inset: 0; z-index: 9990; display: none; overflow: hidden;
+    color: #fff; background: #0b0b0e; }
+  #hoq-np.on { display: flex; align-items: center; justify-content: center; gap: 64px; }
+  /* ambient mode has its own transport (prev/play/next/like/seek), so the real
+     player bar is redundant while it's open — hide it. Keep it in layout
+     (opacity, NOT display:none) and behind the overlay so the ambient seek can
+     still read the real timeline's geometry to scrub. */
+  html.hoq-np-open .playControls { opacity: 0 !important; pointer-events: none !important; z-index: 1 !important; }
+  /* ===== "Next up" queue panel =====
+     The queue's buttons (play/like/more/Clear) read as DEAD — clicks fell right
+     through. Root cause: .playControls / .playControls__inner carry
+     overflow-x:clip (to hide the bar's h-scroll), which clips the queue's
+     HIT-TEST region down to the 49px bar. The panel still PAINTS above the bar
+     (it's a composited transform layer), so it looked fine but nothing above the
+     bar's height was clickable. While the queue is open, un-clip the bar so the
+     panel is hit-testable, lift it above the page, and drop the overlapping
+     right sidebar out of hit-testing for good measure. Plus give the flat black
+     panel the app's frosted-glass look (it had none). */
+  html.hoq-queue-open .playControls,
+  html.hoq-queue-open .playControls__inner,
+  html:has(.queue.m-visible) .playControls,
+  html:has(.queue.m-visible) .playControls__inner { overflow: visible !important; }
+  html.hoq-queue-open .playControls,
+  html:has(.queue.m-visible) .playControls { z-index: 100000 !important; }
+  html.hoq-queue-open .l-sidebar-right,
+  html:has(.queue.m-visible) .l-sidebar-right { pointer-events: none !important; }
+  /* match the app's own dark-frosted panels (header / dropdowns): a translucent
+     dark ground with the same backdrop blur — no shimmer, no glass. */
+  .playControls__queue {
+    background: rgba(12,12,16,0.5) !important;
+    border-left: 1px solid rgba(255,255,255,0.08) !important;
+    box-shadow: -18px 0 52px rgba(0,0,0,0.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important; }
+  /* theme the panel chrome to the accent so it matches the rest of the app */
+  .playControls__queue .queue__title { color: #fff !important; }
+  .playControls__queue .queueItemView.m-playing .queueItemView__title a,
+  .playControls__queue .queueItemView.m-active .queueItemView__title a { color: var(--sc-accent, #ff5500) !important; }
+  .playControls__queue .queue__clear:hover { color: var(--sc-accent, #ff5500) !important; }
+  .playControls__queue .queue,
+  .playControls__queue .queue__panel,
+  .playControls__queue .queue__scrollable,
+  .playControls__queue .queue__scrollableInner,
+  .playControls__queue .queue__itemsHeight,
+  .playControls__queue .queueFallback { background: transparent !important; }
+  .playControls__queue .queueItemView { border-radius: 10px !important; }
+  html.hoq-no-frost .playControls__queue {
+    background: rgba(14,14,18,0.97) !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  #hoq-np .np-bg { position: absolute; inset: -10%; background-size: cover; background-position: center;
+    filter: blur(72px) saturate(1.7) brightness(.72); transform: scale(1.15); }
+  #hoq-np .np-scrim { position: absolute; inset: 0;
+    background:
+      /* even edge vignette for depth (keeps particles from washing out at the
+         borders) + a soft accent bloom rising from the bottom */
+      radial-gradient(125% 105% at 50% 48%, transparent 42%, rgba(8,8,11,.5) 100%),
+      radial-gradient(50% 55% at 50% 120%, color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent), transparent 70%); }
+  #hoq-np .np-art { position: relative; width: 380px; height: 380px; border-radius: 20px;
+    background-size: cover; background-position: center; background-color: rgba(255,255,255,.04);
+    box-shadow: 0 40px 90px rgba(0,0,0,.55),
+      0 0 90px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent),
+      0 0 0 1px rgba(255,255,255,.1); }
+  #hoq-np .np-side { position: relative; width: 460px; max-width: 46vw; }
+  #hoq-np .np-eyebrow { font-size: 12px; letter-spacing: .22em; font-weight: 700; text-transform: uppercase;
+    color: var(--sc-accent, #ff5500); margin: 0 0 14px; opacity: .95; }
+  #hoq-np .np-title { font-size: 40px; font-weight: 800; line-height: 1.12; letter-spacing: -.01em;
+    margin: 0 0 10px; }
+  #hoq-np .np-artist { font-size: 18px; opacity: .72; margin: 0 0 30px; }
+  #hoq-np .np-bar { height: 7px; border-radius: 4px; background: rgba(255,255,255,.16); overflow: hidden; cursor: pointer; }
+  #hoq-np .np-bar i { display: block; height: 100%; background: var(--sc-accent, #ff5500); width: 0%;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--sc-accent,#ff5500) 70%, transparent); }
+  #hoq-np .np-times { display: flex; justify-content: space-between; font-size: 12px; opacity: .7; margin-top: 8px; }
+  #hoq-np .np-ctrls { display: flex; align-items: center; gap: 26px; margin-top: 30px; }
+  #hoq-np .np-ctrls button { background: none; border: 0; color: #fff; cursor: pointer; opacity: .85; padding: 0; display: flex; }
+  #hoq-np .np-ctrls button:hover { opacity: 1; }
+  #hoq-np .np-play { width: 62px; height: 62px; border-radius: 50%; background: #fff !important; color: #111 !important;
+    align-items: center; justify-content: center; }
+  #hoq-np .np-play svg { width: 26px; height: 26px; }
+  #hoq-np .np-like { margin-left: 8px; }
+  #hoq-np .np-like svg { width: 24px; height: 24px; }
+  #hoq-np .np-close { position: absolute; top: 44px; left: 24px; width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(255,255,255,.1); border: 0; color: #fff; cursor: pointer; font-size: 20px; line-height: 40px; }
+  #hoq-np .np-close:hover { background: rgba(255,255,255,.2); }
+  /* trigger button in the player bar — matched to our Discord play/share buttons
+     (and SoundCloud's own icon buttons): 26x26 box, 15px icon, secondary grey,
+     accent on hover. */
+  #hoq-ambient-btn { display: none; }
+  .playbackSoundBadge__actions #hoq-ambient-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; margin-left: 10px; padding: 0; background: none; border: 0;
+    border-radius: 7px; cursor: pointer; color: #fff; flex: 0 0 auto;
+    transition: color .15s ease, background .15s ease; }
+  .playbackSoundBadge__actions #hoq-ambient-btn:hover { color: var(--sc-accent, #ff5500); background: rgba(255,255,255,0.09); }
+  .playbackSoundBadge__actions #hoq-ambient-btn svg { width: 16px; height: 16px; flex: 0 0 auto; }
+
+  /* ===== Mobile (the userscript build sets html.hoq-mobile — desktop never
+     does, so these are phone-only) — adapt this session's features that the
+     base mobile stylesheet predates: ambient mode, the feed, and the extra
+     player-bar buttons. ===== */
+  /* Ambient now-playing: the desktop 380px art + 460px text row overflows a
+     390px phone. Stack it, shrink the art, centre the text. */
+  html.hoq-mobile #hoq-np.on { flex-direction: column !important; gap: 22px !important; padding: 0 18px !important; }
+  html.hoq-mobile #hoq-np .np-art { width: min(64vw, 260px) !important; height: min(64vw, 260px) !important; }
+  html.hoq-mobile #hoq-np .np-side { width: 100% !important; max-width: 100% !important; text-align: center !important; }
+  html.hoq-mobile #hoq-np .np-ctrls { justify-content: center !important; }
+  html.hoq-mobile #hoq-np .np-title { font-size: 25px !important; }
+  html.hoq-mobile #hoq-np .np-close { top: 16px !important; left: 16px !important; }
+  html.hoq-mobile #hoq-np-gl { display: none !important; } /* skip the WebGL nebula on a phone GPU */
+  html.hoq-mobile #hoq-np .np-bg { opacity: .32 !important; }
+  /* Player bar: it was fit to Play+Share; the later Ambient button made three,
+     which overflows 390px. Shrink all three so the whole set fits. */
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-ambient-btn,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-playbtn,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-share {
+    width: 26px !important; height: 26px !important; margin-left: 0 !important; }
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-ambient-btn svg,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-playbtn svg,
+  html.hoq-mobile .playbackSoundBadge__actions #hoq-share svg { width: 15px !important; height: 15px !important; }
+  /* Feed composer/list: keep it from overflowing at phone width. */
+  html.hoq-mobile #hoq-discord .hoq-feed-crow { flex-wrap: wrap !important; row-gap: 6px !important; }
+  html.hoq-mobile #hoq-discord .hoq-feed-post { margin-left: auto !important; }
+  html.hoq-mobile #hoq-discord .hoq-feed-avatar { width: 34px !important; height: 34px !important; }
+  html.hoq-mobile #hoq-discord .hoq-sub { flex-wrap: wrap !important; }
+
+  #hoq-np .np-art { transition: transform .14s ease; }
+  html.hoq-no-anim #hoq-np .np-art { transition: none !important; }
+  /* WebGL 3D backdrop (Three.js): a rotating accent crystal + starfield behind
+     the card. Sits at the back; the cover wash dims when it's live. */
+  /* Backdrop layers sit at NEGATIVE z so the card + text are normal-flow content
+     above them WITHOUT a stacking context of their own — that's what lets the
+     text's blend mode reach the nebula behind it. */
+  #hoq-np-gl { position: absolute; inset: 0; z-index: -3; }
+  #hoq-np .np-bg { z-index: -2; }
+  html.hoq-np-gl #hoq-np .np-bg { opacity: .16 !important; }
+  #hoq-np .np-scrim { z-index: -1; }
+  #hoq-np .np-art, #hoq-np .np-side, #hoq-np .np-close { position: relative; }
+  /* Text legibility over the busy nebula: solid white with a layered dark halo
+     (a tight shadow for edge contrast + a wide soft one to lift it off bright
+     particles). Reads cleanly on any part of the backdrop — no muddy blend.
+     isolation still keeps our layers self-contained. */
+  #hoq-np { isolation: isolate; }
+  #hoq-np .np-title, #hoq-np .np-artist, #hoq-np .np-times {
+    color: #fff !important; -webkit-text-fill-color: #fff !important; opacity: 1 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.72), 0 4px 26px rgba(0,0,0,.6); }
+  #hoq-np .np-eyebrow { text-shadow: 0 1px 10px rgba(0,0,0,.55); }
+  #hoq-np .np-artist { opacity: .82 !important; }
+
   a.sc-link-primary, .sc-link-primary:hover { color: var(--sc-accent, #ff5500) !important; }
 
   /* Waveform is a <canvas> (orange played + grey unplayed). Hue-rotate just the
@@ -683,8 +884,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 12px !important;
     box-shadow: 0 16px 44px rgba(0,0,0,0.55) !important;
-    backdrop-filter: blur(42px) saturate(1.4) !important;
-    -webkit-backdrop-filter: blur(42px) saturate(1.4) !important;
+    backdrop-filter: blur(24px) saturate(1.4) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.4) !important;
     overflow: hidden !important; padding: 5px !important;
   }
   .select__list li, .select__option, .select__list a, .select__list button,
@@ -921,14 +1122,61 @@ const BASE_CSS = `
   .l-collection:has(.collectionNav) .l-main {
     flex: 1 1 auto !important; min-width: 0 !important; margin: 0 !important;
   }
+  /* ===== 3D lift on tab bars (profile tabs + library/collection nav) =====
+     JS tilts the hovered tab toward the cursor; CSS gives it a lit accent lift.
+     Gated by the "3D tab bars" toggle (html.hoq-no-tabtilt) and Low-end mode. */
+  .userInfoBar__tabs .profileTabs, .l-nav .collectionNav.g-tabs { perspective: 900px; }
+  .userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link {
+    transform-style: preserve-3d;
+    transition: transform .16s cubic-bezier(.2,.7,.2,1), background .14s ease, color .14s ease, box-shadow .18s ease !important; }
+  .userInfoBar__tabs .g-tabs-link.hoq-tt, .l-nav .collectionNav.g-tabs .g-tabs-link.hoq-tt {
+    position: relative; z-index: 3;
+    box-shadow: 0 14px 30px rgba(0,0,0,.5),
+      0 0 22px color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent) !important; }
+  html.hoq-no-tabtilt .userInfoBar__tabs .g-tabs-link,
+  html.hoq-no-tabtilt .l-nav .collectionNav.g-tabs .g-tabs-link { transform: none !important; }
+
+  /* ===== Profile dropbar (sticky mini-header on scroll) → themed frost ===== */
+  .dropbar.m-active, .dropbar__content {
+    background: rgba(12,12,16,0.6) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.45) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important; }
+  .userDropbar { border-bottom: 0 !important; }
+  .userDropbar__title { color: #fff !important; letter-spacing: -.01em !important; }
+  .userDropbar .sc-media-image .image {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent) !important; }
+  html.hoq-no-frost .dropbar.m-active, html.hoq-no-frost .dropbar__content {
+    background: rgba(14,14,18,0.97) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+  /* ===== Low-end mode: strip GPU/CPU-heavy work ===== */
+  html.hoq-lowend *, html.hoq-lowend *::before, html.hoq-lowend *::after {
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    animation: none !important; }
+  html.hoq-lowend #hoq-np .np-bg { filter: brightness(.55) !important; }
+  html.hoq-lowend #hoq-np .np-scrim, html.hoq-lowend #hoq-ambient { display: none !important; }
+  html.hoq-lowend .playControls__queue, html.hoq-lowend .collectionNav.g-tabs,
+  html.hoq-lowend .dropbar.m-active, html.hoq-lowend .dropbar__content,
+  html.hoq-lowend #sc-palette, html.hoq-lowend .dropdownMenu, html.hoq-lowend .linkMenu {
+    background: rgba(16,16,20,0.98) !important; }
+
+  /* toggle: scroll long titles (marquee) */
+  html.hoq-no-mq .hoq-mq { animation: none !important; transform: none !important; }
+  /* toggle: profile banner bottom fade */
+  html.hoq-no-herofade .l-user-hero .profileHeaderBackground.m-visualLoaded {
+    -webkit-mask-image: none !important; mask-image: none !important; }
+  /* settings note line */
+  #sc-palette .pal-note { font-size: 11px; color: #8a8a90; line-height: 1.35; margin: 2px 2px 6px; }
+
   .collectionNav.g-tabs {
     display: flex !important; flex-direction: column !important;
     align-items: stretch !important; gap: 3px !important;
     background: rgba(12,12,16,0.42) !important; border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 14px !important; padding: 8px !important;
     overflow: visible !important; box-sizing: border-box !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
   }
   .collectionNav.g-tabs li, .collectionNav.g-tabs .g-tabs-item {
@@ -951,15 +1199,17 @@ const BASE_CSS = `
     color: #fff !important;
     box-shadow: 0 0 13px color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
   }
+  /* Selected item: ONE clear indicator instead of bg + border + inset bar +
+     outer glow + text glow all stacked (which read as boxy). A soft accent
+     wash, the left accent bar, and accent text — nothing else. */
   .collectionNav.g-tabs .active a, .collectionNav.g-tabs a.active,
   .collectionNav.g-tabs li.active a, .collectionNav.g-tabs [aria-current] a,
   .collectionNav.g-tabs a[aria-current] {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
-    color: var(--sc-accent, #ff5500) !important; font-weight: 800 !important;
-    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important;
-    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500),
-                0 0 16px color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent) !important;
-    text-shadow: 0 0 10px color-mix(in srgb, var(--sc-accent, #ff5500) 60%, transparent) !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 70%, #ffffff) !important;
+    font-weight: 700 !important; border: 0 !important;
+    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important;
+    text-shadow: none !important;
   }
 
   /* ===== Library "Filter" input — themed field with accent focus glow ===== */
@@ -1035,6 +1285,23 @@ const BASE_CSS = `
   }
   .userInfoBar__buttons .sc-button svg { fill: currentColor !important; }
 
+  /* ===== Profile hero — bottom fade =====
+     Full-bleed (width:100vw + negative margins) was destabilising some profiles:
+     on open, their content column collapsed to 0 height (a SoundCloud layout
+     timing bug the extra reflow tipped over). So keep the banner at its normal
+     width and only fade its bottom. Everything is scoped to .m-visualLoaded so
+     profiles with no banner — and the brief pre-load state — are left untouched. */
+  .l-user-hero .profileHeaderBackground.m-visualLoaded {
+    background-color: transparent !important;
+    -webkit-mask-image: linear-gradient(180deg,#000 0%,#000 68%,transparent 100%) !important;
+    mask-image: linear-gradient(180deg,#000 0%,#000 68%,transparent 100%) !important;
+  }
+  /* Cover the width — the visual defaults to auto 100%, leaving a small grey gap
+     on the right otherwise. */
+  .l-user-hero .profileHeaderBackground.m-visualLoaded .profileHeaderBackground__visual {
+    background-size: cover !important; background-position: center !important;
+  }
+
   /* ===== Profile tabs (All / Popular tracks / Tracks / …) — accent active + hover glow ===== */
   .profileTabs.g-tabs .g-tabs-link {
     color: #b7b7ba !important; border: 0 !important; box-shadow: none !important;
@@ -1078,7 +1345,7 @@ const BASE_CSS = `
     background: rgba(12,12,16,0.42) !important;
     border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 14px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important; -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     padding: 8px !important;
   }
   /* "Search results for …" title bar — was a solid black block; make it see-through. */
@@ -1105,13 +1372,62 @@ const BASE_CSS = `
     background: rgba(12,12,16,0.5) !important;
     border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 12px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
-    backdrop-filter: blur(42px) saturate(1.5) !important; -webkit-backdrop-filter: blur(42px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
   }
-  #searchMenuList, #searchMenuList li, .autosuggests li { background: transparent !important; }
-  #searchMenuList li a, #searchMenuList li { color: #d4d4d7 !important; }
-  #searchMenuList li:hover, #searchMenuList li.selected, #searchMenuList li[aria-selected="true"] {
+  #searchMenuList, #searchMenuList li, #searchMenuList ul,
+  #searchMenuList .lazyLoadingList__list, .autosuggests li,
+  /* the newer combobox wraps the list in a SOLID rgb(18,18,18) .searchAutocomplete
+     that hid our frosted glass — make it (and its list wrapper) see-through so the
+     .dropdownMenu acrylic shows. */
+  .dropdownMenu .searchAutocomplete, .dropdownMenu .lazyLoadingList,
+  .dropdownMenu .lazyLoadingList__list,
+  .dropdownMenu .combox-box-content, .dropdownMenu .searchMenu__searchFor {
+    background: transparent !important;
+    /* SC draws rgb(48,48,48) grey top/bottom borders + a box-shadow on these —
+       those are the stray grey outlines. Remove them for a clean frosted panel. */
+    border: 0 !important; box-shadow: none !important;
+  }
+  /* the auto-highlighted first row -> accent wash instead of SC's solid grey */
+  .dropdownMenu .searchMenu__searchFor:hover,
+  .dropdownMenu .searchMenu__searchFor.m-active,
+  .dropdownMenu [aria-selected="true"] .searchMenu__searchFor {
     background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent) !important;
+    border-radius: 8px !important;
+  }
+  /* SoundCloud's newer "combobox" search list paints its rows with sc-link-primary
+     (the RAW accent) on inner spans — unreadable when the accent is a dark colour.
+     Force light, readable text across the whole list; reserve the accent for the
+     row hover. Covers the "Search for …" item, query suggestions and user rows. */
+  #searchMenuList a, #searchMenuList a *, #searchMenuList li, #searchMenuList span,
+  #searchMenuList .sc-link-primary, #searchMenuList .searchMenu__searchForText {
+    color: #e7e7ed !important; -webkit-text-fill-color: #e7e7ed !important;
+  }
+  #searchMenuList .searchMenu__searchForText,
+  #searchMenuList .searchMenu__searchForText * {
+    color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; font-weight: 600 !important;
+  }
+  #searchMenuList .sc-link-secondary, #searchMenuList .sc-link-light,
+  #searchMenuList .sc-link-secondary * {
+    color: #a6a6ac !important; -webkit-text-fill-color: #a6a6ac !important;
+  }
+  #searchMenuList li:hover, #searchMenuList li.selected, #searchMenuList li[aria-selected="true"],
+  #searchMenuList [role="option"]:hover, #searchMenuList .sc-media:hover {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent) !important;
+    border-radius: 8px !important;
+  }
+  /* the keyboard/hover selection is a DIV.autocompleteItem.selected which SC fills
+     solid grey (rgb(48,48,48)) — that's the grey box left behind on mouse-off.
+     Default it transparent and highlight the selected/hovered one in the accent. */
+  #searchMenuList .autocompleteItem { background: transparent !important; border-radius: 8px !important; }
+  #searchMenuList .autocompleteItem:hover, #searchMenuList .autocompleteItem.selected,
+  #searchMenuList .autocompleteItem.m-active {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent) !important;
+  }
+  /* keep the accent glow on the search box's own icon/border, not the text */
+  #searchMenuList mark, #searchMenuList .g-highlight {
+    color: var(--sc-accent, #ff5500) !important; -webkit-text-fill-color: var(--sc-accent, #ff5500) !important;
+    background: transparent !important; font-weight: 700 !important;
   }
 
   /* ===== GO+ tier badge on covers → more visible / legible ===== */
@@ -1510,8 +1826,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 14px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
   }
   /* clear the inner solid wrappers SoundCloud paints (the "double layer") */
@@ -1571,8 +1887,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.12) !important;
     border-radius: 14px !important;
     box-shadow: 0 18px 52px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.10) !important;
-    backdrop-filter: blur(46px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(46px) saturate(1.5) !important;
+    backdrop-filter: blur(24px) saturate(1.5) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
     overflow: hidden !important;
     padding: 5px !important;
   }
@@ -1622,8 +1938,8 @@ const BASE_CSS = `
     border: 1px solid rgba(255,255,255,0.10) !important;
     border-radius: 16px !important;
     box-shadow: 0 26px 74px rgba(0,0,0,0.62) !important;
-    backdrop-filter: blur(48px) saturate(1.45) !important;
-    -webkit-backdrop-filter: blur(48px) saturate(1.45) !important;
+    backdrop-filter: blur(24px) saturate(1.45) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.45) !important;
   }
   /* dim + blur the page behind the modal */
   .modal__background, .modalBackground, .g-modal-overlay, .modal__overlay {
@@ -1805,8 +2121,8 @@ const MUI_CSS = `
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiCard-root,
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiPaper-contained {
     background: rgba(12,12,14,0.3) !important;
-    backdrop-filter: blur(26px) saturate(1.35) !important;
-    -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+    backdrop-filter: blur(24px) saturate(1.35) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.35) !important;
     border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
     border-radius: 14px !important;
   }
@@ -1954,8 +2270,8 @@ const MUI_CSS = `
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiStack-root:has(> .MuiStack-root > a > img[sizes="64px"]),
   html.hoq-webi.sc-coverbg aside[aria-label="Track sidebar"] .MuiStack-root:has(> .MuiTypography-h2) {
     background: rgba(12,12,14,0.3) !important;
-    backdrop-filter: blur(26px) saturate(1.35) !important;
-    -webkit-backdrop-filter: blur(26px) saturate(1.35) !important;
+    backdrop-filter: blur(24px) saturate(1.35) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(1.35) !important;
     border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
     border-radius: 14px !important;
   }
@@ -2331,7 +2647,14 @@ function updateWaveProgress() {
 // Optional visual effects, toggled from the palette. Default ON (return true
 // unless explicitly saved '0'). Effects: 'viz' (song bar), 'tilt' (3D tilt),
 // 'wave' (interactive waveform).
-function effectOn(name) { return localStorage.getItem('scFx_' + name) !== '0'; }
+function lowEndOn() { try { return localStorage.getItem('scFx_lowend') === '1'; } catch (e) { return false; } }
+// Under Low-end mode the GPU/CPU-heavy effects are forced off regardless of their
+// own switch (backdrop blur + the WebGL nebula are the big RAM/GPU spenders).
+const HOQ_HEAVY = ['viz', 'wave', 'tilt', 'pulse', 'anim', 'frost', 'tabtilt'];
+function effectOn(name) {
+  if (lowEndOn() && HOQ_HEAVY.indexOf(name) !== -1) return false;
+  return localStorage.getItem('scFx_' + name) !== '0';
+}
 function applyVizState() {
   const on = effectOn('viz');
   window.__hoqVizOn = on;
@@ -2339,8 +2662,8 @@ function applyVizState() {
 }
 // CSS-gated optional effects. Default-ON ones: OFF adds html.hoq-no-<name> to
 // revert. Opt-in ones (default OFF): ON adds html.hoq-<name> to apply.
-const HOQ_CSS_FX = ['pulse', 'round', 'hover', 'anim', 'frost', 'glow'];
-const HOQ_OPTIN_FX = ['gray'];
+const HOQ_CSS_FX = ['pulse', 'round', 'hover', 'anim', 'frost', 'glow', 'mq', 'herofade', 'tabtilt'];
+const HOQ_OPTIN_FX = ['gray', 'ambient', 'lowend'];
 function applyFxClasses() {
   HOQ_CSS_FX.forEach((n) => document.documentElement.classList.toggle('hoq-no-' + n, !effectOn(n)));
   HOQ_OPTIN_FX.forEach((n) => document.documentElement.classList.toggle('hoq-' + n, localStorage.getItem('scFx_' + n) === '1'));
@@ -2812,7 +3135,7 @@ function buildTitlebar() {
       #sc-palette {
         position: fixed; top: 52px; right: 12px; z-index: 2147483647;
         background: rgba(14,14,18,0.55);
-        backdrop-filter: blur(46px) saturate(1.5); -webkit-backdrop-filter: blur(46px) saturate(1.5);
+        backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
         border: 1px solid rgba(255,255,255,0.10); border-radius: 16px;
         padding: 12px 14px; width: 470px; display: none;
         max-height: calc(100vh - 66px); overflow-y: auto; overscroll-behavior: contain;
@@ -2869,6 +3192,7 @@ function buildTitlebar() {
          (2 cols = 232+232+18) instead of stretching across the whole tab. */
       #hoq-discord .hoq-settings-host #sc-palette > .row,
       #hoq-discord .hoq-settings-host #sc-palette > .bgurl,
+      #hoq-discord .hoq-settings-host #sc-palette > .pal-note,
       #hoq-discord .hoq-settings-host #sc-palette > .btn-2up { max-width: calc(66.667% - 6px); }
       #sc-palette h4 {
         margin: 1px 0 8px; font-size: 10.5px; font-weight: 700; color: #fff;
@@ -2880,20 +3204,18 @@ function buildTitlebar() {
       }
       #sc-palette .row {
         display: flex; align-items: center; justify-content: space-between;
-        margin: 3px 0; padding: 4px 9px; background: rgba(255,255,255,0.035);
-        border: 1px solid rgba(255,255,255,0.05);
-        border-radius: 8px; font-weight: 500; font-size: 11px;
+        margin: 4px 0; padding: 8px 12px; background: rgba(255,255,255,0.045);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 10px; font-weight: 500; font-size: 12px; color: #e9e9ee;
+        transition: background .14s ease, border-color .14s ease;
       }
-      /* two-up (side by side) grid for the toggles */
-      #sc-palette .pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
-      #sc-palette .pal-grid .row { margin: 0; gap: 10px; padding: 5px 9px; }
+      #sc-palette .row:hover { background: rgba(255,255,255,0.075); border-color: rgba(255,255,255,0.12); }
+      /* multi-column grid for the toggles */
+      #sc-palette .pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+      #sc-palette .pal-grid .row { margin: 0; gap: 10px; padding: 8px 12px; }
       #sc-palette .pal-grid .row span {
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
       }
-      /* slightly smaller switches so label + toggle never touch in a cell */
-      #sc-palette .pal-grid input[type=checkbox] { width: 32px; height: 18px; flex: none; }
-      #sc-palette .pal-grid input[type=checkbox]::after { width: 14px; height: 14px; }
-      #sc-palette .pal-grid input[type=checkbox]:checked::after { transform: translateX(14px); }
       #sc-palette input[type=color] {
         width: 34px; height: 24px; border: 1px solid rgba(255,255,255,0.15);
         border-radius: 6px; background: none; cursor: pointer; padding: 0;
@@ -2902,18 +3224,36 @@ function buildTitlebar() {
       #sc-palette input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
       #sc-palette label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
       #sc-palette label { justify-content: space-between; width: 100%; }
+      /* ===== toggle: a hollow OUTLINED pill when OFF (dim recessed dot) that snaps
+         to a clean SOLID accent when ON (the dot grows into a bright white knob).
+         No glow bloom — reads crisp against the frosted rows. ===== */
       #sc-palette input[type=checkbox] {
         appearance: none; -webkit-appearance: none; flex: none; cursor: pointer;
-        width: 36px; height: 20px; border-radius: 20px; position: relative; margin: 0;
-        background: rgba(255,255,255,0.16); transition: background .18s ease;
+        box-sizing: border-box; width: 42px; height: 23px; border-radius: 23px;
+        position: relative; margin: 0; background: rgba(255,255,255,0.04);
+        border: 1.5px solid rgba(255,255,255,0.24);
+        transition: background .2s ease, border-color .2s ease;
       }
+      #sc-palette input[type=checkbox]:hover { border-color: rgba(255,255,255,0.44); background: rgba(255,255,255,0.07); }
       #sc-palette input[type=checkbox]::after {
-        content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-        border-radius: 50%; background: #fff; transition: transform .18s ease;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        content: ''; position: absolute; top: 4px; left: 4px; width: 11px; height: 11px;
+        border-radius: 50%; background: rgba(255,255,255,0.5);
+        transition: transform .26s cubic-bezier(.34,1.55,.64,1),
+          width .16s ease, height .16s ease, top .16s ease, left .16s ease, background .2s ease;
       }
-      #sc-palette input[type=checkbox]:checked { background: var(--sc-accent-bg, #ff5500); }
-      #sc-palette input[type=checkbox]:checked::after { transform: translateX(16px); }
+      #sc-palette input[type=checkbox]:checked {
+        background: var(--sc-accent, #ff5500);
+        border-color: var(--sc-accent, #ff5500);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent);
+      }
+      #sc-palette input[type=checkbox]:checked::after {
+        width: 16px; height: 16px; top: 2px; left: 2px; background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        transform: translateX(19px);
+      }
+      #sc-palette input[type=checkbox]:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--sc-accent, #ff5500) 70%, transparent); outline-offset: 2px;
+      }
       #sc-palette .swatches {
         display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; margin: 14px 2px 6px;
       }
@@ -3005,8 +3345,10 @@ function buildTitlebar() {
       <label class="row"><span>Visualizer</span><input type="checkbox" id="sc-fx-viz"></label>
       <label class="row"><span>Interactive wave</span><input type="checkbox" id="sc-fx-wave"></label>
       <label class="row"><span>3D tilt</span><input type="checkbox" id="sc-fx-tilt"></label>
+      <label class="row"><span>3D tab bars</span><input type="checkbox" id="sc-fx-tabtilt"></label>
       <label class="row"><span>Speaker pulse</span><input type="checkbox" id="sc-fx-pulse"></label>
       <label class="row"><span>Animations</span><input type="checkbox" id="sc-fx-anim"></label>
+      <label class="row"><span>Scroll long titles</span><input type="checkbox" id="sc-fx-mq"></label>
     </div>
 
     <div class="section-label">Look</div>
@@ -3016,7 +3358,13 @@ function buildTitlebar() {
       <label class="row"><span>Row hover</span><input type="checkbox" id="sc-fx-hover"></label>
       <label class="row"><span>Frosted bars</span><input type="checkbox" id="sc-fx-frost"></label>
       <label class="row"><span>Grayscale covers</span><input type="checkbox" id="sc-fx-gray"></label>
+      <label class="row"><span>Banner fade</span><input type="checkbox" id="sc-fx-herofade"></label>
+      <label class="row"><span>Room glow</span><input type="checkbox" id="sc-fx-ambient"></label>
     </div>
+
+    <div class="section-label">Performance</div>
+    <label class="row"><span>Low-end mode</span><input type="checkbox" id="sc-fx-lowend"></label>
+    <div class="pal-note">Turns off the WebGL nebula, frosted blur, the visualizer and animations to cut GPU/RAM use.</div>
 
     <div class="section-label">Display</div>
     <div class="row"><span>Song list zoom</span><span class="zoomctl">
@@ -3118,14 +3466,16 @@ function buildTitlebar() {
   [['viz', 'sc-fx-viz'], ['tilt', 'sc-fx-tilt'], ['wave', 'sc-fx-wave'],
    ['pulse', 'sc-fx-pulse'], ['round', 'sc-fx-round'], ['hover', 'sc-fx-hover'],
    ['anim', 'sc-fx-anim'], ['frost', 'sc-fx-frost'], ['glow', 'sc-fx-glow'],
-   ['gray', 'sc-fx-gray']].forEach(([name, id]) => {
+   ['mq', 'sc-fx-mq'], ['herofade', 'sc-fx-herofade'], ['tabtilt', 'sc-fx-tabtilt'],
+   ['gray', 'sc-fx-gray'], ['ambient', 'sc-fx-ambient'], ['lowend', 'sc-fx-lowend']].forEach(([name, id]) => {
     const cb = panel.querySelector('#' + id);
     if (!cb) return;
     // opt-in effects default OFF; everything else defaults ON.
     cb.checked = HOQ_OPTIN_FX.includes(name) ? (localStorage.getItem('scFx_' + name) === '1') : effectOn(name);
     cb.addEventListener('change', () => {
       localStorage.setItem('scFx_' + name, cb.checked ? '1' : '0');
-      if (name === 'viz') applyVizState();
+      // Low-end mode flips the heavy effects, so re-sync everything that reads them.
+      if (name === 'viz' || name === 'lowend') applyVizState();
       if (name === 'wave' && !cb.checked) document.querySelectorAll('.hoq-wave .bars i').forEach((b) => b.style.transform = '');
       applyFxClasses();
     });
@@ -3189,6 +3539,86 @@ function currentNowPlaying() {
     artist: cleanNP(a && (a.getAttribute('title') || a.textContent)),
     cover: currentCoverUrl() || '',
   };
+}
+
+// Community feed: composer (message + optional "current track") and the live
+// list. Identity is hoqMe() (public SC handle/avatar). The list is served by the
+// host via window.__hoqFeed; a cached copy + a warm empty state mean the feed
+// never renders blank even if the backend is down (a dead feed makes the whole
+// tab feel dead — that's the failsafe).
+function setupFeed(p) {
+  const list = p.querySelector('.hoq-feed-list');
+  const input = p.querySelector('.hoq-feed-input');
+  const attachBtn = p.querySelector('.hoq-feed-attach');
+  const attachedBox = p.querySelector('.hoq-feed-attached');
+  const postBtn = p.querySelector('.hoq-feed-post');
+  const avatarImg = p.querySelector('.hoq-feed-avatar');
+  if (!list || !input) return;
+  let attached = null, feedItems = [], pending = [];
+
+  const esc = hoqEsc; // reuse the shared HTML-escape helper
+  const rel = (ts) => { const d = (Date.now() - ts) / 1000; if (d < 60) return 'now'; if (d < 3600) return Math.floor(d / 60) + 'm'; if (d < 86400) return Math.floor(d / 3600) + 'h'; return Math.floor(d / 86400) + 'd'; };
+  const curTrack = () => { const np = currentNowPlaying(); if (!np.title) return null; const l = document.querySelector('.playbackSoundBadge__titleLink'); const href = l && l.getAttribute('href'); return { title: np.title, artist: np.artist, cover: np.cover, url: href ? (href.startsWith('http') ? href : 'https://soundcloud.com' + href) : '' }; };
+  const setMeAvatar = () => { const me = hoqMe(); if (me.avatar && avatarImg) avatarImg.src = me.avatar; };
+  setMeAvatar(); setTimeout(setMeAvatar, 1500);
+
+  const grow = () => { input.style.height = 'auto'; input.style.height = Math.min(140, input.scrollHeight) + 'px'; };
+  input.addEventListener('input', grow);
+
+  const renderAttached = () => {
+    if (!attached) { attachedBox.hidden = true; attachedBox.innerHTML = ''; attachBtn.classList.remove('on'); attachBtn.textContent = '♪ Attach current track'; return; }
+    attachedBox.hidden = false; attachBtn.classList.add('on'); attachBtn.textContent = '♪ Track attached';
+    attachedBox.innerHTML = (attached.cover ? '<img src="' + esc(attached.cover) + '">' : '') +
+      '<div style="min-width:0"><div class="fa-t">' + esc(attached.title) + '</div><div class="fa-a">' + esc(attached.artist) + '</div></div><button class="fa-x" title="Remove">×</button>';
+    attachedBox.querySelector('.fa-x').onclick = () => { attached = null; renderAttached(); };
+  };
+  attachBtn.addEventListener('click', () => {
+    if (attached) { attached = null; renderAttached(); return; }
+    attached = curTrack();
+    if (!attached) { attachBtn.textContent = 'Nothing playing'; setTimeout(() => { if (!attached) attachBtn.textContent = '♪ Attach current track'; }, 1400); return; }
+    renderAttached();
+  });
+
+  const trackCard = (t) => (t && t.title) ? ('<a class="hoq-fi-track"' + (t.url ? ' href="' + esc(t.url) + '"' : '') + '>' + (t.cover ? '<img src="' + esc(t.cover) + '">' : '') + '<div style="min-width:0"><div class="ft-t">' + esc(t.title) + '</div><div class="ft-a">' + esc(t.artist || '') + '</div></div><span class="ft-play">▶</span></a>') : '';
+  const itemHtml = (f, isPending) => {
+    const nameEl = f.url ? '<a class="hoq-fi-name" href="' + esc(f.url) + '">' + esc(f.name) + '</a>' : '<span class="hoq-fi-name">' + esc(f.name) + '</span>';
+    return '<div class="hoq-feed-item' + (f.sys ? ' sys' : '') + (isPending ? ' pending' : '') + '">' +
+      '<img class="hoq-fi-av" src="' + (f.avatar ? esc(f.avatar) : HOQ_LOGO) + '">' +
+      '<div class="hoq-fi-body"><div class="hoq-fi-head">' + nameEl + '<span class="hoq-fi-time">' + (f.sys ? '' : rel(f.ts)) + '</span></div>' +
+      (f.text ? '<div class="hoq-fi-text">' + esc(f.text) + '</div>' : '') + trackCard(f.track) + '</div></div>';
+  };
+  const render = () => {
+    if (!pending.length && !feedItems.length) { list.innerHTML = '<div class="hoq-feed-empty">Nothing here yet.<br>Be the first to say something or share a track.</div>'; return; }
+    list.innerHTML = pending.map((f) => itemHtml(f, true)).join('') + feedItems.map((f) => itemHtml(f, false)).join('');
+    list.querySelectorAll('.hoq-fi-track[href], a.hoq-fi-name[href]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const h = a.getAttribute('href'); if (h) location.href = h; }));
+  };
+
+  window.__hoqFeed = function (arr) {
+    if (!Array.isArray(arr)) return;
+    feedItems = arr;
+    pending = pending.filter((q) => !arr.some((f) => f.id === q.id && f.text === q.text && Math.abs(f.ts - q.ts) < 120000));
+    try { localStorage.setItem('hoqFeedCache', JSON.stringify(arr.slice(0, 30))); } catch (e) {}
+    render();
+  };
+  window.__hoqFeedOffline = function () {
+    if (!feedItems.length) { try { const c = JSON.parse(localStorage.getItem('hoqFeedCache') || '[]'); if (Array.isArray(c) && c.length) feedItems = c; } catch (e) {} }
+    render();
+  };
+
+  const post = () => {
+    const text = input.value.trim();
+    if (!text && !attached) return;
+    const me = hoqMe();
+    const item = { id: me.id, name: me.name, avatar: me.avatar, url: me.url, text, track: attached, ts: Date.now() };
+    pending.unshift(item); render();
+    scPost('feed:post:' + JSON.stringify(item));
+    input.value = ''; grow(); attached = null; renderAttached();
+  };
+  postBtn.addEventListener('click', post);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } });
+
+  try { const c = JSON.parse(localStorage.getItem('hoqFeedCache') || '[]'); if (Array.isArray(c) && c.length) { feedItems = c; render(); } } catch (e) {}
+  scPost('feed:get');
 }
 
 function buildDiscordTab() {
@@ -3262,7 +3692,7 @@ function ensureDiscordPanel() {
          real settings page instead of one long 540px ribbon. */
       /* Page content, not a dialog — no panel gradient, border or drop shadow.
          The individual sections keep their own surfaces, same as SoundCloud's. */
-      #hoq-discord .hoq-dc-card { max-width: 940px; margin: 0 auto;
+      #hoq-discord .hoq-dc-card { max-width: min(1320px, 94vw); margin: 0 auto;
         background: transparent; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
       /* While the tab is the current page, SoundCloud's content is not on screen
          (this is what a route swap does); the header and player stay untouched. */
@@ -3369,6 +3799,61 @@ function ensureDiscordPanel() {
         padding: 1px 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: .6px;
         color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); }
       #hoq-discord .hoq-dc-friend.is-me { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); }
+      /* ===== Community feed ===== */
+      #hoq-discord .hoq-feed-composer { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 14px; }
+      #hoq-discord .hoq-feed-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none;
+        background: rgba(255,255,255,0.06); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      #hoq-discord .hoq-feed-cwrap { flex: 1; min-width: 0; }
+      #hoq-discord .hoq-feed-input { width: 100%; box-sizing: border-box; resize: none; overflow: hidden;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09); border-radius: 12px;
+        color: #fff; font: 500 13px Inter, system-ui, sans-serif; padding: 10px 12px; min-height: 40px; line-height: 1.4;
+        transition: border-color .14s ease, background .14s ease; }
+      #hoq-discord .hoq-feed-input:focus { outline: none; border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent);
+        background: rgba(255,255,255,0.06); }
+      #hoq-discord .hoq-feed-input::placeholder { color: #8a8a90; }
+      #hoq-discord .hoq-feed-attached { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 7px 9px;
+        background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; position: relative; }
+      #hoq-discord .hoq-feed-attached img { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; flex: none; }
+      #hoq-discord .hoq-feed-attached .fa-t { color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-feed-attached .fa-a { color: #b0b0b6; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-feed-attached .fa-x { margin-left: auto; background: none; border: 0; color: #b0b0b6; cursor: pointer; font-size: 16px; padding: 2px 6px; }
+      #hoq-discord .hoq-feed-attached .fa-x:hover { color: #fff; }
+      #hoq-discord .hoq-feed-crow { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+      #hoq-discord .hoq-feed-attach { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+        color: #cfcfd4; font: 600 12px Inter, system-ui, sans-serif; padding: 7px 12px; border-radius: 9px; cursor: pointer;
+        transition: background .14s ease, color .14s ease, border-color .14s ease; }
+      #hoq-discord .hoq-feed-attach:hover { color: #fff; border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
+      #hoq-discord .hoq-feed-attach.on { color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 20%, transparent);
+        border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
+      #hoq-discord .hoq-feed-post { margin-left: auto; background: var(--sc-accent,#ff5500); border: 0; color: #fff;
+        font: 700 12.5px Inter, system-ui, sans-serif; padding: 8px 18px; border-radius: 9px; cursor: pointer;
+        box-shadow: 0 0 12px color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); transition: filter .14s ease, opacity .14s ease; }
+      #hoq-discord .hoq-feed-post:hover { filter: brightness(1.08); }
+      #hoq-discord .hoq-feed-post:disabled { opacity: .45; cursor: default; box-shadow: none; }
+      #hoq-discord .hoq-feed-list { display: flex; flex-direction: column; gap: 10px; }
+      #hoq-discord .hoq-feed-item { display: flex; gap: 11px; align-items: flex-start; padding: 11px 12px;
+        background: rgba(12,12,14,0.5); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px;
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); animation: hoqIn .2s ease; }
+      #hoq-discord .hoq-feed-item.sys { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 28%, transparent);
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 8%, rgba(12,12,14,0.5)); }
+      #hoq-discord .hoq-feed-item.pending { opacity: .6; }
+      #hoq-discord .hoq-fi-av { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex: none; background: rgba(255,255,255,0.06); }
+      #hoq-discord .hoq-fi-body { flex: 1; min-width: 0; }
+      #hoq-discord .hoq-fi-head { display: flex; align-items: baseline; gap: 8px; }
+      #hoq-discord .hoq-fi-name { color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord a.hoq-fi-name:hover { color: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-fi-time { color: #7f7f86; font-size: 11px; flex: none; margin-left: auto; }
+      #hoq-discord .hoq-fi-text { color: #dcdce0; font-size: 13px; line-height: 1.45; margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+      #hoq-discord .hoq-fi-track { display: flex; gap: 10px; align-items: center; margin-top: 8px; padding: 8px 9px;
+        background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; cursor: pointer;
+        text-decoration: none; transition: background .14s ease; }
+      #hoq-discord .hoq-fi-track:hover { background: rgba(255,255,255,0.08); }
+      #hoq-discord .hoq-fi-track img { width: 40px; height: 40px; border-radius: 7px; object-fit: cover; flex: none; }
+      #hoq-discord .hoq-fi-track .ft-t { color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-fi-track .ft-a { color: #b0b0b6; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-fi-track .ft-play { margin-left: auto; color: var(--sc-accent,#ff5500); flex: none; }
+      #hoq-discord .hoq-feed-empty { text-align: center; color: #9a9aa0; font-size: 12.5px; padding: 18px 10px; line-height: 1.5; }
+      #hoq-discord .hoq-feed-off { color: #8a8a90; font-size: 11.5px; margin-top: 4px; }
       #hoq-discord .hoq-dc-sclink { color: var(--sc-accent,#ff5500); font-size: 11px; cursor: pointer; text-decoration: none; }
       #hoq-discord .hoq-dc-sclink:hover { text-decoration: underline; }
       #hoq-discord .hoq-dc-open { width: 100%; padding: 11px; border-radius: 10px; cursor: pointer;
@@ -3441,8 +3926,10 @@ function ensureDiscordPanel() {
         color: #fff; border-bottom-color: var(--sc-accent, #ff5500);
       }
       /* One pane at a time; sections are tagged in ensureDiscordPanel(). */
-      #hoq-discord[data-pane="social"] .hoq-pane-set { display: none !important; }
+      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-set,
+      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-feed { display: none !important; }
       #hoq-discord[data-pane="settings"] .hoq-dc-sec:not(.hoq-pane-set) { display: none !important; }
+      #hoq-discord[data-pane="feed"] .hoq-dc-sec:not(.hoq-pane-feed) { display: none !important; }
       #hoq-discord .hoq-acct-new:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 22%, rgba(12,12,14,0.6)); }
     </style>
     <div class="hoq-dc-card">
@@ -3453,6 +3940,7 @@ function ensureDiscordPanel() {
       </div>
       <div class="hoq-sub">
         <button class="hoq-subtab hoq-on" data-pane="social">Social</button>
+        <button class="hoq-subtab" data-pane="feed">Feed</button>
         <button class="hoq-subtab" data-pane="settings">Settings</button>
       </div>
       <div class="hoq-dc-body">
@@ -3474,6 +3962,21 @@ function ensureDiscordPanel() {
           <button data-act="copy">Copy track link</button>
           <button data-act="server">Open server</button>
         </div>
+      </div>
+      <div class="hoq-dc-sec hoq-wide hoq-feed-sec">
+        <div class="hoq-dc-label">Feed</div>
+        <div class="hoq-feed-composer">
+          <img class="hoq-feed-avatar" src="${HOQ_LOGO}" alt="">
+          <div class="hoq-feed-cwrap">
+            <textarea class="hoq-feed-input" rows="1" maxlength="500" placeholder="Say something, or share what you’re playing…"></textarea>
+            <div class="hoq-feed-attached" hidden></div>
+            <div class="hoq-feed-crow">
+              <button class="hoq-feed-attach" type="button">♪ Attach current track</button>
+              <button class="hoq-feed-post" type="button">Post</button>
+            </div>
+          </div>
+        </div>
+        <div class="hoq-feed-list"><div class="hoq-dc-hint">Loading the feed…</div></div>
       </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Last.fm scrobbling</div>
@@ -3548,6 +4051,7 @@ function ensureDiscordPanel() {
     const lab = sec.querySelector('.hoq-dc-label');
     const t = lab ? lab.textContent.trim().toLowerCase() : '';
     if (SET_SECS.indexOf(t) !== -1) sec.classList.add('hoq-pane-set');
+    else if (sec.classList.contains('hoq-feed-sec')) sec.classList.add('hoq-pane-feed');
   });
   // The palette is the point of the Settings pane, so lead with it.
   const setSecs = [...p.querySelectorAll('.hoq-dc-sec.hoq-pane-set')];
@@ -3560,6 +4064,9 @@ function ensureDiscordPanel() {
     const dup = palSec.querySelector('.hoq-dc-label');
     if (dup) dup.remove();
   }
+  // Same for the Feed pane — the sub-tab already says "Feed".
+  const feedSec = p.querySelector('.hoq-dc-sec.hoq-pane-feed');
+  if (feedSec) { const dl = feedSec.querySelector('.hoq-dc-label'); if (dl) dl.remove(); }
   p.dataset.pane = 'social';
   p.querySelectorAll('.hoq-subtab').forEach((b) => {
     b.addEventListener('click', () => {
@@ -3569,6 +4076,7 @@ function ensureDiscordPanel() {
     });
   });
   document.body.appendChild(p);
+  setupFeed(p);
 
   // Quick actions just drive the controls that already exist, so there's one
   // implementation of each behaviour rather than two.
@@ -3878,10 +4386,27 @@ if (window.top === window) {
     const t = e.target;
     if (!t || !t.closest) return;
     if (t.closest('#hoq-discord') || t.closest('.hoq-dc-tab')) return;
-    if (t.closest('.header__navMenuItem, .header__logo, .headerSearch, a[href^="/"]')) closeDiscord();
+    // NOTE: not .headerSearch — clicking the search box just focuses it to type;
+    // closing the tab there dropped you onto the page underneath (discover). The
+    // tab now closes on the actual route change when you submit a search.
+    if (t.closest('.header__navMenuItem, .header__logo, a[href^="/"]')) closeDiscord();
   }, true);
   // Any real navigation should drop the tab, whichever way it was triggered.
-  window.addEventListener('popstate', () => closeDiscord());
+  // SoundCloud navigates client-side with pushState (which doesn't fire
+  // popstate), so patch those too — otherwise submitting a search left the
+  // results hidden behind the still-open tab.
+  (function () {
+    let last = location.pathname + location.search;
+    const check = () => {
+      const now = location.pathname + location.search;
+      if (now !== last) { last = now; if (document.documentElement.classList.contains('hoq-tab')) closeDiscord(); }
+    };
+    ['pushState', 'replaceState'].forEach((m) => {
+      const orig = history[m];
+      if (typeof orig === 'function') history[m] = function () { const r = orig.apply(this, arguments); try { check(); } catch (e) {} return r; };
+    });
+    window.addEventListener('popstate', check);
+  })();
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDiscord(); });
   window.addEventListener('resize', () => {
     if (document.documentElement.classList.contains('hoq-tab')) hoqTabMetrics();
@@ -3892,6 +4417,33 @@ function myId() {
   let id = localStorage.getItem('hoqId');
   if (!id) { id = 'u' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('hoqId', id); }
   return id;
+}
+
+// The social identity: the logged-in user's PUBLIC SoundCloud handle + avatar —
+// no accounts, no private data (never an email or anything private). Pulled from
+// the page and cached; a stable id is derived from the profile slug (or avatar
+// token) so posts stay attributed across sessions.
+function hoqMe() {
+  const av = (typeof findUserAvatar === 'function' ? findUserAvatar() : '') || '';
+  let name = '';
+  const nb = document.querySelector('.userNav__usernameButton, .header__userNavButton, .profileMenu__username');
+  if (nb) name = (nb.getAttribute('title') || nb.textContent || '').trim();
+  if (!name) name = (localStorage.getItem('hoqDiscord') || '').trim();
+  if (!name) name = 'Someone';
+  let url = (localStorage.getItem('hoqSC') || '').trim();
+  if (!url || /\/you$/.test(url)) {
+    const prof = document.querySelector('.profileMenu a.headerMenu__link[href^="/"]:not([href="/you"])');
+    const href = prof ? prof.getAttribute('href') : '';
+    if (href) url = 'https://soundcloud.com' + href;
+  }
+  let id = '';
+  const slug = ((url || '').match(/soundcloud\.com\/([^\/?#]+)/) || [])[1];
+  if (slug && slug !== 'you') id = 'sc_' + slug;
+  if (!id) { const m = av.match(/avatars-([A-Za-z0-9]+)/); if (m) id = 'sc_' + m[1]; }
+  if (!id) id = localStorage.getItem('hoqUid') || myId();
+  if (id.indexOf('sc_') === 0) localStorage.setItem('hoqUid', id);
+  url = (url || '').split('?')[0].split('#')[0]; // drop utm/share query junk
+  return { id, name, avatar: av, url };
 }
 
 // Real song position / duration / play-state from the player UI.
@@ -4037,11 +4589,11 @@ function startShareButton() {
       // icon buttons there. Hidden while unmounted so it can never float loose.
       '#hoq-share{display:none}' +
       '.playbackSoundBadge__actions #hoq-share{display:inline-flex;align-items:center;justify-content:center;' +
-      'width:26px;height:26px;margin-left:10px;padding:0;background:none;border:0;' +
-      'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
+      'width:30px;height:30px;margin-left:10px;padding:0;background:none;border:0;' +
+      'border-radius:7px;cursor:pointer;color:#fff;flex:0 0 auto;' +
       'transition:color .15s ease,background .15s ease}' +
       '.playbackSoundBadge__actions #hoq-share:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
-      '.playbackSoundBadge__actions #hoq-share svg{width:15px;height:15px;flex:0 0 auto}' +
+      '.playbackSoundBadge__actions #hoq-share svg{width:16px;height:16px;flex:0 0 auto}' +
       // The label becomes the tooltip once we're icon-only.
       '.playbackSoundBadge__actions #hoq-share span{display:none}' +
       '.playbackSoundBadge__actions #hoq-share.done{color:var(--sc-accent,#ff5500);cursor:default}' +
@@ -4094,6 +4646,32 @@ function startShareButton() {
 // "Play in Discord" — same payload as Share, but flagged so the host marks
 // it as a play request. Sits above the Share button and shares its styling.
 let _hoqLastQueued = '';
+let _hoqLastRowBtn = null;   // the per-row queue button last clicked, so a failure can undo it
+
+// The host answers every play request. Both buttons flip to "Queued" the moment
+// they're clicked, so a request that never reached Discord (no webhook, Discord
+// refused it) used to look like it worked — and the one-per-track lock then
+// blocked a retry. A failure undoes the optimistic state and shows it in red.
+window.__hoqPlayResult = function (ok, reason) {
+  const row = _hoqLastRowBtn;
+  _hoqLastRowBtn = null;
+  if (ok) return;
+  _hoqLastQueued = '';   // let the same track be tried again
+  const msg = "Didn't send: " + reason;
+  if (row) {
+    row.classList.remove('done');
+    row.classList.add('fail');
+    row.innerHTML = HOQ_Q_PLAY;
+    row.title = msg;
+    setTimeout(() => { row.classList.remove('fail'); row.title = 'Play in Discord'; }, 4000);
+  }
+  const bar = document.getElementById('hoq-playbtn');
+  if (bar) {
+    bar.classList.add('fail');
+    if (bar._hoqFlash) bar._hoqFlash(msg);
+    setTimeout(() => bar.classList.remove('fail'), 4000);
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Queue ANY track, not just the one playing. The bot resolves from the URL, so
@@ -4205,7 +4783,7 @@ function addQueueButtons(d) {
       e.preventDefault();
       e.stopPropagation();   // don't let the row navigate / start playback
       if (b.classList.contains('done')) return;
-      if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued'; }
+      if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued'; _hoqLastRowBtn = b; }
     });
     try { if (d.defaultView.getComputedStyle(row).position === 'static') row.style.position = 'relative'; } catch (e) {}
     row.appendChild(b);
@@ -4242,8 +4820,8 @@ function startPlayButton() {
       // icon buttons there. Hidden while unmounted so it can never float loose.
       '#hoq-playbtn{display:none}' +
       '.playbackSoundBadge__actions #hoq-playbtn{display:inline-flex;align-items:center;justify-content:center;' +
-      'width:26px;height:26px;margin-left:10px;padding:0;background:none;border:0;' +
-      'border-radius:7px;cursor:pointer;color:#b4b4b8;flex:0 0 auto;' +
+      'width:30px;height:30px;margin-left:10px;padding:0;background:none;border:0;' +
+      'border-radius:7px;cursor:pointer;color:#fff;flex:0 0 auto;' +
       'transition:color .15s ease,background .15s ease}' +
       '.playbackSoundBadge__actions #hoq-playbtn:hover{color:var(--sc-accent,#ff5500);background:rgba(255,255,255,0.09)}' +
       // Hairline before the pair so the Discord actions read as ours rather than
@@ -4251,11 +4829,13 @@ function startPlayButton() {
       '.playbackSoundBadge__actions #hoq-playbtn{position:relative;margin-left:17px}' +
       '.playbackSoundBadge__actions #hoq-playbtn::before{content:"";position:absolute;left:-9px;' +
       'top:5px;bottom:5px;width:1px;background:rgba(255,255,255,0.15)}' +
-      '.playbackSoundBadge__actions #hoq-playbtn svg{width:15px;height:15px;flex:0 0 auto}' +
+      '.playbackSoundBadge__actions #hoq-playbtn svg{width:16px;height:16px;flex:0 0 auto}' +
       // The label becomes the tooltip once we're icon-only.
       '.playbackSoundBadge__actions #hoq-playbtn span{display:none}' +
       '.playbackSoundBadge__actions #hoq-playbtn.done{color:var(--sc-accent,#ff5500);cursor:default}' +
-      '.playbackSoundBadge__actions #hoq-playbtn.done:hover{background:none}';
+      '.playbackSoundBadge__actions #hoq-playbtn.done:hover{background:none}' +
+      // Set by __hoqPlayResult when a request didn't reach Discord.
+      '#hoq-playbtn.fail,.hoq-q.fail{color:#e5484d !important}';
     document.head.appendChild(st);
   }
 
@@ -4307,10 +4887,13 @@ function startPlayButton() {
     // The bot needs a real track link to resolve; a title alone is no use.
     if (!payload.url) { flash('No track link'); return; }
     if (k === _hoqLastQueued) return;   // one request per track
+    _hoqLastRowBtn = null;              // this request is the bar's, not a row's
     scPost('playreq:' + JSON.stringify(payload));
+    // Optimistic: __hoqPlayResult undoes this if the host reports a failure.
     _hoqLastQueued = k;
     refresh();
   };
+  btn._hoqFlash = flash;   // __hoqPlayResult shows the failure reason through this
 
   document.body.appendChild(btn);
   refresh();
@@ -4444,7 +5027,8 @@ function removeClutter() {
   // e.g. the profile header lives in an .l-container).
   const STRUCT_SEL =
     '.l-container, .l-content, #content, main, .header, .l-fixed-top, ' +
-    '.l-listen-wrapper, .l-about, .l-user, .userInfoBar, [class*="profileHead" i]';
+    '.l-listen-wrapper, .l-about, .l-user, .userInfoBar, ' +
+    '.l-user-hero, .profileHeader, .profileHeaderBackground, .profileHeaderInfo';
   const isStruct = (el) => !!(el && el.matches && el.matches(STRUCT_SEL));
   // Hide + tag so diagnostics can tell OUR hides from SoundCloud's own.
   const kill = (el) => {
@@ -4609,32 +5193,81 @@ function removeClutter() {
 // 3D tilt: home tiles lean toward the cursor for a "3D site" feel.
 // Event-delegated (tiles load lazily) + only on the home/discover pages.
 // ---------------------------------------------------------------------------
+// Ctrl+Shift+C forwards to the host, which opens the real DevTools and turns on
+// its element inspector (Overlay.setInspectMode) so hover/click selects nodes in
+// the Elements panel. (Ctrl+Shift+E was dropped — it's AMD ReLive's record key.)
+function setupInspectKey() {
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
+      e.preventDefault(); e.stopPropagation(); scPost('inspect');
+    }
+  }, true);
+}
+// The profile-tab bar and the library/collection nav lean toward the cursor
+// with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
+// it survives SoundCloud's re-renders; gated by the "3D tab bars" toggle.
+function setupTabTilt() {
+  const SEL = '.userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link';
+  const MAX_Y = 12, MAX_X = 7, LIFT = 12;
+  let cur = null, px = 0, py = 0, raf = 0;
+  const reset = (t) => { if (!t) return; t.style.transform = ''; t.style.transition = 'transform .3s ease'; t.classList.remove('hoq-tt'); };
+  const apply = () => {
+    raf = 0; if (!cur) return;
+    cur.style.transform = 'perspective(700px) rotateX(' + (-py * MAX_X).toFixed(2) + 'deg) rotateY(' +
+      (px * MAX_Y).toFixed(2) + 'deg) translateZ(' + LIFT + 'px)';
+  };
+  document.addEventListener('mousemove', (e) => {
+    if (!effectOn('tabtilt')) { if (cur) { reset(cur); cur = null; } return; }
+    const t = e.target.closest && e.target.closest(SEL);
+    if (t !== cur) { reset(cur); cur = t; if (cur) { cur.classList.add('hoq-tt'); cur.style.transition = 'transform .05s linear'; } }
+    if (!cur) return;
+    const r = cur.getBoundingClientRect(); if (!r.width) return;
+    px = (e.clientX - r.left) / r.width - 0.5;
+    py = (e.clientY - r.top) / r.height - 0.5;
+    if (!raf) raf = requestAnimationFrame(apply);
+  }, { passive: true });
+  document.addEventListener('mouseleave', () => { if (cur) { reset(cur); cur = null; } if (raf) { cancelAnimationFrame(raf); raf = 0; } }, true);
+}
 function setupTilt() {
   const SEL = '.playableTile, .audibleTile, .homeShortcutsModule__item, .mixedSelectionModule__item';
   const MAX_Y = 20; // strong left/right lean (very visible, doesn't overflow the top)
   const MAX_X = 7;  // gentle up/down (kept small so tiles don't poke over the row above)
   const onHome = () => /^\/(discover|stream|home)?$/.test(location.pathname) || location.pathname === '/';
-  let cur = null;
+  let cur = null, px = 0, py = 0, raf = 0;
   const reset = (t) => { if (!t) return; t.style.transform = ''; t.style.transition = 'transform .35s ease'; t.classList.remove('hoq-tilt'); };
+  // Write the transform at most once per frame. The old code set it synchronously
+  // on every mousemove event (dozens/sec), thrashing layout+paint on the whole
+  // tile subtree — that was the lag. rAF coalesces it to one write per frame.
+  const apply = () => {
+    raf = 0;
+    if (!cur) return;
+    cur.style.transform =
+      'perspective(700px) rotateX(' + (-py * MAX_X).toFixed(2) + 'deg) rotateY(' +
+      (px * MAX_Y).toFixed(2) + 'deg)';
+  };
 
   document.addEventListener('mousemove', (e) => {
     if (!effectOn('tilt')) { if (cur) { reset(cur); cur = null; } return; }
     if (!onHome()) { if (cur) { reset(cur); cur = null; } return; }
     const tile = e.target.closest && e.target.closest(SEL);
-    if (tile !== cur) { reset(cur); cur = tile; }
-    if (!tile) return;
-    const r = tile.getBoundingClientRect();
+    if (tile !== cur) {
+      reset(cur);
+      cur = tile;
+      // Class + transition change only when the hovered tile changes, not every move.
+      if (cur) { cur.classList.add('hoq-tilt'); cur.style.transition = 'transform .05s linear'; }
+    }
+    if (!cur) return;
+    const r = cur.getBoundingClientRect();
     if (!r.width) return;
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    tile.classList.add('hoq-tilt');
-    tile.style.transition = 'transform .05s linear';
-    tile.style.transform =
-      'perspective(700px) rotateX(' + (-py * MAX_X).toFixed(2) + 'deg) rotateY(' +
-      (px * MAX_Y).toFixed(2) + 'deg)';
+    px = (e.clientX - r.left) / r.width - 0.5;
+    py = (e.clientY - r.top) / r.height - 0.5;
+    if (!raf) raf = requestAnimationFrame(apply);
   }, { passive: true });
 
-  document.addEventListener('mouseleave', () => { if (cur) { reset(cur); cur = null; } }, true);
+  document.addEventListener('mouseleave', () => {
+    if (cur) { reset(cur); cur = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+  }, true);
 }
 
 // Track-page cover: follows the mouse in 3D. Only sets transform/transition — no
@@ -4660,6 +5293,233 @@ function setupCoverTilt() {
     py = (e.clientY - r.top) / r.height - 0.5;
     if (!raf) raf = requestAnimationFrame(apply);
   }, { passive: true });
+}
+
+// Ambient mode: a big Spotify-style now-playing view. Reads the current track
+// from the real player bar and mirrors it; controls call the real transport
+// buttons so we never touch playback state directly. Toggled by a button we add
+// into the player bar (and Esc to close).
+function setupAmbientMode() {
+  if (window.__hoqNp) return;
+  window.__hoqNp = true;
+  const big = (u) => u ? u.replace(/-t\d+x\d+\./, '-t500x500.') : '';
+  const artUrl = () => {
+    const el = document.querySelector('.playbackSoundBadge__avatar span.sc-artwork')
+            || document.querySelector('.playControls .playbackSoundBadge__avatar span')
+            || document.querySelector('.playControls .sc-artwork span');
+    if (!el) return '';
+    const bi = getComputedStyle(el).backgroundImage || '';
+    const m = bi.match(/url\(["']?(.*?)["']?\)/);
+    return m ? m[1] : '';
+  };
+  const txt = (sel, attr) => { const e = document.querySelector(sel); return e ? (attr ? (e.getAttribute(attr) || '') : e.textContent || '') : ''; };
+
+  const np = document.createElement('div');
+  np.id = 'hoq-np';
+  np.innerHTML =
+    '<canvas id="hoq-np-gl"></canvas>' +
+    '<div class="np-bg"></div><div class="np-scrim"></div>' +
+    '<button class="np-close" title="Close (Esc)">✕</button>' +
+    '<div class="np-art"></div>' +
+    '<div class="np-side"><div class="np-eyebrow">Now playing</div><h1 class="np-title"></h1><div class="np-artist"></div>' +
+    '<div class="np-bar"><i></i></div><div class="np-times"><span class="np-cur">0:00</span><span class="np-dur">0:00</span></div>' +
+    '<div class="np-ctrls">' +
+      '<button class="np-prev" title="Previous"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>' +
+      '<button class="np-play" title="Play/Pause"></button>' +
+      '<button class="np-next" title="Next"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>' +
+      '<button class="np-like" title="Like"><svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor"><path d="M7.978 5c.653-1.334 1.644-2 2.972-2 1.992 0 3.405 1.657 2.971 4-.289 1.561-2.27 3.895-5.943 7C4.19 10.895 2.21 8.561 2.035 7c-.26-2.343.947-4 2.972-4 1.35 0 2.34.666 2.971 2z"/></svg></button>' +
+    '</div></div>';
+  (document.body || document.documentElement).appendChild(np);
+
+  let lastArt = '';
+  const sync = () => {
+    const u = big(artUrl());
+    if (u && u !== lastArt) { lastArt = u; np.querySelector('.np-art').style.backgroundImage = 'url("' + u + '")'; np.querySelector('.np-bg').style.backgroundImage = 'url("' + u + '")'; }
+    np.querySelector('.np-title').textContent = (txt('.playbackSoundBadge__titleLink', 'title') || txt('.playbackSoundBadge__titleLink')).trim();
+    np.querySelector('.np-artist').textContent = (txt('.playbackSoundBadge__lightLink', 'title') || txt('.playbackSoundBadge__lightLink')).trim();
+    np.querySelector('.np-bar i').style.width = (document.querySelector('.playbackTimeline__progressBar') || {}).style && document.querySelector('.playbackTimeline__progressBar').style.width || '0%';
+    np.querySelector('.np-cur').textContent = txt('.playbackTimeline__timePassed span[aria-hidden]');
+    np.querySelector('.np-dur').textContent = txt('.playbackTimeline__duration span[aria-hidden]');
+    const playing = !!document.querySelector('.playControls__play.playing');
+    np.querySelector('.np-play').innerHTML = playing
+      ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    // reflect like state: accent + full opacity when the track is liked
+    const liked = !!document.querySelector('.playbackSoundBadge__like.sc-button-selected');
+    const lk = np.querySelector('.np-like');
+    lk.style.color = liked ? 'var(--sc-accent, #ff5500)' : '#fff';
+    lk.style.opacity = liked ? '1' : '.85';
+    // match the real Like button's accent glow when liked
+    lk.style.filter = liked ? 'drop-shadow(0 0 5px color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent))' : 'none';
+  };
+  const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); setTimeout(sync, 120); };
+  np.querySelector('.np-play').onclick = () => click('.playControls__play');
+  np.querySelector('.np-prev').onclick = () => click('.skipControl__previous');
+  np.querySelector('.np-next').onclick = () => click('.skipControl__next');
+  np.querySelector('.np-like').onclick = () => click('.playbackSoundBadge__like');
+  np.querySelector('.np-close').onclick = () => close();
+  // click the empty backdrop (not the art/controls) to close
+  np.querySelector('.np-scrim').onclick = () => close();
+  np.querySelector('.np-bg').onclick = () => close();
+  // seek: click the overlay bar → click the same fraction on the real timeline
+  np.querySelector('.np-bar').onclick = (e) => {
+    const wrap = document.querySelector('.playbackTimeline__progressWrapper');
+    if (!wrap) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const wr = wrap.getBoundingClientRect();
+    wrap.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: wr.left + frac * wr.width, clientY: wr.top + wr.height / 2 }));
+    wrap.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, clientX: wr.left + frac * wr.width, clientY: wr.top + wr.height / 2 }));
+    setTimeout(sync, 150);
+  };
+
+  // Subtle 3D: the art tilts toward the cursor and the blurred background
+  // parallaxes the other way for depth. rAF-throttled; honours the tilt effect.
+  let tpx = 0, tpy = 0, traf = 0;
+  const tiltApply = () => {
+    traf = 0;
+    const art = np.querySelector('.np-art'), bg = np.querySelector('.np-bg');
+    if (art) art.style.transform = 'perspective(900px) rotateY(' + (tpx * 14).toFixed(1) + 'deg) rotateX(' + (-tpy * 10).toFixed(1) + 'deg)';
+    if (bg) bg.style.transform = 'scale(1.15) translate(' + (-tpx * 2.4).toFixed(1) + '%,' + (-tpy * 2.4).toFixed(1) + '%)';
+  };
+  np.addEventListener('mousemove', (e) => {
+    if (typeof effectOn === 'function' && !effectOn('tilt')) return;
+    const r = np.getBoundingClientRect();
+    tpx = (e.clientX - r.left) / r.width - 0.5;
+    tpy = (e.clientY - r.top) / r.height - 0.5;
+    if (!traf) traf = requestAnimationFrame(tiltApply);
+  }, { passive: true });
+  np.addEventListener('mouseleave', () => { const art = np.querySelector('.np-art'); if (art) art.style.transform = ''; });
+
+  // --- WebGL 3D backdrop (Three.js, lazy-loaded on first open) -----------------
+  // A flowing particle nebula in the track's accent colour: a soft cloud of
+  // additive-blended points that breathe and drift, over a faint far starfield,
+  // with the camera parallaxing to the cursor. If Three.js can't load, the
+  // blurred-cover background stays and nothing breaks.
+  let gl = null, glRaf = 0, glAccent = '', glBusy = false;
+  const loadThree = () => new Promise((res) => {
+    if (window.THREE) return res(true);
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    s.onload = () => res(!!window.THREE); s.onerror = () => res(false);
+    document.head.appendChild(s);
+  });
+  const accentColor = () => (getComputedStyle(document.documentElement).getPropertyValue('--sc-accent') || '#ff5500').trim() || '#ff5500';
+  const recolorGL = () => {
+    if (!gl) return; const acc = accentColor(); if (acc === glAccent) return; glAccent = acc;
+    const T = gl.T; let col; try { col = new T.Color(acc); } catch (e) { return; }
+    const hsl = {}; col.getHSL(hsl);
+    gl.cloudMat.color = col.clone();
+    gl.coreMat.color = new T.Color().setHSL(hsl.h, Math.min(1, hsl.s + 0.1), Math.min(0.85, hsl.l + 0.35));
+    gl.starMat.color = new T.Color().setHSL(hsl.h, 0.4, 0.7);
+  };
+  const buildGL = () => {
+    const T = window.THREE, cv = np.querySelector('#hoq-np-gl');
+    const renderer = new T.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(np.clientWidth, np.clientHeight);
+    const scene = new T.Scene();
+    const camera = new T.PerspectiveCamera(55, np.clientWidth / np.clientHeight, 0.1, 100); camera.position.z = 4.6;
+    // soft round glowing dot texture so particles read as a nebula, not squares
+    const dc = document.createElement('canvas'); dc.width = dc.height = 64;
+    const dx = dc.getContext('2d'); const rg = dx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.35, 'rgba(255,255,255,0.55)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    dx.fillStyle = rg; dx.fillRect(0, 0, 64, 64);
+    const dot = new T.CanvasTexture(dc);
+    // nebula: N particles in a soft flattened cloud; keep base positions to flow from
+    const N = 3600, pos = new Float32Array(N * 3), base = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const r = Math.pow(Math.random(), 0.55) * 2.9;
+      const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+      const x = r * Math.sin(ph) * Math.cos(th), y = r * Math.sin(ph) * Math.sin(th) * 0.62, z = r * Math.cos(ph);
+      pos[i*3] = base[i*3] = x; pos[i*3+1] = base[i*3+1] = y; pos[i*3+2] = base[i*3+2] = z;
+    }
+    const cg = new T.BufferGeometry(); cg.setAttribute('position', new T.BufferAttribute(pos, 3));
+    const cloudMat = new T.PointsMaterial({ size: 0.13, map: dot, transparent: true, opacity: 0.85, blending: T.AdditiveBlending, depthWrite: false });
+    const cloud = new T.Points(cg, cloudMat); scene.add(cloud);
+    // a small bright core for a glowing centre
+    const coreMat = new T.PointsMaterial({ size: 0.3, map: dot, transparent: true, opacity: 0.8, blending: T.AdditiveBlending, depthWrite: false });
+    const coreN = 300, cpos = new Float32Array(coreN * 3);
+    for (let i = 0; i < coreN * 3; i++) cpos[i] = (Math.random() - 0.5) * 1.1;
+    const coreG = new T.BufferGeometry(); coreG.setAttribute('position', new T.BufferAttribute(cpos, 3));
+    const core = new T.Points(coreG, coreMat); scene.add(core);
+    // faint far starfield for depth
+    const sN = 600, spos = new Float32Array(sN * 3); for (let i = 0; i < sN * 3; i++) spos[i] = (Math.random() - 0.5) * 44;
+    const sg = new T.BufferGeometry(); sg.setAttribute('position', new T.BufferAttribute(spos, 3));
+    const starMat = new T.PointsMaterial({ size: 0.12, map: dot, transparent: true, opacity: 0.5, blending: T.AdditiveBlending, depthWrite: false });
+    const stars = new T.Points(sg, starMat); scene.add(stars);
+    gl = { renderer, scene, camera, cloud, cloudMat, core, coreMat, base, stars, starMat, clock: new T.Clock(), T };
+    recolorGL();
+    addEventListener('resize', () => { if (!gl) return; gl.camera.aspect = np.clientWidth / np.clientHeight; gl.camera.updateProjectionMatrix(); gl.renderer.setSize(np.clientWidth, np.clientHeight); });
+  };
+  const glFrame = () => {
+    if (!gl) return; const t = gl.clock.getElapsedTime();
+    // real audio: bass energy drives the pulse; smoothed, with a gentle idle
+    // fallback when there's no analyser yet.
+    let bass = 0, lvl = 0;
+    const an = window.__hoqAudioAnalyser;
+    if (an) {
+      if (!gl.freq) gl.freq = new Uint8Array(an.frequencyBinCount);
+      an.getByteFrequencyData(gl.freq);
+      let bs = 0; for (let i = 1; i < 10; i++) bs += gl.freq[i]; bass = bs / (9 * 255);
+      let s = 0; for (let i = 0; i < gl.freq.length; i++) s += gl.freq[i]; lvl = s / (gl.freq.length * 255);
+    }
+    gl.bass = (gl.bass || 0) + (bass - (gl.bass || 0)) * 0.25;      // fast attack
+    gl.lvl  = (gl.lvl  || 0) + (lvl  - (gl.lvl  || 0)) * 0.1;
+    const beat = an ? gl.bass : (0.35 + Math.sin(t * 1.4) * 0.12);   // idle pulse w/o audio
+    const spread = 0.14 + beat * 0.34;
+    // flow: displace each particle from its base along a drifting field, pushed
+    // outward on the beat
+    const p = gl.cloud.geometry.attributes.position.array, b = gl.base, n = b.length / 3;
+    for (let i = 0; i < n; i++) {
+      const bx = b[i*3], by = b[i*3+1], bz = b[i*3+2];
+      p[i*3]   = bx * (1 + beat * 0.16) + Math.sin(t * 0.5 + by * 1.5) * spread;
+      p[i*3+1] = by * (1 + beat * 0.16) + Math.cos(t * 0.4 + bx * 1.5) * spread;
+      p[i*3+2] = bz * (1 + beat * 0.16) + Math.sin(t * 0.45 + bx * 1.2 + by * 0.8) * spread;
+    }
+    gl.cloud.geometry.attributes.position.needsUpdate = true;
+    gl.cloud.rotation.y = t * 0.05;
+    gl.cloudMat.opacity = 0.7 + Math.min(0.3, (an ? gl.lvl : 0.2) * 0.9);
+    gl.core.rotation.y = -t * 0.15;
+    gl.core.scale.setScalar(1 + beat * 0.9);
+    gl.coreMat.opacity = 0.55 + beat * 0.45;
+    gl.camera.position.x += (tpx * 0.9 - gl.camera.position.x) * 0.05;
+    gl.camera.position.y += (-tpy * 0.9 - gl.camera.position.y) * 0.05;
+    gl.camera.lookAt(0, 0, 0);
+    gl.stars.rotation.y = t * 0.015;
+    gl.renderer.render(gl.scene, gl.camera);
+  };
+  const ensureGL = async () => {
+    if (gl || glBusy) return;
+    if (typeof lowEndOn === 'function' && lowEndOn()) return; // no WebGL nebula on low-end
+    glBusy = true;
+    const ok = await loadThree();
+    if (ok) { try {
+      buildGL(); document.documentElement.classList.add('hoq-np-gl');
+      const loop = () => { if (np.classList.contains('on') && !document.documentElement.classList.contains('hoq-no-anim')) glFrame(); glRaf = requestAnimationFrame(loop); };
+      loop();
+    } catch (e) {} }
+    glBusy = false;
+  };
+
+  let iv = 0;
+  const open = () => { sync(); np.classList.add('on'); document.documentElement.classList.add('hoq-np-open'); ensureGL(); if (!iv) iv = setInterval(() => { if (np.classList.contains('on')) { sync(); recolorGL(); } }, 500); };
+  const close = () => { np.classList.remove('on'); document.documentElement.classList.remove('hoq-np-open'); };
+  window.__hoqNpToggle = () => (np.classList.contains('on') ? close() : open());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && np.classList.contains('on')) close(); });
+
+  // Add the trigger button into the player bar; re-add on the interval since the
+  // badge re-renders per track.
+  const addBtn = () => {
+    const actions = document.querySelector('.playbackSoundBadge__actions');
+    if (!actions || actions.querySelector('#hoq-ambient-btn')) return;
+    const b = document.createElement('button');
+    b.id = 'hoq-ambient-btn'; b.title = 'Ambient mode';
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M4 4h7v2H6v5H4V4zm9 0h7v7h-2V6h-5V4zM6 13v5h5v2H4v-7h2zm12 0h2v7h-7v-2h5v-5z"/></svg>';
+    b.onclick = () => window.__hoqNpToggle();
+    actions.appendChild(b);
+  };
+  addBtn();
+  setInterval(addBtn, 1200);
 }
 
 // Push the "FANS / leaderboard" module to the BOTTOM of the right sidebar (under
@@ -4964,8 +5824,11 @@ function boot() {
   ensureAdBadge(); // the page-world __scAdKiller toggles this
   buildContextMenu();   // custom right-click menu (native one is off)
   setupTilt();          // 3D tilt on home tiles
+  setupTabTilt();       // 3D lift on profile/library tab bars
+  setupInspectKey();    // Ctrl+Shift+C -> real DevTools element inspector
   setupWaveInteract();  // waveform bars rise toward the cursor
   setupCoverTilt();     // track cover follows the mouse in 3D
+  setupAmbientMode();   // big now-playing view (button in the player bar)
   removeClutter();
   // Debounced + on a gentle interval instead of firing on every mutation — a
   // constant stream of DOM writes looks like bot activity to SoundCloud.
@@ -4981,8 +5844,25 @@ function boot() {
       removeClutter();
     }, performance.now() < 5000 ? 150 : 800);
   };
-  const obs = new MutationObserver(schedule);
+  // The "Next up" queue is a plain class toggle on SC's side; mirror it onto
+  // <html> so our CSS can lift the player bar above the page while it's open
+  // (the right sidebar otherwise overlaps the queue and steals its clicks).
+  const syncQueueOpen = () => { try { document.documentElement.classList.toggle('hoq-queue-open', !!document.querySelector('.queue.m-visible')); } catch (e) {} };
+  // The queue shows/hides by toggling `m-visible` on the existing .queue node —
+  // an attribute change, which a childList observer misses. Attach a narrow
+  // attribute observer to the queue container once it mounts.
+  let queueAttrObs = null;
+  const watchQueue = () => {
+    const q = document.querySelector('.playControls__queue');
+    if (q && !queueAttrObs) {
+      queueAttrObs = new MutationObserver(syncQueueOpen);
+      queueAttrObs.observe(q, { attributes: true, attributeFilter: ['class'], subtree: true });
+      syncQueueOpen();
+    }
+  };
+  const obs = new MutationObserver(() => { watchQueue(); syncQueueOpen(); schedule(); });
   obs.observe(document.body, { childList: true, subtree: true });
+  watchQueue(); syncQueueOpen();
   // Cold load shows a burst of SoundCloud orange (follow buttons, badges) before
   // the first debounced pass lands. These few extra early passes close that window
   // without turning into the sustained write stream the debounce exists to avoid.
@@ -5007,6 +5887,12 @@ function boot() {
   }, 1000);
   setInterval(() => { try { buildCustomWave(); } catch (e) {} }, 600); // our waveform + playhead
   applyVizState();  // apply saved "song visualizer bar" on/off before it draws
+  // Ambient-glow layer (opt-in effect): one fixed div the CSS lights up when
+  // html.hoq-ambient is set. Created once; the accent it uses is the live var.
+  if (!document.getElementById('hoq-ambient')) {
+    const amb = document.createElement('div'); amb.id = 'hoq-ambient';
+    (document.body || document.documentElement).appendChild(amb);
+  }
   applyFxClasses(); // apply saved CSS-gated optional effects
   startPlayerViz(); // bottom-player seek bar → flowing bouncy accent visualizer
   startOverlayScrollbar(); // custom floating accent scrollbar (no side gutter)
