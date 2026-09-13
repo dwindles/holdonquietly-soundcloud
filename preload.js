@@ -4605,6 +4605,32 @@ function startShareButton() {
 // "Play in Discord" — same payload as Share, but flagged so the host marks
 // it as a play request. Sits above the Share button and shares its styling.
 let _hoqLastQueued = '';
+let _hoqLastRowBtn = null;   // the per-row queue button last clicked, so a failure can undo it
+
+// The host answers every play request. Both buttons flip to "Queued" the moment
+// they're clicked, so a request that never reached Discord (no webhook, Discord
+// refused it) used to look like it worked — and the one-per-track lock then
+// blocked a retry. A failure undoes the optimistic state and shows it in red.
+window.__hoqPlayResult = function (ok, reason) {
+  const row = _hoqLastRowBtn;
+  _hoqLastRowBtn = null;
+  if (ok) return;
+  _hoqLastQueued = '';   // let the same track be tried again
+  const msg = "Didn't send: " + reason;
+  if (row) {
+    row.classList.remove('done');
+    row.classList.add('fail');
+    row.innerHTML = HOQ_Q_PLAY;
+    row.title = msg;
+    setTimeout(() => { row.classList.remove('fail'); row.title = 'Play in Discord'; }, 4000);
+  }
+  const bar = document.getElementById('hoq-playbtn');
+  if (bar) {
+    bar.classList.add('fail');
+    if (bar._hoqFlash) bar._hoqFlash(msg);
+    setTimeout(() => bar.classList.remove('fail'), 4000);
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Queue ANY track, not just the one playing. The bot resolves from the URL, so
@@ -4716,7 +4742,7 @@ function addQueueButtons(d) {
       e.preventDefault();
       e.stopPropagation();   // don't let the row navigate / start playback
       if (b.classList.contains('done')) return;
-      if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued'; }
+      if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued'; _hoqLastRowBtn = b; }
     });
     try { if (d.defaultView.getComputedStyle(row).position === 'static') row.style.position = 'relative'; } catch (e) {}
     row.appendChild(b);
@@ -4766,7 +4792,9 @@ function startPlayButton() {
       // The label becomes the tooltip once we're icon-only.
       '.playbackSoundBadge__actions #hoq-playbtn span{display:none}' +
       '.playbackSoundBadge__actions #hoq-playbtn.done{color:var(--sc-accent,#ff5500);cursor:default}' +
-      '.playbackSoundBadge__actions #hoq-playbtn.done:hover{background:none}';
+      '.playbackSoundBadge__actions #hoq-playbtn.done:hover{background:none}' +
+      // Set by __hoqPlayResult when a request didn't reach Discord.
+      '#hoq-playbtn.fail,.hoq-q.fail{color:#e5484d !important}';
     document.head.appendChild(st);
   }
 
@@ -4818,10 +4846,13 @@ function startPlayButton() {
     // The bot needs a real track link to resolve; a title alone is no use.
     if (!payload.url) { flash('No track link'); return; }
     if (k === _hoqLastQueued) return;   // one request per track
+    _hoqLastRowBtn = null;              // this request is the bar's, not a row's
     scPost('playreq:' + JSON.stringify(payload));
+    // Optimistic: __hoqPlayResult undoes this if the host reports a failure.
     _hoqLastQueued = k;
     refresh();
   };
+  btn._hoqFlash = flash;   // __hoqPlayResult shows the failure reason through this
 
   document.body.appendChild(btn);
   refresh();
