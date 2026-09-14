@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         holdonquietly for SoundCloud
 // @namespace    https://github.com/dwindles/holdonquietly-soundcloud
-// @version      2026.09.13
+// @version      2026.09.14
 // @description  The holdonquietly theme for SoundCloud, on mobile.
 // @author       dwindles
 // @match        https://soundcloud.com/*
@@ -959,6 +959,20 @@ const BASE_CSS = `
   html.hoq-mobile #hoq-discord .hoq-feed-post { margin-left: auto !important; }
   html.hoq-mobile #hoq-discord .hoq-feed-avatar { width: 34px !important; height: 34px !important; }
   html.hoq-mobile #hoq-discord .hoq-sub { flex-wrap: wrap !important; }
+  /* hoq tab (Social/Feed/Settings) on a phone: the desktop grids are too wide.
+     Stats 4-across -> 2x2; top artists/tracks 2-col -> stacked; and the settings
+     toggles' 3-column override (a high-specificity rule the base mobile sheet
+     can't reach) -> one per row. */
+  html.hoq-mobile #hoq-discord .hoq-stat-row { grid-template-columns: 1fr 1fr !important; }
+  html.hoq-mobile #hoq-discord .hoq-stat-cols { grid-template-columns: 1fr !important; }
+  html.hoq-mobile #hoq-discord .hoq-settings-host #sc-palette .pal-grid { grid-template-columns: 1fr !important; }
+  html.hoq-mobile #hoq-discord .hoq-settings-host #sc-palette > .row,
+  html.hoq-mobile #hoq-discord .hoq-settings-host #sc-palette > .bgurl,
+  html.hoq-mobile #hoq-discord .hoq-settings-host #sc-palette > .pal-note,
+  html.hoq-mobile #hoq-discord .hoq-settings-host #sc-palette > .btn-2up { max-width: 100% !important; }
+  /* the widened hoq card + activity/discord rows also need to fit 390px */
+  html.hoq-mobile #hoq-discord .hoq-dc-card { max-width: 100% !important; padding: 16px 12px !important; }
+  html.hoq-mobile #hoq-discord .hoq-dc-quick { flex-wrap: wrap !important; }
 
   #hoq-np .np-art { transition: transform .14s ease; }
   html.hoq-no-anim #hoq-np .np-art { transition: none !important; }
