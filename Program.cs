@@ -21,8 +21,15 @@ class Program
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
     [DllImport("shell32.dll")] static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string id);
+    [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id);
     const int WM_NCLBUTTONDOWN = 0xA1;
     const int HTCAPTION = 0x2;
+    // Global media keys: registered system-wide so play/pause/next/prev work while a
+    // game or any other app is focused. Handled in HotkeyHook -> window.__hoqMedia.
+    const int WM_HOTKEY = 0x0312;
+    const uint VK_MEDIA_NEXT_TRACK = 0xB0, VK_MEDIA_PREV_TRACK = 0xB1, VK_MEDIA_STOP = 0xB2, VK_MEDIA_PLAY_PAUSE = 0xB3;
+    const int HK_PLAYPAUSE = 0xB001, HK_NEXT = 0xB002, HK_PREV = 0xB003, HK_STOP = 0xB004;
 
     static System.Windows.Forms.NotifyIcon tray;
     static bool realQuit = false;
@@ -216,6 +223,8 @@ class Program
             Log("preload injected OK");
         }
         catch (Exception ex) { Log("preload FAIL: " + ex.Message); }
+
+        try { SetupMediaKeys(); } catch (Exception ex) { Log("mediakeys FAIL: " + ex.Message); }
 
         // Network ad/tracker blocking.
         core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
@@ -756,6 +765,12 @@ class Program
         }
         switch (m)
         {
+            case "mini:on":
+                EnterMini();
+                break;
+            case "mini:off":
+                ExitMini();
+                break;
             case "win:minimize":
                 win.WindowState = WindowState.Minimized;
                 break;
@@ -794,6 +809,70 @@ class Program
                 catch { }
                 break;
         }
+    }
+
+    // Register the hardware media keys system-wide and route them to the page.
+    static void SetupMediaKeys()
+    {
+        var hwnd = new WindowInteropHelper(win).Handle;
+        var src = HwndSource.FromHwnd(hwnd);
+        if (src == null) return;
+        src.AddHook(HotkeyHook);
+        // fsModifiers 0: the bare media transport keys. Best-effort — if another app
+        // already owns one, that RegisterHotKey simply returns false.
+        RegisterHotKey(hwnd, HK_PLAYPAUSE, 0, VK_MEDIA_PLAY_PAUSE);
+        RegisterHotKey(hwnd, HK_NEXT, 0, VK_MEDIA_NEXT_TRACK);
+        RegisterHotKey(hwnd, HK_PREV, 0, VK_MEDIA_PREV_TRACK);
+        RegisterHotKey(hwnd, HK_STOP, 0, VK_MEDIA_STOP);
+    }
+
+    static IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WM_HOTKEY)
+        {
+            int id = wParam.ToInt32();
+            string act = id == HK_NEXT ? "next" : id == HK_PREV ? "prev" : (id == HK_PLAYPAUSE || id == HK_STOP) ? "playpause" : null;
+            if (act != null)
+            {
+                handled = true;
+                try { win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqMedia && window.__hoqMedia('" + act + "')"); } catch { } }); } catch { }
+            }
+        }
+        return IntPtr.Zero;
+    }
+
+    // Compact / mini player: shrink to a small always-on-top widget, and back.
+    static bool miniOn = false;
+    static Rect miniRestore;
+    static bool miniWasMax = false;
+    static void EnterMini()
+    {
+        if (miniOn) return;
+        try
+        {
+            if (maxed) { miniWasMax = true; ToggleMaximize(); } else miniWasMax = false;
+            miniRestore = new Rect(win.Left, win.Top, win.Width, win.Height);
+            win.MinWidth = 0; win.MinHeight = 0;
+            win.Width = 360; win.Height = 116;
+            var wa = SystemParameters.WorkArea;
+            win.Left = wa.Right - win.Width - 24; win.Top = wa.Top + 24;
+            win.Topmost = true;
+            miniOn = true;
+        }
+        catch { }
+    }
+    static void ExitMini()
+    {
+        if (!miniOn) return;
+        try
+        {
+            win.Topmost = false;
+            win.Width = miniRestore.Width; win.Height = miniRestore.Height;
+            win.Left = miniRestore.X; win.Top = miniRestore.Y;
+            if (miniWasMax) ToggleMaximize();
+            miniOn = false;
+        }
+        catch { }
     }
 
     // Maximize to the working area (so it never covers the taskbar), toggle back.
