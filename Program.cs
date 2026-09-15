@@ -176,6 +176,27 @@ class Program
         core.Settings.AreDevToolsEnabled = true; // real inspector (opened from our context menu / F12)
         try { wv.DefaultBackgroundColor = System.Drawing.Color.FromArgb(11, 11, 12); } catch { }
 
+        // The header "play SoundCloud out of <device>" picker needs enumerateDevices()
+        // to return real device names + ids, and setSinkId() to a specific device to be
+        // allowed — both of which Chromium only unlocks after an audio-input permission
+        // grant. Auto-grant Microphone so the user isn't hit with a "SoundCloud wants
+        // your microphone" prompt on a music app. It is used ONLY to unlock the output
+        // list: preload opens a stream and stops it in the same breath (setupOutputPicker),
+        // never reading any audio. Nothing else changes permission behavior.
+        try
+        {
+            core.PermissionRequested += (s, e) =>
+            {
+                try
+                {
+                    if (e.PermissionKind == CoreWebView2PermissionKind.Microphone)
+                        e.State = CoreWebView2PermissionState.Allow;
+                }
+                catch { }
+            };
+        }
+        catch { }
+
         // Serve the app folder to the page so the injected CSS can load logo.png.
         try
         {
