@@ -46,7 +46,37 @@ function scPost(cmd) {
         node.connect(an);
         window.__hoqAudioAnalyser = an;
       } catch (e) {}
+      try {
+        // THIS context is the one SoundCloud actually plays through, so it is the
+        // one whose output device we can steer with setSinkId (the "play out of…"
+        // picker). Element-level el.setSinkId() aborts in WebView2; context-level
+        // works. Capturing it here — the moment SC wires up its source — is why
+        // this patch has to run before SC's code (it does; injected at doc-start).
+        window.__hoqSCAC = this;
+        if (typeof window.__hoqApplySink === 'function') window.__hoqApplySink();
+      } catch (e) {}
       return node;
+    };
+  } catch (e) {}
+})();
+
+// --- Audio output routing (the header "play out of <device>" picker) ----------
+// SoundCloud's own AudioContext (captured above) drives playback; setSinkId on it
+// moves ALL SoundCloud audio to a chosen device — e.g. your headphones — without
+// touching the Windows default. Storing the choice here (not just in the picker)
+// so it re-applies automatically the instant SC builds its context on first play.
+(() => {
+  try {
+    window.__hoqSinkId = (() => { try { return localStorage.getItem('hoqSinkId') || ''; } catch (e) { return ''; } })();
+    // Returns a promise<bool>. Never rejects, and crucially can only move the
+    // audio or no-op — it never silences it (no graph surgery, just a sink swap).
+    window.__hoqApplySink = function () {
+      const ac = window.__hoqSCAC;
+      const id = window.__hoqSinkId || '';
+      if (!ac || typeof ac.setSinkId !== 'function') return Promise.resolve(false);
+      try {
+        return Promise.resolve(ac.setSinkId(id)).then(() => true).catch(() => false);
+      } catch (e) { return Promise.resolve(false); }
     };
   } catch (e) {}
 })();
@@ -5047,6 +5077,7 @@ function buildVolume() {
 // ---------------------------------------------------------------------------
 function removeClutter() {
   try { buildDiscordTab(); } catch (e) {}
+  try { setupOutputPicker(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
   document.documentElement.classList.toggle('hoq-feed', /\/feed/i.test(location.pathname));
@@ -5250,6 +5281,170 @@ function setupInspectKey() {
       e.preventDefault(); e.stopPropagation(); scPost('inspect');
     }
   }, true);
+}
+
+// Header "play SoundCloud out of <device>" picker. Routes the whole app's audio
+// to a chosen output (e.g. your headphones) via setSinkId on SoundCloud's own
+// AudioContext — independent of the Windows default device. Listing devices by
+// name needs a one-time audio permission (a Chromium rule); the mic stream is
+// requested only to unlock the labels and stopped immediately, never read.
+function setupOutputPicker() {
+  const supported = !!(window.AudioContext && window.AudioContext.prototype &&
+    typeof window.AudioContext.prototype.setSinkId === 'function');
+  if (!supported) return;                                   // no sink switching here
+  if (document.documentElement.classList.contains('hoq-mobile')) return; // phones route at the OS level
+  if (document.getElementById('hoq-out-btn')) return;       // idempotent
+
+  const anchor = document.querySelector('.header__right') ||
+                 document.querySelector('.header__userNav') ||
+                 document.querySelector('.header__middle');
+  if (!anchor) return;                                      // header not ready yet — caller retries
+
+  if (!document.getElementById('hoq-out-css')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-out-css';
+    st.textContent = `
+      #hoq-out-btn { display:inline-flex; align-items:center; justify-content:center;
+        width:34px; height:34px; margin:0 4px; padding:0; border:0; border-radius:9px;
+        background:transparent; color:#c9c9d2; cursor:pointer;
+        transition:color .14s ease, background .14s ease, box-shadow .18s ease; }
+      #hoq-out-btn:hover { color:#fff; background:rgba(255,255,255,0.06); }
+      #hoq-out-btn.on { color:var(--sc-accent,#ff5500);
+        box-shadow:0 0 0 1px color-mix(in srgb, var(--sc-accent,#ff5500) 42%, transparent) inset; }
+      #hoq-out-btn svg { width:18px; height:18px; }
+      #hoq-out-menu { position:fixed; z-index:2147483000; min-width:260px; max-width:340px;
+        padding:8px; border-radius:14px;
+        background:rgba(12,12,16,0.72); border:1px solid rgba(255,255,255,0.10);
+        box-shadow:0 18px 52px rgba(0,0,0,0.55);
+        backdrop-filter:blur(24px) saturate(1.5); -webkit-backdrop-filter:blur(24px) saturate(1.5);
+        color:#e7e7ed; font-family:Inter,-apple-system,Arial,sans-serif;
+        opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none;
+        transition:opacity .13s ease, transform .13s ease; }
+      #hoq-out-menu.show { opacity:1; transform:none; pointer-events:auto; }
+      .hoq-out-head { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+        color:#8a8a95; padding:6px 8px 8px; }
+      .hoq-out-item { display:flex; align-items:center; gap:9px; width:100%; box-sizing:border-box;
+        padding:9px 10px; border:0; border-radius:9px; background:transparent; color:#e7e7ed;
+        font-size:13.5px; text-align:left; cursor:pointer; transition:background .12s ease; }
+      .hoq-out-item:hover { background:rgba(255,255,255,0.07); }
+      .hoq-out-item .tick { width:15px; height:15px; flex:0 0 15px; color:var(--sc-accent,#ff5500); opacity:0; }
+      .hoq-out-item.sel .tick { opacity:1; }
+      .hoq-out-item.sel { color:#fff; }
+      .hoq-out-item .lbl { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .hoq-out-locked { padding:6px 8px 4px; }
+      .hoq-out-enable { display:inline-flex; align-items:center; gap:7px; margin-top:4px;
+        padding:8px 12px; border:0; border-radius:9px; cursor:pointer; font-size:13px; font-weight:600;
+        color:#fff; background:var(--sc-accent,#ff5500);
+        box-shadow:0 4px 16px color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
+      .hoq-out-note { padding:8px 8px 4px; font-size:11px; line-height:1.45; color:#7f7f8a; }
+      .hoq-out-msg { padding:6px 8px 2px; font-size:11.5px; color:var(--sc-accent,#ff5500); }
+      html.hoq-lowend #hoq-out-menu, html.hoq-no-frost #hoq-out-menu {
+        background:rgba(16,16,20,0.98); backdrop-filter:none; -webkit-backdrop-filter:none; }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  const TICK = '<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+  const btn = document.createElement('button');
+  btn.id = 'hoq-out-btn';
+  btn.type = 'button';
+  btn.title = 'Audio output device';
+  btn.setAttribute('aria-label', 'Choose audio output device');
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="2.5" y="13.5" width="4" height="6.5" rx="1.6"/><rect x="17.5" y="13.5" width="4" height="6.5" rx="1.6"/></svg>';
+  // Sits at the left edge of the right-hand cluster (before Upload / avatar).
+  anchor.insertBefore(btn, anchor.firstChild);
+
+  let menu = document.getElementById('hoq-out-menu');
+  if (!menu) { menu = document.createElement('div'); menu.id = 'hoq-out-menu'; document.body.appendChild(menu); }
+
+  const reflectBtn = () => { btn.classList.toggle('on', !!(window.__hoqSinkId)); };
+  reflectBtn();
+
+  const msg = (t) => {
+    let m = menu.querySelector('.hoq-out-msg');
+    if (!m) { m = document.createElement('div'); m.className = 'hoq-out-msg'; menu.appendChild(m); }
+    m.textContent = t || '';
+  };
+
+  const select = async (id, label) => {
+    window.__hoqSinkId = id || '';
+    try { localStorage.setItem('hoqSinkId', window.__hoqSinkId); } catch (e) {}
+    reflectBtn();
+    const hadCtx = !!window.__hoqSCAC;
+    const ok = await window.__hoqApplySink();
+    if (id && hadCtx && !ok) {
+      // The device is gone or refused — don't leave the app silently misrouted.
+      window.__hoqSinkId = ''; try { localStorage.setItem('hoqSinkId', ''); } catch (e) {}
+      await window.__hoqApplySink(); reflectBtn(); render(); msg('Could not switch to ' + (label || 'that device') + '.');
+      return;
+    }
+    render();
+    msg(id && !hadCtx ? 'Set — starts when you play a track.' : '');
+    if (ok || !id) setTimeout(close, 650);
+  };
+
+  const unlock = async () => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach((t) => t.stop());          // labels are unlocked now; drop the stream
+      await render();
+    } catch (e) { msg('Audio permission is needed to list device names.'); }
+  };
+
+  async function render() {
+    let outs = [];
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      outs = devs.filter((d) => d.kind === 'audiooutput');
+    } catch (e) {}
+    // Labels are blank until an audio permission is granted once.
+    const named = outs.filter((d) => d.deviceId && d.label);
+    const locked = named.length === 0;
+
+    let html = '<div class="hoq-out-head">Play SoundCloud out of</div>';
+    const cur = window.__hoqSinkId || '';
+    const row = (id, label) =>
+      `<button class="hoq-out-item${(cur === id) ? ' sel' : ''}" data-id="${id.replace(/"/g, '&quot;')}">${TICK}<span class="lbl">${hoqEsc(label)}</span></button>`;
+    html += row('', 'System default');
+    named.forEach((d) => { if (d.deviceId !== 'default') html += row(d.deviceId, d.label); });
+    if (locked) {
+      html += '<div class="hoq-out-locked">' +
+        '<button class="hoq-out-enable" type="button">Show my devices</button></div>' +
+        '<div class="hoq-out-note">Chrome only reveals device names after a one-time audio permission. Nothing is recorded — the mic is opened to unlock the list, then closed instantly.</div>';
+    }
+    menu.innerHTML = html;
+    menu.querySelectorAll('.hoq-out-item').forEach((el) => {
+      el.addEventListener('click', () => select(el.getAttribute('data-id'), el.querySelector('.lbl').textContent));
+    });
+    const en = menu.querySelector('.hoq-out-enable');
+    if (en) en.addEventListener('click', unlock);
+  }
+
+  const place = () => {
+    const b = document.getElementById('hoq-out-btn'); if (!b) return;
+    const r = b.getBoundingClientRect();
+    menu.style.top = (r.bottom + 8) + 'px';
+    // right-align to the button, clamped to the viewport
+    menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    menu.style.left = 'auto';
+  };
+  const isOpen = () => menu.classList.contains('show');
+  const show = async () => { place(); await render(); menu.classList.add('show'); };
+  const close = () => { menu.classList.remove('show'); };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
+  // Global listeners survive header re-renders (which can drop + re-add the button),
+  // so bind them exactly once and drive open-state off the menu's own class.
+  if (!window.__hoqOutBound) {
+    window.__hoqOutBound = true;
+    document.addEventListener('click', (e) => {
+      const b = document.getElementById('hoq-out-btn');
+      if (isOpen() && !menu.contains(e.target) && (!b || !b.contains(e.target))) close();
+    });
+    window.addEventListener('keydown', (e) => { if (isOpen() && e.key === 'Escape') close(); });
+    window.addEventListener('resize', () => { if (isOpen()) place(); });
+    try { navigator.mediaDevices.addEventListener('devicechange', () => { if (isOpen()) render(); }); } catch (e) {}
+  }
 }
 // The profile-tab bar and the library/collection nav lean toward the cursor
 // with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
