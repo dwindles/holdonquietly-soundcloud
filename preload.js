@@ -5282,23 +5282,24 @@ function setupOutputPicker() {
   if (document.documentElement.classList.contains('hoq-mobile')) return; // phones route at the OS level
   if (document.getElementById('hoq-out-btn')) return;       // idempotent
 
-  const anchor = document.querySelector('.header__right') ||
-                 document.querySelector('.header__userNav') ||
-                 document.querySelector('.header__middle');
+  const nav = document.querySelector('.header__userNav');
+  const anchor = nav || document.querySelector('.header__right');
   if (!anchor) return;                                      // header not ready yet — caller retries
 
   if (!document.getElementById('hoq-out-css')) {
     const st = document.createElement('style');
     st.id = 'hoq-out-css';
     st.textContent = `
+      /* Sized + coloured to match SoundCloud's own header icons (notifications /
+         messages): 38x46, rgb(153,153,153), 22px glyph, recolour-only on hover
+         (no hover box), so it reads as native. Accent when a device is pinned. */
       #hoq-out-btn { display:inline-flex; align-items:center; justify-content:center;
-        width:34px; height:34px; margin:0 4px; padding:0; border:0; border-radius:9px;
-        background:transparent; color:#c9c9d2; cursor:pointer;
-        transition:color .14s ease, background .14s ease, box-shadow .18s ease; }
-      #hoq-out-btn:hover { color:#fff; background:rgba(255,255,255,0.06); }
-      #hoq-out-btn.on { color:var(--sc-accent,#ff5500);
-        box-shadow:0 0 0 1px color-mix(in srgb, var(--sc-accent,#ff5500) 42%, transparent) inset; }
-      #hoq-out-btn svg { width:18px; height:18px; }
+        width:38px; height:46px; margin:0; padding:0; border:0;
+        background:transparent; color:rgb(153,153,153); cursor:pointer;
+        transition:color .14s ease; }
+      #hoq-out-btn:hover { color:#fff; }
+      #hoq-out-btn.on { color:var(--sc-accent,#ff5500); }
+      #hoq-out-btn svg { width:22px; height:22px; }
       #hoq-out-menu { position:fixed; z-index:2147483000; min-width:260px; max-width:340px;
         padding:8px; border-radius:14px;
         background:rgba(12,12,16,0.72); border:1px solid rgba(255,255,255,0.10);
@@ -5339,8 +5340,12 @@ function setupOutputPicker() {
   btn.title = 'Audio output device';
   btn.setAttribute('aria-label', 'Choose audio output device');
   btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="2.5" y="13.5" width="4" height="6.5" rx="1.6"/><rect x="17.5" y="13.5" width="4" height="6.5" rx="1.6"/></svg>';
-  // Sits at the left edge of the right-hand cluster (before Upload / avatar).
-  anchor.insertBefore(btn, anchor.firstChild);
+  // Group it with SoundCloud's own header icons (notifications / messages) so it
+  // reads as native. Falls back to the right cluster if the nav shape changes.
+  const beforeIcon = nav && (nav.querySelector('.header__userNavActivitiesButton') ||
+                             nav.querySelector('.header__userNavItem'));
+  if (nav && beforeIcon) nav.insertBefore(btn, beforeIcon);
+  else anchor.insertBefore(btn, anchor.firstChild);
 
   let menu = document.getElementById('hoq-out-menu');
   if (!menu) { menu = document.createElement('div'); menu.id = 'hoq-out-menu'; document.body.appendChild(menu); }
