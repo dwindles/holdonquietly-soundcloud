@@ -68,6 +68,83 @@ function scPost(cmd) {
   } catch (e) {}
 })();
 
+// --- Equalizer -----------------------------------------------------------------
+// A 6-band graphic EQ spliced into SoundCloud's own audio graph at the very last
+// stage. Rather than reroute SC's source (which risks breaking its volume), we
+// patch AudioNode.connect so that whatever SC connects to the context destination
+// is transparently passed through our filter chain first. SC's internal graph is
+// left completely untouched. Fail-safe: any error falls back to the real connect,
+// so the worst case is "EQ does nothing" and audio always plays.
+const HOQ_EQ_FREQS = [70, 180, 450, 1100, 2800, 7000];
+function hoqEnsureEqChain(ac) {
+  if (ac.__hoqEqIn) return ac.__hoqEqIn;
+  const rc = AudioNode.prototype.__hoqRealConnect;   // the un-patched connect
+  const bands = HOQ_EQ_FREQS.map((f, i) => {
+    const b = ac.createBiquadFilter();
+    b.type = i === 0 ? 'lowshelf' : (i === HOQ_EQ_FREQS.length - 1 ? 'highshelf' : 'peaking');
+    b.frequency.value = f; b.Q.value = 0.9; b.gain.value = 0;
+    return b;
+  });
+  for (let i = 0; i < bands.length - 1; i++) rc.call(bands[i], bands[i + 1]);
+  rc.call(bands[bands.length - 1], ac.destination);   // real connect, or we'd recurse
+  ac.__hoqEqBands = bands;
+  ac.__hoqEqIn = bands[0];
+  try { hoqApplyEqGains(ac); } catch (e) {}
+  return ac.__hoqEqIn;
+}
+function hoqApplyEqGains(ac) {
+  const bands = ac && ac.__hoqEqBands; if (!bands) return;
+  let on = false, gains = [0, 0, 0, 0, 0, 0];
+  try { on = localStorage.getItem('hoqEQOn') === '1'; } catch (e) {}
+  try { const g = JSON.parse(localStorage.getItem('hoqEQ') || 'null'); if (Array.isArray(g)) gains = g; } catch (e) {}
+  const t = ac.currentTime;
+  bands.forEach((b, i) => { try { b.gain.setTargetAtTime(on ? (+gains[i] || 0) : 0, t, 0.03); } catch (e) { b.gain.value = on ? (+gains[i] || 0) : 0; } });
+}
+(() => {
+  try {
+    const P = window.AudioNode && AudioNode.prototype;
+    const Dest = window.AudioDestinationNode;
+    if (!P || !Dest || P.__hoqConnPatched) return;
+    P.__hoqConnPatched = true;
+    const realConnect = P.connect;
+    P.__hoqRealConnect = realConnect;
+    P.connect = function (dest) {
+      try {
+        if (dest instanceof Dest) {
+          const eqIn = hoqEnsureEqChain(dest.context);
+          if (eqIn && eqIn !== this) return realConnect.call(this, eqIn);
+        }
+      } catch (e) {}
+      return realConnect.apply(this, arguments);
+    };
+  } catch (e) {}
+})();
+// Read/write access for the EQ UI. Persisted, and re-applied whenever the context
+// exists (the chain is built lazily on first play via the connect patch above).
+window.__hoqEQ = {
+  freqs: HOQ_EQ_FREQS,
+  labels: ['70', '180', '450', '1.1k', '2.8k', '7k'],
+  get() { try { const g = JSON.parse(localStorage.getItem('hoqEQ') || 'null'); if (Array.isArray(g)) return g; } catch (e) {} return [0, 0, 0, 0, 0, 0]; },
+  isOn() { try { return localStorage.getItem('hoqEQOn') === '1'; } catch (e) { return false; } },
+  set(gains, on) {
+    try { localStorage.setItem('hoqEQ', JSON.stringify(gains)); } catch (e) {}
+    try { localStorage.setItem('hoqEQOn', on ? '1' : '0'); } catch (e) {}
+    try { if (window.__hoqSCAC) hoqApplyEqGains(window.__hoqSCAC); } catch (e) {}
+  },
+};
+
+// --- Global media keys --------------------------------------------------------
+// The C# host registers the hardware media keys system-wide (so they work while a
+// game is focused) and calls this to drive SoundCloud's transport.
+window.__hoqMedia = function (action) {
+  try {
+    const q = (s) => document.querySelector(s);
+    if (action === 'next') { const b = q('.playControls__next') || q('.skipControl__next'); if (b) b.click(); }
+    else if (action === 'prev') { const b = q('.playControls__prev') || q('.skipControl__previous'); if (b) b.click(); }
+    else { const b = q('.playControls__play'); if (b) b.click(); } // playpause / stop
+  } catch (e) {}
+};
+
 // --- Anti-bot-detection (does NOT clobber chrome.webview) ---
 (() => {
   try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch (e) {}
@@ -5065,6 +5142,8 @@ function buildVolume() {
 function removeClutter() {
   try { buildDiscordTab(); } catch (e) {}
   try { setupOutputPicker(); } catch (e) {}
+  try { setupEqPicker(); } catch (e) {}
+  try { setupMiniMode(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
   document.documentElement.classList.toggle('hoq-feed', /\/feed/i.test(location.pathname));
@@ -5438,6 +5517,284 @@ function setupOutputPicker() {
     try { navigator.mediaDevices.addEventListener('devicechange', () => { if (isOpen()) render(); }); } catch (e) {}
   }
 }
+
+// Shared CSS for our header icon buttons (output / EQ / mini), matched to
+// SoundCloud's native header icons: 38x46, rgb(153,153,153), 22px glyph, recolour
+// on hover only, accent when active. Injected once.
+function hoqHdrIconCss() {
+  if (document.getElementById('hoq-hdr-icon-css')) return;
+  const st = document.createElement('style');
+  st.id = 'hoq-hdr-icon-css';
+  st.textContent = `
+    .hoq-hdr-icon { display:inline-flex; align-items:center; justify-content:center;
+      width:38px; height:46px; margin:0; padding:0; border:0; background:transparent;
+      color:rgb(153,153,153); cursor:pointer; transition:color .14s ease; }
+    .hoq-hdr-icon:hover { color:#fff; }
+    .hoq-hdr-icon.on { color:var(--sc-accent,#ff5500); }
+    .hoq-hdr-icon svg { width:22px; height:22px; }
+    .hoq-pop { position:fixed; z-index:2147483000; padding:10px; border-radius:14px;
+      background:rgba(12,12,16,0.72); border:1px solid rgba(255,255,255,0.10);
+      box-shadow:0 18px 52px rgba(0,0,0,0.55);
+      backdrop-filter:blur(24px) saturate(1.5); -webkit-backdrop-filter:blur(24px) saturate(1.5);
+      color:#e7e7ed; font-family:Inter,-apple-system,Arial,sans-serif;
+      opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none;
+      transition:opacity .13s ease, transform .13s ease; }
+    .hoq-pop.show { opacity:1; transform:none; pointer-events:auto; }
+    html.hoq-lowend .hoq-pop, html.hoq-no-frost .hoq-pop {
+      background:rgba(16,16,20,0.98); backdrop-filter:none; -webkit-backdrop-filter:none; }
+  `;
+  (document.head || document.documentElement).appendChild(st);
+}
+// Insert one of our header icon buttons into the userNav cluster, grouped just
+// after the output-device button (falling back sensibly if the nav shape shifts).
+function hoqPlaceHdrIcon(btn) {
+  const out = document.getElementById('hoq-out-btn');
+  const eq = document.getElementById('hoq-eq-btn');
+  const nav = document.querySelector('.header__userNav');
+  const after = eq || out;                                   // keep our icons together, in order
+  if (after && after.parentElement) { after.insertAdjacentElement('afterend', btn); return true; }
+  if (nav) {
+    const bell = nav.querySelector('.header__userNavActivitiesButton') || nav.querySelector('.header__userNavItem');
+    if (bell) nav.insertBefore(btn, bell); else nav.appendChild(btn);
+    return true;
+  }
+  const right = document.querySelector('.header__right');
+  if (right) { right.insertBefore(btn, right.firstChild); return true; }
+  return false;
+}
+
+// Header equalizer: a 6-band graphic EQ with presets, wired to the audio chain
+// spliced in near the top of this file (window.__hoqEQ).
+function setupEqPicker() {
+  if (!window.AudioContext) return;
+  if (document.documentElement.classList.contains('hoq-mobile')) return;
+  if (document.getElementById('hoq-eq-btn')) return;
+  if (!document.querySelector('.header__userNav') && !document.querySelector('.header__right')) return;
+  hoqHdrIconCss();
+
+  if (!document.getElementById('hoq-eq-css')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-eq-css';
+    st.textContent = `
+      #hoq-eq-menu { width:288px; }
+      #hoq-eq-menu .hoq-eq-top { display:flex; align-items:center; justify-content:space-between; padding:2px 4px 10px; }
+      #hoq-eq-menu .hoq-eq-title { font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8a8a95; }
+      .hoq-eq-sw { position:relative; width:38px; height:21px; flex:0 0 38px; border-radius:99px; cursor:pointer;
+        background:rgba(255,255,255,0.10); border:1.5px solid rgba(255,255,255,0.20); transition:background .16s ease, border-color .16s ease; }
+      .hoq-eq-sw::after { content:''; position:absolute; top:1.5px; left:1.5px; width:15px; height:15px; border-radius:50%;
+        background:#e7e7ed; transition:transform .18s cubic-bezier(.34,1.56,.64,1), width .18s ease; }
+      .hoq-eq-sw.on { background:var(--sc-accent,#ff5500); border-color:var(--sc-accent,#ff5500);
+        box-shadow:0 0 10px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      .hoq-eq-sw.on::after { transform:translateX(17px); background:#fff; }
+      #hoq-eq-menu .hoq-eq-presets { display:flex; flex-wrap:wrap; gap:6px; padding:0 2px 12px; }
+      .hoq-eq-preset { padding:5px 11px; border-radius:99px; border:1px solid rgba(255,255,255,0.14);
+        background:rgba(255,255,255,0.04); color:#c9c9d2; font-size:12px; cursor:pointer; transition:all .12s ease; }
+      .hoq-eq-preset:hover { background:rgba(255,255,255,0.10); color:#fff; }
+      .hoq-eq-preset.sel { background:var(--sc-accent,#ff5500); border-color:var(--sc-accent,#ff5500); color:#fff; }
+      .hoq-eq-row { display:flex; align-items:center; gap:10px; padding:4px 2px; }
+      .hoq-eq-row .f { width:34px; flex:0 0 34px; font-size:11px; color:#8a8a95; text-align:right; }
+      .hoq-eq-row .v { width:34px; flex:0 0 34px; font-size:11px; color:#c9c9d2; text-align:left; font-variant-numeric:tabular-nums; }
+      .hoq-eq-row input[type=range] { flex:1 1 auto; -webkit-appearance:none; appearance:none; height:4px; border-radius:99px;
+        background:rgba(255,255,255,0.16); outline:none; }
+      .hoq-eq-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px;
+        border-radius:50%; background:var(--sc-accent,#ff5500); cursor:pointer;
+        box-shadow:0 0 8px color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
+      .hoq-eq-note { padding:8px 4px 2px; font-size:11px; color:#7f7f8a; }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  const btn = document.createElement('button');
+  btn.id = 'hoq-eq-btn'; btn.type = 'button'; btn.title = 'Equalizer'; btn.className = 'hoq-hdr-icon';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="4" x2="6" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/><circle cx="6" cy="9" r="2.4" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="2.4" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.4" fill="currentColor" stroke="none"/></svg>';
+  if (!hoqPlaceHdrIcon(btn)) return;
+
+  let menu = document.getElementById('hoq-eq-menu');
+  if (!menu) { menu = document.createElement('div'); menu.id = 'hoq-eq-menu'; menu.className = 'hoq-pop'; document.body.appendChild(menu); }
+
+  const PRESETS = {
+    Flat: [0, 0, 0, 0, 0, 0],
+    Bass: [7, 5, 2, 0, 0, 0],
+    Warm: [4, 3, 1, 0, -1, -2],
+    Vocal: [-2, -1, 2, 4, 3, 1],
+    Treble: [0, 0, 0, 2, 4, 6],
+    Punch: [5, 2, -1, 0, 2, 4],
+  };
+  const reflectBtn = () => btn.classList.toggle('on', window.__hoqEQ.isOn());
+
+  function render() {
+    const gains = window.__hoqEQ.get();
+    const on = window.__hoqEQ.isOn();
+    const presetName = Object.keys(PRESETS).find((k) => PRESETS[k].every((v, i) => v === (gains[i] || 0)));
+    let h = '<div class="hoq-eq-top"><span class="hoq-eq-title">Equalizer</span><div class="hoq-eq-sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '"></div></div>';
+    h += '<div class="hoq-eq-presets">' + Object.keys(PRESETS).map((k) =>
+      '<button class="hoq-eq-preset' + (presetName === k ? ' sel' : '') + '" data-p="' + k + '">' + k + '</button>').join('') + '</div>';
+    h += window.__hoqEQ.freqs.map((f, i) =>
+      '<div class="hoq-eq-row"><span class="f">' + window.__hoqEQ.labels[i] + '</span>' +
+      '<input type="range" min="-12" max="12" step="1" value="' + (gains[i] || 0) + '" data-i="' + i + '">' +
+      '<span class="v" data-v="' + i + '">' + ((gains[i] || 0) > 0 ? '+' : '') + (gains[i] || 0) + '</span></div>').join('');
+    h += '<div class="hoq-eq-note">Applies to SoundCloud only. Off = flat (bypassed).</div>';
+    menu.innerHTML = h;
+    menu.querySelector('.hoq-eq-sw').addEventListener('click', () => { window.__hoqEQ.set(window.__hoqEQ.get(), !window.__hoqEQ.isOn()); reflectBtn(); render(); });
+    menu.querySelectorAll('.hoq-eq-preset').forEach((el) => el.addEventListener('click', () => {
+      window.__hoqEQ.set(PRESETS[el.getAttribute('data-p')].slice(), true); reflectBtn(); render();
+    }));
+    menu.querySelectorAll('input[type=range]').forEach((el) => el.addEventListener('input', () => {
+      const g = window.__hoqEQ.get(); g[+el.getAttribute('data-i')] = +el.value;
+      window.__hoqEQ.set(g, true);
+      const v = menu.querySelector('.v[data-v="' + el.getAttribute('data-i') + '"]'); if (v) v.textContent = (+el.value > 0 ? '+' : '') + el.value;
+      reflectBtn();
+      // update preset highlight without a full re-render (keeps slider focus)
+      const gg = window.__hoqEQ.get(); const pn = Object.keys(PRESETS).find((k) => PRESETS[k].every((vv, i) => vv === (gg[i] || 0)));
+      menu.querySelectorAll('.hoq-eq-preset').forEach((p) => p.classList.toggle('sel', p.getAttribute('data-p') === pn));
+    }));
+  }
+  const place = () => { const b = document.getElementById('hoq-eq-btn'); if (!b) return; const r = b.getBoundingClientRect(); menu.style.top = (r.bottom + 8) + 'px'; menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px'; menu.style.left = 'auto'; };
+  const isOpen = () => menu.classList.contains('show');
+  const show = () => { render(); place(); menu.classList.add('show'); };
+  const close = () => menu.classList.remove('show');
+  reflectBtn();
+  btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
+  if (!window.__hoqEqBound) {
+    window.__hoqEqBound = true;
+    document.addEventListener('click', (e) => { const b = document.getElementById('hoq-eq-btn'); if (isOpen() && !menu.contains(e.target) && (!b || !b.contains(e.target))) close(); });
+    window.addEventListener('keydown', (e) => { if (isOpen() && e.key === 'Escape') close(); });
+    window.addEventListener('resize', () => { if (isOpen()) place(); });
+  }
+}
+
+// Compact / mini player mode: shrinks the window to a small always-on-top widget
+// (handled host-side on mini:on/off) and swaps the page to a minimal now-playing
+// card with transport controls.
+function setupMiniMode() {
+  if (document.documentElement.classList.contains('hoq-mobile')) return;
+  if (document.getElementById('hoq-mini-btn')) return;
+  if (!document.querySelector('.header__userNav') && !document.querySelector('.header__right')) return;
+  hoqHdrIconCss();
+
+  if (!document.getElementById('hoq-mini-css')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-mini-css';
+    st.textContent = `
+      html.hoq-mini, html.hoq-mini body { overflow:hidden !important; background:#0b0b0e !important; }
+      html.hoq-mini body > *:not(#hoq-mini):not(#hoq-discord):not(script):not(style) { display:none !important; }
+      html.hoq-mini #hoq-discord { display:none !important; }
+      #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none;
+        align-items:center; gap:12px; padding:12px 14px; box-sizing:border-box;
+        background:linear-gradient(180deg, rgba(20,20,26,0.6), rgba(10,10,13,0.85));
+        font-family:Inter,-apple-system,Arial,sans-serif; -webkit-user-select:none; user-select:none; }
+      html.hoq-mini #hoq-mini { display:flex; }
+      #hoq-mini .mn-bg { position:absolute; inset:0; z-index:0; background-size:cover; background-position:center;
+        filter:blur(26px) saturate(1.5) brightness(.5); transform:scale(1.2); opacity:.6; }
+      #hoq-mini > * { position:relative; z-index:1; }
+      #hoq-mini .mn-art { width:64px; height:64px; flex:0 0 64px; border-radius:10px; background:#222 center/cover no-repeat;
+        box-shadow:0 6px 20px rgba(0,0,0,0.5); }
+      #hoq-mini .mn-info { flex:1 1 auto; min-width:0; }
+      #hoq-mini .mn-title { font-size:14px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        text-shadow:0 1px 3px rgba(0,0,0,.6); }
+      #hoq-mini .mn-artist { font-size:12px; color:#c9c9d2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        text-shadow:0 1px 3px rgba(0,0,0,.6); }
+      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:4px; flex:0 0 auto; }
+      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px;
+        border:0; border-radius:50%; background:transparent; color:#e7e7ed; cursor:pointer; transition:background .12s ease, color .12s ease; }
+      #hoq-mini .mn-btn:hover { background:rgba(255,255,255,0.12); color:#fff; }
+      #hoq-mini .mn-btn.mn-play { background:var(--sc-accent,#ff5500); color:#fff; width:40px; height:40px; }
+      #hoq-mini .mn-btn.mn-play:hover { filter:brightness(1.08); }
+      #hoq-mini .mn-btn svg { width:18px; height:18px; }
+      #hoq-mini .mn-play svg { width:20px; height:20px; }
+      #hoq-mini .mn-exit { position:absolute; top:6px; right:8px; width:22px; height:22px; z-index:2;
+        border:0; border-radius:50%; background:rgba(0,0,0,0.35); color:#c9c9d2; cursor:pointer; font-size:14px; line-height:1;
+        display:flex; align-items:center; justify-content:center; }
+      #hoq-mini .mn-exit:hover { background:rgba(0,0,0,0.6); color:#fff; }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  const btn = document.createElement('button');
+  btn.id = 'hoq-mini-btn'; btn.type = 'button'; btn.title = 'Compact player'; btn.className = 'hoq-hdr-icon';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><rect x="12" y="12" width="7" height="5" rx="1.2" fill="currentColor" stroke="none"/></svg>';
+  if (!hoqPlaceHdrIcon(btn)) return;
+
+  const SVG = {
+    prev: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>',
+    next: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>',
+    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  };
+  let widget = document.getElementById('hoq-mini');
+  if (!widget) {
+    widget = document.createElement('div');
+    widget.id = 'hoq-mini';
+    widget.innerHTML =
+      '<div class="mn-bg"></div>' +
+      '<button class="mn-exit" title="Exit compact player">' + SVG.exit + '</button>' +
+      '<div class="mn-art"></div>' +
+      '<div class="mn-info"><div class="mn-title">—</div><div class="mn-artist"></div></div>' +
+      '<div class="mn-ctrls">' +
+        '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
+        '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
+        '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
+      '</div>';
+    document.body.appendChild(widget);
+    // Dragging the card body moves the OS window (frameless), except on controls.
+    widget.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('button')) return;
+      scPost('win:drag');
+    });
+    widget.querySelector('.mn-prev').addEventListener('click', () => window.__hoqMedia('prev'));
+    widget.querySelector('.mn-next').addEventListener('click', () => window.__hoqMedia('next'));
+    widget.querySelector('.mn-play').addEventListener('click', () => window.__hoqMedia('playpause'));
+    widget.querySelector('.mn-exit').addEventListener('click', exitMini);
+  }
+
+  function np() {
+    const g = (s) => document.querySelector(s);
+    const t = g('.playbackSoundBadge__titleLink');
+    const a = g('.playbackSoundBadge__lightLink');
+    let cover = '';
+    const art = g('.playControls .playbackSoundBadge__avatar span.sc-artwork, .playControls .playbackSoundBadge span.sc-artwork, .playControls__soundBadge span.sc-artwork');
+    if (art) { const bg = getComputedStyle(art).backgroundImage; if (bg && bg !== 'none') cover = bg; }
+    const playBtn = g('.playControls__play');
+    // aria-label is the real play state ("Pause current" = playing); the class is
+    // a permanent style hook, not a state flag.
+    const paused = playBtn ? (playBtn.getAttribute('aria-label') || '').toLowerCase().indexOf('play') === 0 : true;
+    // The link's text has a visually-hidden "Current track: …" duplicate; its
+    // title attribute is the clean value.
+    let title = '';
+    if (t) {
+      title = t.getAttribute('title') || '';
+      if (!title) { const vis = [...t.children].find((c) => !c.classList.contains('sc-visuallyhidden')); title = vis ? vis.textContent.trim() : t.textContent.replace(/^\s*Current track:\s*/i, '').trim(); }
+    }
+    const artist = a ? (a.getAttribute('title') || a.textContent.trim()) : '';
+    return { title, artist, cover, paused };
+  }
+  function update() {
+    if (!document.documentElement.classList.contains('hoq-mini')) return;
+    const s = np();
+    const set = (sel, txt) => { const el = widget.querySelector(sel); if (el && el.textContent !== txt) el.textContent = txt; };
+    set('.mn-title', s.title || 'Not playing');
+    set('.mn-artist', s.artist || '');
+    const art = widget.querySelector('.mn-art'); const bg = widget.querySelector('.mn-bg');
+    if (s.cover) { art.style.backgroundImage = s.cover; bg.style.backgroundImage = s.cover; }
+    const pb = widget.querySelector('.mn-play'); if (pb) pb.innerHTML = s.paused ? SVG.play : SVG.pause;
+  }
+  function enterMini() {
+    document.documentElement.classList.add('hoq-mini');
+    scPost('mini:on');
+    update();
+    if (!window.__hoqMiniTimer) window.__hoqMiniTimer = setInterval(update, 900);
+  }
+  function exitMini() {
+    document.documentElement.classList.remove('hoq-mini');
+    scPost('mini:off');
+    if (window.__hoqMiniTimer) { clearInterval(window.__hoqMiniTimer); window.__hoqMiniTimer = null; }
+  }
+  window.__hoqExitMini = exitMini;   // let the host force-exit if needed
+  btn.addEventListener('click', () => { document.documentElement.classList.contains('hoq-mini') ? exitMini() : enterMini(); });
+}
+
 // The profile-tab bar and the library/collection nav lean toward the cursor
 // with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
 // it survives SoundCloud's re-renders; gated by the "3D tab bars" toggle.
