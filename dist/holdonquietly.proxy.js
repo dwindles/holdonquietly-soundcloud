@@ -5679,6 +5679,9 @@ function setupEqPicker() {
 // card with transport controls.
 function setupMiniMode() {
   if (document.documentElement.classList.contains('hoq-mobile')) return;
+  // Mini mode shrinks the OS window, which only the C# host can do. On the web
+  // proxy (no host) the widget would just fill the browser tab, so hide it there.
+  try { if (!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage)) return; } catch (e) { return; }
   if (document.getElementById('hoq-mini-btn')) return;
   if (!document.querySelector('.header__userNav') && !document.querySelector('.header__right')) return;
   hoqHdrIconCss();
