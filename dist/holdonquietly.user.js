@@ -231,6 +231,7 @@ function scPost(cmd) {
         // works. Capturing it here — the moment SC wires up its source — is why
         // this patch has to run before SC's code (it does; injected at doc-start).
         window.__hoqSCAC = this;
+        window.__hoqMediaEl = el;   // the <audio> element — used for seek/volume/time in the mini player
         if (typeof window.__hoqApplySink === 'function') window.__hoqApplySink();
       } catch (e) {}
       return node;
@@ -5874,31 +5875,50 @@ function setupMiniMode() {
       html.hoq-mini body > *:not(#hoq-mini):not(#hoq-discord):not(script):not(style) { display:none !important; }
       html.hoq-mini #hoq-discord { display:none !important; }
       #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none;
-        align-items:center; gap:12px; padding:12px 14px; box-sizing:border-box;
-        background:linear-gradient(180deg, rgba(20,20,26,0.6), rgba(10,10,13,0.85));
+        flex-direction:column; gap:9px; padding:12px 14px 11px; box-sizing:border-box;
+        background:linear-gradient(180deg, rgba(20,20,26,0.6), rgba(10,10,13,0.86));
         font-family:Inter,-apple-system,Arial,sans-serif; -webkit-user-select:none; user-select:none; }
       html.hoq-mini #hoq-mini { display:flex; }
       #hoq-mini .mn-bg { position:absolute; inset:0; z-index:0; background-size:cover; background-position:center;
-        filter:blur(26px) saturate(1.5) brightness(.5); transform:scale(1.2); opacity:.6; }
+        filter:blur(28px) saturate(1.5) brightness(.5); transform:scale(1.2); opacity:.6; }
       #hoq-mini > * { position:relative; z-index:1; }
-      #hoq-mini .mn-art { width:64px; height:64px; flex:0 0 64px; border-radius:10px; background:#222 center/cover no-repeat;
-        box-shadow:0 6px 20px rgba(0,0,0,0.5); }
-      #hoq-mini .mn-info { flex:1 1 auto; min-width:0; }
+      #hoq-mini .mn-top { display:flex; align-items:center; gap:12px; }
+      #hoq-mini .mn-art { width:60px; height:60px; flex:0 0 60px; border-radius:10px; background:#222 center/cover no-repeat;
+        box-shadow:0 6px 20px rgba(0,0,0,0.5); cursor:pointer; }
+      #hoq-mini .mn-art:hover { outline:2px solid color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); outline-offset:1px; }
+      #hoq-mini .mn-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
       #hoq-mini .mn-title { font-size:14px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         text-shadow:0 1px 3px rgba(0,0,0,.6); }
       #hoq-mini .mn-artist { font-size:12px; color:#c9c9d2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         text-shadow:0 1px 3px rgba(0,0,0,.6); }
-      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:4px; flex:0 0 auto; }
-      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px;
-        border:0; border-radius:50%; background:transparent; color:#e7e7ed; cursor:pointer; transition:background .12s ease, color .12s ease; }
+      #hoq-mini .mn-seek { display:flex; align-items:center; gap:8px; margin-top:2px; }
+      #hoq-mini .mn-time { font-size:10.5px; color:#b7b7c0; flex:0 0 auto; font-variant-numeric:tabular-nums; white-space:nowrap; }
+      #hoq-mini input.mn-range { -webkit-appearance:none; appearance:none; height:4px; border-radius:99px; background:rgba(255,255,255,0.18); outline:none; cursor:pointer; }
+      #hoq-mini input.mn-prog { flex:1 1 auto; }
+      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
+        background:var(--sc-accent,#ff5500); box-shadow:0 0 6px color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
+      #hoq-mini input.mn-range:disabled { opacity:.45; cursor:default; }
+      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:2px; }
+      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; position:relative;
+        border:0; border-radius:50%; background:transparent; color:#d6d6de; cursor:pointer; transition:background .12s ease, color .12s ease; flex:0 0 auto; }
       #hoq-mini .mn-btn:hover { background:rgba(255,255,255,0.12); color:#fff; }
-      #hoq-mini .mn-btn.mn-play { background:var(--sc-accent,#ff5500); color:#fff; width:40px; height:40px; }
-      #hoq-mini .mn-btn.mn-play:hover { filter:brightness(1.08); }
-      #hoq-mini .mn-btn svg { width:18px; height:18px; }
+      #hoq-mini .mn-btn.on { color:var(--sc-accent,#ff5500); }
+      #hoq-mini .mn-btn svg { width:17px; height:17px; }
+      #hoq-mini .mn-play { background:var(--sc-accent,#ff5500); color:#fff; width:38px; height:38px; margin:0 2px; }
+      #hoq-mini .mn-play:hover { filter:brightness(1.1); background:var(--sc-accent,#ff5500); }
       #hoq-mini .mn-play svg { width:20px; height:20px; }
-      #hoq-mini .mn-exit { position:absolute; top:6px; right:8px; width:22px; height:22px; z-index:2;
-        border:0; border-radius:50%; background:rgba(0,0,0,0.35); color:#c9c9d2; cursor:pointer; font-size:14px; line-height:1;
+      #hoq-mini .mn-like svg { fill:none; stroke:currentColor; }
+      #hoq-mini .mn-like.on svg { fill:currentColor; }
+      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; bottom:3px; right:4px; font-size:8px; font-weight:800;
+        color:var(--sc-accent,#ff5500); }
+      #hoq-mini .mn-spacer { flex:1 1 auto; }
+      #hoq-mini .mn-vol { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
+      #hoq-mini .mn-vol svg { width:16px; height:16px; color:#b7b7c0; flex:0 0 auto; }
+      #hoq-mini input.mn-volrange { width:56px; flex:0 0 56px; }
+      #hoq-mini .mn-exit { position:absolute; top:6px; right:8px; width:22px; height:22px; z-index:3;
+        border:0; border-radius:50%; background:rgba(0,0,0,0.35); color:#c9c9d2; cursor:pointer;
         display:flex; align-items:center; justify-content:center; }
+      #hoq-mini .mn-exit svg { width:12px; height:12px; }
       #hoq-mini .mn-exit:hover { background:rgba(0,0,0,0.6); color:#fff; }
     `;
     (document.head || document.documentElement).appendChild(st);
@@ -5914,8 +5934,15 @@ function setupMiniMode() {
     next: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg>',
     play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
     pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>',
-    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M3 4l5 5"/></svg>',
+    repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+    like: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
+    vol: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   };
+  const fmt = (s) => { if (!isFinite(s) || s < 0) s = 0; s = Math.floor(s); const m = Math.floor(s / 60); const ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
+  let scrubbing = false, adjustingVol = false;
+
   let widget = document.getElementById('hoq-mini');
   if (!widget) {
     widget = document.createElement('div');
@@ -5923,24 +5950,46 @@ function setupMiniMode() {
     widget.innerHTML =
       '<div class="mn-bg"></div>' +
       '<button class="mn-exit" title="Exit compact player">' + SVG.exit + '</button>' +
-      '<div class="mn-art"></div>' +
-      '<div class="mn-info"><div class="mn-title">—</div><div class="mn-artist"></div></div>' +
+      '<div class="mn-top">' +
+        '<div class="mn-art" title="Back to full app"></div>' +
+        '<div class="mn-main">' +
+          '<div class="mn-title">—</div>' +
+          '<div class="mn-artist"></div>' +
+          '<div class="mn-seek"><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0"><span class="mn-time">0:00 / 0:00</span></div>' +
+        '</div>' +
+      '</div>' +
       '<div class="mn-ctrls">' +
+        '<button class="mn-btn mn-shuffle" title="Shuffle">' + SVG.shuffle + '</button>' +
         '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
         '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
         '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
+        '<button class="mn-btn mn-repeat" title="Repeat">' + SVG.repeat + '</button>' +
+        '<button class="mn-btn mn-like" title="Like">' + SVG.like + '</button>' +
+        '<span class="mn-spacer"></span>' +
+        '<span class="mn-vol">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
       '</div>';
     document.body.appendChild(widget);
     // Dragging the card body moves the OS window (frameless), except on controls.
     widget.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
-      if (e.target.closest('button')) return;
+      if (e.target.closest('button, input')) return;
       scPost('win:drag');
     });
+    const clickSc = (sel) => { const el = document.querySelector(sel); if (el) el.click(); setTimeout(update, 60); };
     widget.querySelector('.mn-prev').addEventListener('click', () => window.__hoqMedia('prev'));
     widget.querySelector('.mn-next').addEventListener('click', () => window.__hoqMedia('next'));
-    widget.querySelector('.mn-play').addEventListener('click', () => window.__hoqMedia('playpause'));
-    widget.querySelector('.mn-exit').addEventListener('click', exitMini);
+    widget.querySelector('.mn-play').addEventListener('click', () => { window.__hoqMedia('playpause'); setTimeout(update, 80); });
+    widget.querySelector('.mn-shuffle').addEventListener('click', () => clickSc('.shuffleControl'));
+    widget.querySelector('.mn-repeat').addEventListener('click', () => clickSc('.repeatControl'));
+    widget.querySelector('.mn-like').addEventListener('click', () => clickSc('.playbackSoundBadge__like'));
+    widget.querySelector('.mn-art').addEventListener('click', () => exitMini());   // cover = back to full app
+    widget.querySelector('.mn-exit').addEventListener('click', () => exitMini());
+    const prog = widget.querySelector('.mn-prog');
+    prog.addEventListener('input', () => { scrubbing = true; const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-time').textContent = fmt(prog.value / 1000 * el.duration) + ' / ' + fmt(el.duration); });
+    prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) { try { el.currentTime = prog.value / 1000 * el.duration; } catch (e) {} } scrubbing = false; });
+    const vol = widget.querySelector('.mn-volrange');
+    vol.addEventListener('input', () => { adjustingVol = true; const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } });
+    vol.addEventListener('change', () => { adjustingVol = false; });
   }
 
   function np() {
@@ -5962,7 +6011,12 @@ function setupMiniMode() {
       if (!title) { const vis = [...t.children].find((c) => !c.classList.contains('sc-visuallyhidden')); title = vis ? vis.textContent.trim() : t.textContent.replace(/^\s*Current track:\s*/i, '').trim(); }
     }
     const artist = a ? (a.getAttribute('title') || a.textContent.trim()) : '';
-    return { title, artist, cover, paused };
+    const like = g('.playbackSoundBadge__like');
+    const liked = like ? (like.getAttribute('aria-label') || '').toLowerCase() === 'unlike' : false;
+    const sh = g('.shuffleControl'); const rp = g('.repeatControl');
+    const shuffling = !!(sh && sh.classList.contains('m-shuffling'));
+    const repeat = rp ? (rp.classList.contains('m-one') ? 'one' : rp.classList.contains('m-all') ? 'all' : 'none') : 'none';
+    return { title, artist, cover, paused, liked, shuffling, repeat };
   }
   function update() {
     if (!document.documentElement.classList.contains('hoq-mini')) return;
@@ -5973,12 +6027,26 @@ function setupMiniMode() {
     const art = widget.querySelector('.mn-art'); const bg = widget.querySelector('.mn-bg');
     if (s.cover) { art.style.backgroundImage = s.cover; bg.style.backgroundImage = s.cover; }
     const pb = widget.querySelector('.mn-play'); if (pb) pb.innerHTML = s.paused ? SVG.play : SVG.pause;
+    widget.querySelector('.mn-like').classList.toggle('on', s.liked);
+    widget.querySelector('.mn-shuffle').classList.toggle('on', s.shuffling);
+    const rpBtn = widget.querySelector('.mn-repeat');
+    rpBtn.classList.toggle('on', s.repeat !== 'none');
+    rpBtn.classList.toggle('one', s.repeat === 'one');
+    // progress + time + volume from the actual audio element
+    const el = window.__hoqMediaEl;
+    const prog = widget.querySelector('.mn-prog'); const timeEl = widget.querySelector('.mn-time'); const vol = widget.querySelector('.mn-volrange');
+    const dur = el && isFinite(el.duration) ? el.duration : 0;
+    const cur = el ? el.currentTime : 0;
+    prog.disabled = !dur;
+    if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; timeEl.textContent = fmt(cur) + ' / ' + fmt(dur); }
+    if (!adjustingVol && el) vol.value = Math.round((el.muted ? 0 : el.volume) * 100);
   }
   function enterMini() {
     document.documentElement.classList.add('hoq-mini');
     scPost('mini:on');
     update();
-    if (!window.__hoqMiniTimer) window.__hoqMiniTimer = setInterval(update, 900);
+    // Tighter cadence so the progress bar moves smoothly.
+    if (!window.__hoqMiniTimer) window.__hoqMiniTimer = setInterval(update, 500);
   }
   function exitMini() {
     document.documentElement.classList.remove('hoq-mini');

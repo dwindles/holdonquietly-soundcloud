@@ -853,7 +853,7 @@ class Program
             if (maxed) { miniWasMax = true; ToggleMaximize(); } else miniWasMax = false;
             miniRestore = new Rect(win.Left, win.Top, win.Width, win.Height);
             win.MinWidth = 0; win.MinHeight = 0;
-            win.Width = 360; win.Height = 116;
+            win.Width = 432; win.Height = 152;
             var wa = SystemParameters.WorkArea;
             win.Left = wa.Right - win.Width - 24; win.Top = wa.Top + 24;
             win.Topmost = true;
