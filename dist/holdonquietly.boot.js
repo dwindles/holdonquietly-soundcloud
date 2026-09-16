@@ -5791,10 +5791,13 @@ function setupMiniMode() {
         '<span class="mn-vol">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
       '</div>';
     document.body.appendChild(widget);
-    // Dragging the card body moves the OS window (frameless), except on controls.
+    // Dragging the card body moves the OS window (frameless), except on controls
+    // and the cover art (which is a click target — "back to full app"). Without
+    // excluding the art, mousedown starts an OS window-move and its click never
+    // lands, so clicking the cover dragged the window instead of restoring.
     widget.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
-      if (e.target.closest('button, input')) return;
+      if (e.target.closest('button, input, .mn-art')) return;
       scPost('win:drag');
     });
     const clickSc = (sel) => { const el = document.querySelector(sel); if (el) el.click(); setTimeout(update, 60); };
