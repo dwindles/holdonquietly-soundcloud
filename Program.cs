@@ -491,7 +491,8 @@ class Program
             // malformed embed) used to fail completely silently.
             Log((play ? "playreq" : "share") + " <- HTTP " + (int)resp.StatusCode +
                 (resp.IsSuccessStatusCode ? "" : " " + await resp.Content.ReadAsStringAsync()));
-            if (play) PlayResult(resp.IsSuccessStatusCode, "discord refused it (" + (int)resp.StatusCode + ")");
+            if (play) PlayResult(resp.IsSuccessStatusCode,
+                resp.IsSuccessStatusCode ? "sent to Discord" : "Discord refused it (" + (int)resp.StatusCode + ")");
         }
         catch (Exception ex)
         {
