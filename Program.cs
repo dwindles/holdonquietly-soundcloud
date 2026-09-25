@@ -453,40 +453,77 @@ class Program
             int color = 0xff5500;
             if (r.TryGetProperty("color", out var cc) && cc.ValueKind == JsonValueKind.Number) color = cc.GetInt32();
 
-            var author = new Dictionary<string, object>
-            {
-                ["name"] = string.IsNullOrEmpty(name)
-                    ? (play ? "Play request" : "Now playing")
-                    : (name + (play ? " wants to play this" : " shared a track")),
-            };
-            if (!string.IsNullOrEmpty(avatar)) author["icon_url"] = avatar;
+            // ---- Components V2 card -----------------------------------------------
+            // A plain channel webhook CAN post a V2 card — but only with the
+            // ?with_components=true query flag below; without it Discord strips the
+            // components and the post fails as an empty message (50006). A V2 message
+            // carries no embeds, so the marker the bot keys off lives in the footer
+            // text ("Play in Discord" / "via holdonquietly"), and the track link is
+            // the markdown link in the title line.
+            string authorName = string.IsNullOrEmpty(name)
+                ? (play ? "Play request" : "Now playing")
+                : (name + (play ? " wants to play this" : " shared a track"));
 
-            var embed = new Dictionary<string, object>
+            // The artist's profile is the first path segment of the track URL, so we
+            // can link "by <artist>" without the page having to send a separate field.
+            string artistUrl = "";
+            try
             {
-                ["author"] = author,
-                ["title"] = title,
-                ["color"] = color,
-                ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["footer"] = new Dictionary<string, object> { ["text"] = play ? "hoq-play" : "via holdonquietly" },
-            };
-            if (!string.IsNullOrEmpty(url)) embed["url"] = url;
-            if (!string.IsNullOrEmpty(artist)) embed["description"] = "by **" + artist + "**";
-            if (!string.IsNullOrEmpty(cover)) embed["thumbnail"] = new Dictionary<string, object> { ["url"] = cover };
+                if (!string.IsNullOrEmpty(url))
+                {
+                    var uu = new Uri(url);
+                    var seg = uu.AbsolutePath.Trim('/').Split('/');
+                    if (seg.Length >= 2 && seg[0].Length > 0) artistUrl = uu.GetLeftPart(UriPartial.Authority) + "/" + seg[0];
+                }
+            }
+            catch { }
 
-            var fields = new List<object>();
-            if (!string.IsNullOrEmpty(length))
-                fields.Add(new Dictionary<string, object> { ["name"] = "Length", ["value"] = length, ["inline"] = true });
-            if (!string.IsNullOrEmpty(url))
-                fields.Add(new Dictionary<string, object> { ["name"] = "Listen", ["value"] = "[Open in SoundCloud](" + url + ")", ["inline"] = true });
-            if (fields.Count > 0) embed["fields"] = fields;
+            var head = new StringBuilder();
+            head.Append("-# ").Append(authorName).Append("\n### ");
+            head.Append(string.IsNullOrEmpty(url) ? title : "[" + title + "](" + url + ")");
+            var meta = new List<string>();
+            if (!string.IsNullOrEmpty(artist))
+                meta.Add(string.IsNullOrEmpty(artistUrl) ? ("by **" + artist + "**") : ("by [" + artist + "](" + artistUrl + ")"));
+            if (!string.IsNullOrEmpty(length)) meta.Add(length);
+            if (meta.Count > 0) head.Append("\n").Append(string.Join("  ·  ", meta));
+
+            var headerDisplay = new Dictionary<string, object> { ["type"] = 10, ["content"] = head.ToString() };
+
+            string marker = play ? "Play in Discord" : "via holdonquietly";
+            var footerDisplay = new Dictionary<string, object>
+            {
+                ["type"] = 10,
+                ["content"] = "-# " + marker + "  ·  <t:" + DateTimeOffset.UtcNow.ToUnixTimeSeconds() + ":R>",
+            };
+
+            // Full-width header, then the cover art BIG (a media gallery, not the small
+            // thumbnail accessory it used to be), then the footer.
+            var inner = new List<object> { headerDisplay };
+            if (!string.IsNullOrEmpty(cover))
+                inner.Add(new Dictionary<string, object>
+                {
+                    ["type"] = 12, // Media Gallery — the big image slot
+                    ["items"] = new object[] { new Dictionary<string, object> { ["media"] = new Dictionary<string, object> { ["url"] = cover } } },
+                });
+            inner.Add(footerDisplay);
+
+            var container = new Dictionary<string, object>
+            {
+                ["type"] = 17,                 // Container — accent_color is the left bar
+                ["accent_color"] = color,
+                ["components"] = inner.ToArray(),
+            };
 
             var payload = new Dictionary<string, object>
             {
                 ["username"] = string.IsNullOrEmpty(name) ? "holdonquietly" : name,
-                ["embeds"] = new[] { embed },
+                ["flags"] = 32768,             // IS_COMPONENTS_V2 (1 << 15)
+                ["components"] = new object[] { container },
             };
             if (!string.IsNullOrEmpty(avatar)) payload["avatar_url"] = avatar;
-            var resp = await http.PostAsync(wh, new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+
+            string postUrl = wh + (wh.Contains("?") ? "&" : "?") + "with_components=true";
+            var resp = await http.PostAsync(postUrl, new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
             // Discord answers 204 on success; anything else (bad hook, rate limit,
             // malformed embed) used to fail completely silently.
             Log((play ? "playreq" : "share") + " <- HTTP " + (int)resp.StatusCode +
