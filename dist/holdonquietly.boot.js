@@ -4045,6 +4045,42 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-lf-btn.is-off { background: rgba(255,255,255,0.08); color: #d8d8db;
         border: 1px solid rgba(255,255,255,0.12); }
       #hoq-discord .hoq-lf-btn.is-off:hover { background: rgba(255,255,255,0.14); filter: none; }
+      /* Discord Rich Presence */
+      #hoq-discord .hoq-rp { background: rgba(12,12,14,0.55); backdrop-filter: blur(20px) saturate(1.3);
+        border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; padding: 2px 14px; }
+      #hoq-discord .hoq-rp-row { display: flex; align-items: center; justify-content: space-between;
+        gap: 14px; padding: 11px 0; cursor: pointer; transition: opacity .15s ease; }
+      #hoq-discord .hoq-rp-row + .hoq-rp-row { border-top: 1px solid rgba(255,255,255,0.06); }
+      #hoq-discord .hoq-rp-static { cursor: default; }
+      #hoq-discord .hoq-rp-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      #hoq-discord .hoq-rp-row b { color: #fff; font-size: 13.5px; font-weight: 700; }
+      #hoq-discord .hoq-rp-row em { color: #8a8a8c; font-size: 12px; font-style: normal;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #hoq-discord .hoq-rp-preview { color: var(--sc-accent,#ff5500) !important; font-weight: 600; }
+      #hoq-discord .hoq-rp.is-off .hoq-rp-row:not(:first-child) { opacity: .4; pointer-events: none; }
+      /* switches: same look as the Settings palette toggles */
+      #hoq-discord .hoq-rp-sw { appearance: none; -webkit-appearance: none; flex: none; cursor: pointer;
+        box-sizing: border-box; width: 42px; height: 23px; border-radius: 23px; position: relative; margin: 0;
+        background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.24);
+        transition: background .2s ease, border-color .2s ease; }
+      #hoq-discord .hoq-rp-sw:hover { border-color: rgba(255,255,255,0.44); background: rgba(255,255,255,0.07); }
+      #hoq-discord .hoq-rp-sw::after { content: ''; position: absolute; top: 4px; left: 4px; width: 11px; height: 11px;
+        border-radius: 50%; background: rgba(255,255,255,0.5);
+        transition: transform .26s cubic-bezier(.34,1.55,.64,1), width .16s ease, height .16s ease,
+          top .16s ease, left .16s ease, background .2s ease; }
+      #hoq-discord .hoq-rp-sw:checked { background: var(--sc-accent,#ff5500); border-color: var(--sc-accent,#ff5500);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      #hoq-discord .hoq-rp-sw:checked::after { width: 16px; height: 16px; top: 2px; left: 2px; background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.5); transform: translateX(19px); }
+      #hoq-discord .hoq-rp-sw:focus-visible { outline: 2px solid color-mix(in srgb, var(--sc-accent,#ff5500) 70%, transparent); outline-offset: 2px; }
+      /* status-line segmented control */
+      #hoq-discord .hoq-rp-seg { display: flex; flex: none; gap: 2px; padding: 3px; border-radius: 10px;
+        background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); }
+      #hoq-discord .hoq-rp-seg button { border: 0; border-radius: 7px; padding: 6px 12px; cursor: pointer;
+        background: transparent; color: #b9b9bd; font-size: 12.5px; font-weight: 600;
+        transition: background .12s ease, color .12s ease; }
+      #hoq-discord .hoq-rp-seg button:hover { color: #fff; }
+      #hoq-discord .hoq-rp-seg button.on { background: var(--sc-accent,#ff5500); color: #fff; }
       /* Accounts */
       #hoq-discord .hoq-acct-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
       #hoq-discord .hoq-acct-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px;
@@ -4151,6 +4187,32 @@ function ensureDiscordPanel() {
           <button class="hoq-lf-btn">Connect</button>
         </div>
       </div>
+      <div class="hoq-dc-sec hoq-rp-sec">
+        <div class="hoq-dc-label">Discord Rich Presence</div>
+        <div class="hoq-rp">
+          <label class="hoq-rp-row">
+            <span><b>Show on Discord</b><em>Your profile shows what you're playing.</em></span>
+            <input type="checkbox" class="hoq-rp-sw" data-k="hoqRpOn">
+          </label>
+          <div class="hoq-rp-row hoq-rp-static">
+            <span><b>Status line</b><em class="hoq-rp-preview">Listening to …</em></span>
+            <div class="hoq-rp-seg">
+              <button type="button" data-v="artist">Artist</button>
+              <button type="button" data-v="song">Song</button>
+              <button type="button" data-v="app">App</button>
+            </div>
+          </div>
+          <label class="hoq-rp-row">
+            <span><b>Buttons</b><em>Listen on SoundCloud · Get holdonquietly</em></span>
+            <input type="checkbox" class="hoq-rp-sw" data-k="hoqRpButtons">
+          </label>
+          <label class="hoq-rp-row">
+            <span><b>Hide when paused</b><em>Steps off Discord after 5 minutes paused.</em></span>
+            <input type="checkbox" class="hoq-rp-sw" data-k="hoqRpPauseHide">
+          </label>
+        </div>
+        <div class="hoq-dc-hint">Discord never shows you your own buttons — friends see them. Private (secret-link) tracks never get a link.</div>
+      </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Accounts</div>
         <div class="hoq-acct-list"></div>
@@ -4202,7 +4264,7 @@ function ensureDiscordPanel() {
       </div>
     </div>`;
   // Configuration lives behind the Settings sub-tab; everything else is Social.
-  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'your info'];
+  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'your info'];
   p.querySelectorAll('.hoq-dc-sec').forEach((sec) => {
     const lab = sec.querySelector('.hoq-dc-label');
     const t = lab ? lab.textContent.trim().toLowerCase() : '';
@@ -4223,6 +4285,9 @@ function ensureDiscordPanel() {
   // Same for the Feed pane — the sub-tab already says "Feed".
   const feedSec = p.querySelector('.hoq-dc-sec.hoq-pane-feed');
   if (feedSec) { const dl = feedSec.querySelector('.hoq-dc-label'); if (dl) dl.remove(); }
+  // Rich Presence needs the desktop host; elsewhere the section is dead controls.
+  const rpSec = p.querySelector('.hoq-rp-sec');
+  if (rpSec) { if (hoqHasHost()) setupRpSettings(rpSec); else rpSec.remove(); }
   p.dataset.pane = 'social';
   p.querySelectorAll('.hoq-subtab').forEach((b) => {
     b.addEventListener('click', () => {
@@ -4462,6 +4527,14 @@ function updateDiscordActivity() {
   const p = document.getElementById('hoq-discord');
   if (!p || !p.classList.contains('open')) return;
   const np = currentNowPlaying();
+  // The card's header reads exactly what Discord's member list shows.
+  if (hoqHasHost()) {
+    const line = rpStatusLine();
+    const head = p.querySelector('.hoq-dc-ptext b');
+    if (head) head.textContent = line;
+    const prev = p.querySelector('.hoq-rp-preview');
+    if (prev) prev.textContent = line;
+  }
   p.querySelector('.hoq-dc-title').textContent = np.title || 'Nothing playing';
   p.querySelector('.hoq-dc-artist').textContent = np.artist || '';
   const cov = p.querySelector('.hoq-dc-cover');
@@ -4606,8 +4679,12 @@ function hoqMe() {
 function playerProgress() {
   const parseT = (sel) => {
     const el = document.querySelector(sel);
-    const m = (el && el.textContent || '').trim().match(/(\d+):(\d+)/);
-    return m ? (+m[1] * 60 + +m[2]) : 0;
+    // h:mm:ss for anything an hour or longer — a bare /(\d+):(\d+)/ read
+    // "1:00:15" as 60 seconds, which broke the Discord progress bar and Last.fm
+    // timing on long mixes and radio shows.
+    const m = (el && el.textContent || '').trim().match(/(\d+):(\d{2})(?::(\d{2}))?/);
+    if (!m) return 0;
+    return m[3] !== undefined ? (+m[1] * 3600 + +m[2] * 60 + +m[3]) : (+m[1] * 60 + +m[2]);
   };
   const btn = document.querySelector('.playControls__play');
   const title = (btn && btn.getAttribute('title') || '').trim();
@@ -4641,12 +4718,88 @@ function tuneNowPlayingMarquee() {
   }
 }
 
+// Discord Rich Presence preferences (Social/Settings → Settings → Discord Rich
+// Presence). Sent with every tick; the host decides what Discord shows.
+function rpPrefs() {
+  const g = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
+  return {
+    on: g('hoqRpOn', '1') === '1',
+    status: g('hoqRpStatus', 'artist'),
+    buttons: g('hoqRpButtons', '1') === '1',
+    pauseHide: g('hoqRpPauseHide', '1') === '1',
+  };
+}
+
+// A now-playing link that's safe to broadcast to everyone who can see your
+// profile. The query is dropped ("?in=user/sets/…" names the playlist you're
+// playing from, which can be private), and a secret link (…/s-XXXX) is never
+// published at all.
+function npPublicUrl(sel) {
+  const a = document.querySelector(sel);
+  const h = ((a && a.getAttribute('href')) || '').split(/[?#]/)[0];
+  if (!h) return '';
+  let path = h;
+  if (h.startsWith('http')) { try { path = new URL(h).pathname; } catch (e) { return ''; } }
+  const seg = path.split('/').filter(Boolean);
+  if (seg.length >= 3 && /^s-[A-Za-z0-9]+$/.test(seg[seg.length - 1])) return '';
+  return h.startsWith('http') ? h : 'https://soundcloud.com' + h;
+}
+
+// What Discord's member list will read, e.g. "Listening to tazparis".
+function rpStatusLine() {
+  const rp = rpPrefs();
+  if (!rp.on) return 'Rich Presence is off';
+  const np = currentNowPlaying();
+  const what = rp.status === 'app' ? 'holdonquietlySC'
+    : rp.status === 'song' ? (np.title || 'a song')
+    : (np.artist || np.title || 'an artist');
+  return 'Listening to ' + what;
+}
+
+// Rich Presence goes through the C# host's Discord pipe; the phone and web
+// builds have no host.
+function hoqHasHost() {
+  try { return !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage); } catch (e) { return false; }
+}
+
+// Settings → Discord Rich Presence controls.
+function setupRpSettings(sec) {
+  const box = sec.querySelector('.hoq-rp');
+  const store = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const sync = () => {
+    const rp = rpPrefs();
+    const val = { hoqRpOn: rp.on, hoqRpButtons: rp.buttons, hoqRpPauseHide: rp.pauseHide };
+    sec.querySelectorAll('.hoq-rp-sw').forEach((sw) => { sw.checked = !!val[sw.dataset.k]; });
+    sec.querySelectorAll('.hoq-rp-seg button').forEach((b) => b.classList.toggle('on', b.dataset.v === rp.status));
+    box.classList.toggle('is-off', !rp.on);
+    const prev = sec.querySelector('.hoq-rp-preview');
+    if (prev) prev.textContent = rpStatusLine();
+  };
+  // Apply straight away rather than on the next 3-second tick.
+  const apply = () => {
+    _lastRpc = '';
+    try { rpcTick(); } catch (e) {}
+    sync();
+    try { updateDiscordActivity(); } catch (e) {}
+  };
+  sec.querySelectorAll('.hoq-rp-sw').forEach((sw) => sw.addEventListener('change', () => {
+    store(sw.dataset.k, sw.checked ? '1' : '0'); apply();
+  }));
+  sec.querySelectorAll('.hoq-rp-seg button').forEach((b) => b.addEventListener('click', () => {
+    store('hoqRpStatus', b.dataset.v); apply();
+  }));
+  sync();
+}
+
 // Push now-playing to the C# host (Discord Rich Presence + friends backend).
 let _lastRpc = '';
 function rpcTick() {
   const np = currentNowPlaying();
   const pr = playerProgress();
-  const key = np.title + '|' + pr.paused + '|' + Math.round(pr.pos / 8);
+  const rp = rpPrefs();
+  const url = npPublicUrl('.playbackSoundBadge__titleLink');
+  const key = [np.title, url, pr.paused, Math.round(pr.pos / 8),
+    rp.on, rp.status, rp.buttons, rp.pauseHide].join('|');
   if (key === _lastRpc) return;
   _lastRpc = key;
   scPost('rpc:' + JSON.stringify({
@@ -4654,7 +4807,9 @@ function rpcTick() {
     name: localStorage.getItem('hoqDiscord') || '',
     sc: localStorage.getItem('hoqSC') || '',
     title: np.title, artist: np.artist, cover: np.cover,
+    url, artistUrl: npPublicUrl('.playbackSoundBadge__lightLink'),
     pos: pr.pos, dur: pr.dur, paused: pr.paused,
+    rp,
   }));
 }
 
