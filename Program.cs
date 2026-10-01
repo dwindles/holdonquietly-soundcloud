@@ -55,7 +55,7 @@ class Program
     static bool maxed = false;
     static Rect restoreBounds;
     static readonly string LogFile = Path.Combine(Path.GetTempPath(), "scwv2.log");
-    static void Log(string s) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("HH:mm:ss ") + s + "\n"); } catch { } }
+    internal static void Log(string s) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("HH:mm:ss ") + s + "\n"); } catch { } }
 
     [STAThread]
     static void Main()
@@ -357,6 +357,8 @@ class Program
     static string Prop(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "") : "";
     static int PropI(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
     static bool PropB(JsonElement e, string k) => e.TryGetProperty(k, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False) && v.GetBoolean();
+    static bool PropBool(JsonElement e, string k, bool def) =>
+        e.TryGetProperty(k, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False) ? v.GetBoolean() : def;
 
     // POST our now-playing to the shared friends backend (from the host = no CORS/mixed-content).
     static async Task PostPresence(string id, string name, string sc, string title, string artist, string cover)
@@ -775,8 +777,25 @@ class Program
             {
                 var r = JsonDocument.Parse(m.Substring(4)).RootElement;
                 string title = Prop(r, "title"), artist = Prop(r, "artist"), cover = Prop(r, "cover");
-                if (string.IsNullOrEmpty(title)) DiscordRpc.Clear();
-                else DiscordRpc.SetActivity(title, artist, cover, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
+                // Presence preferences from Settings → Discord Rich Presence. A page
+                // that predates them sends none, which reads as the defaults.
+                bool rpOn = true, rpButtons = true, rpPauseHide = true;
+                string rpStatus = "artist";
+                if (r.TryGetProperty("rp", out var rp) && rp.ValueKind == JsonValueKind.Object)
+                {
+                    rpOn = PropBool(rp, "on", true);
+                    rpButtons = PropBool(rp, "buttons", true);
+                    rpPauseHide = PropBool(rp, "pauseHide", true);
+                    rpStatus = Prop(rp, "status") is var s && s.Length > 0 ? s : "artist";
+                }
+                if (string.IsNullOrEmpty(title) || !rpOn) DiscordRpc.Clear();
+                else DiscordRpc.Update(new DiscordRpc.Track
+                {
+                    Title = title, Artist = artist, Cover = cover,
+                    Url = Prop(r, "url"), ArtistUrl = Prop(r, "artistUrl"),
+                    Pos = PropI(r, "pos"), Dur = PropI(r, "dur"), Paused = PropB(r, "paused"),
+                    Status = rpStatus, Buttons = rpButtons, PauseHide = rpPauseHide,
+                });
                 Log("RP <- title=\"" + title + "\" paused=" + PropB(r, "paused") + " pos=" + PropI(r, "pos"));
                 _ = PostPresence(Prop(r, "id"), Prop(r, "name"), Prop(r, "sc"), title, artist, cover);
                 LastFm.Track(title, artist, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
@@ -932,14 +951,47 @@ class Program
     }
 }
 
-// Minimal Discord Rich Presence over the local Discord IPC pipe. Uses only the
-// PUBLIC Client ID — no token/secret. Shows "Listening to holdonquietly · <song>".
+// Discord Rich Presence over the local Discord IPC pipe. Uses only the PUBLIC
+// Client ID — no token/secret. Shows "Listening to <artist>" with the track and
+// artist as clickable links, crisp cover art, a live progress bar, a paused
+// badge, and "Listen on SoundCloud" / "Get holdonquietly" buttons.
 static class DiscordRpc
 {
     const string CLIENT_ID = "1523891530417442916";
+    // Images are external URLs: the Discord app has no uploaded art assets, so the
+    // "logo" asset key the old code used never rendered. raw.githubusercontent
+    // serves image/png, which Discord proxies.
+    const string RAW = "https://raw.githubusercontent.com/dwindles/holdonquietly-soundcloud/master/";
+    const string LOGO_URL = RAW + "logo.png";
+    const string PAUSED_URL = RAW + "assets/rpc/paused.png";
+    const string RELEASE_URL = "https://github.com/dwindles/holdonquietly-soundcloud/releases/latest";
+    static readonly TimeSpan PAUSE_HIDE_AFTER = TimeSpan.FromMinutes(5);
+
+    public sealed class Track
+    {
+        public string Title, Artist, Cover, Url, ArtistUrl;
+        public int Pos, Dur;
+        public bool Paused;
+        public string Status = "artist";   // member-list line: artist | song | app
+        public bool Buttons = true;
+        public bool PauseHide = true;       // clear the presence after a while paused
+        internal long At;                   // unix time Pos was sampled
+    }
+
     static NamedPipeClientStream pipe;
     static volatile bool ready = false;
-    static string lastActivity; // re-pushed after a reconnect so presence returns
+    static readonly object gate = new object();   // serialises pipe writes + presence state
+    static Track cur;              // what's showing (null = nothing playing / presence off)
+    static string sentKey;         // identity of the last activity sent — dedupes ticks
+    static long sentStart;
+    static string loggedKey;
+    static DateTime pausedSince;
+    static bool hiddenForPause;
+    // status_display_type and the *_url fields need a recent Discord client. If
+    // Discord rejects an update we step down and resend instead of going dark:
+    // 0 = everything, 1 = no status line / clickable links, 2 = also no buttons.
+    static int compat = 0;
+    static readonly string AppVersion = AppVer();
 
     public static async Task Connect()
     {
@@ -953,8 +1005,10 @@ static class DiscordRpc
                 pipe = p;
                 Send(0, "{\"v\":1,\"client_id\":\"" + CLIENT_ID + "\"}"); // handshake
                 ready = true;
-                _ = ReadLoop();
-                if (lastActivity != null) Send(1, lastActivity); // restore presence
+                _ = ReadLoop(p);
+                // A fresh connection (often Discord restarting, maybe updated) gets
+                // the full feature set again, then the current track.
+                lock (gate) { compat = 0; sentKey = null; Push(true); }
                 return;
             }
             catch { }
@@ -962,89 +1016,244 @@ static class DiscordRpc
     }
 
     // Discord frequently isn't running (or the pipe drops) when the app starts;
-    // keep trying so presence shows up whenever Discord becomes available.
+    // keep trying so presence shows up whenever Discord becomes available. The
+    // paused-too-long check also lives here: a paused track sends no new ticks.
     public static async Task KeepAlive()
     {
         while (true)
         {
             await Task.Delay(8000);
             if (!ready || pipe == null || !pipe.IsConnected) { ready = false; await Connect(); }
+            else lock (gate) { if (cur != null && cur.Paused) Push(false); }
         }
     }
 
-    public static void SetActivity(string title, string artist, string cover = "", int pos = 0, int dur = 0, bool paused = true)
+    public static void Update(Track t)
     {
-        if (!ready) return;
-        // large_image: the song cover URL if we have one, else the "logo" asset.
-        string large = string.IsNullOrEmpty(cover) ? "\"logo\"" : "\"" + Esc(cover) + "\"";
-        // Discord rejects empty fields, so only include state when there's an artist.
-        string stateField = string.IsNullOrWhiteSpace(artist) ? "" : ",\"state\":\"" + Esc(artist) + "\"";
-        // Real song progress: only while PLAYING and we know the duration. Paused = no timer.
-        string ts = "";
-        if (!paused && dur > 0 && pos >= 0 && pos <= dur)
+        lock (gate)
         {
-            long nowS = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            ts = ",\"timestamps\":{\"start\":" + (nowS - pos) + ",\"end\":" + (nowS - pos + dur) + "}";
+            t.At = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            bool wasPaused = cur != null && cur.Paused;
+            if (t.Paused) { if (!wasPaused || pausedSince == default) pausedSince = DateTime.UtcNow; }
+            else { pausedSince = default; hiddenForPause = false; }
+            cur = t;
+            Push(false);
         }
-        // Bottom "album" line = the holdonquietly watermark (subtle branding under the track).
-        string largeText = "holdonquietly";
-        string act = "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"" + Guid.NewGuid().ToString() +
-            "\",\"args\":{\"pid\":" + Environment.ProcessId +
-            // name -> the track (Discord shows "Listening to <track>" when it honors
-            // the activity name; falls back to the app name otherwise). No large_text
-            // so there's no redundant "holdonquietly" album line — the cover's hover
-            // shows the track instead. small badge keeps the holdonquietly branding.
-            // NOTE: do NOT set a per-song "name" — Discord treats a changing activity
-            // name as a brand-new activity and rate-limits/caches it, which gets the
-            // presence stuck on the WRONG (previous) song. Keep name = the app (constant)
-            // so song changes are smooth UPDATES. The current song shows as details.
-            ",\"activity\":{\"type\":2,\"details\":\"" + Esc(title) + "\"" + stateField + ts +
-            ",\"assets\":{\"large_image\":" + large + ",\"large_text\":\"" + Esc(largeText) + "\"," +
-            "\"small_image\":\"logo\",\"small_text\":\"holdonquietly\"}}}}";
-        lastActivity = act;
-        Send(1, act);
     }
 
     public static void Clear()
     {
-        lastActivity = null;
+        lock (gate)
+        {
+            cur = null; sentKey = null; pausedSince = default; hiddenForPause = false;
+            ClearActivity();
+        }
+    }
+
+    // Caller holds `gate`.
+    static void ClearActivity()
+    {
         if (!ready) return;
-        Send(1, "{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"" + Guid.NewGuid().ToString() +
-            "\",\"args\":{\"pid\":" + Environment.ProcessId + "}}");
+        Send(1, JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["cmd"] = "SET_ACTIVITY",
+            ["nonce"] = Guid.NewGuid().ToString(),
+            ["args"] = new Dictionary<string, object> { ["pid"] = Environment.ProcessId },
+        }));
+    }
+
+    // Send the current activity if it differs from what Discord already shows.
+    // Caller holds `gate`.
+    static void Push(bool force)
+    {
+        var t = cur;
+        if (t == null) return;
+        // Paused long enough → step off Discord rather than claim you're listening.
+        if (t.Paused && t.PauseHide && pausedSince != default && DateTime.UtcNow - pausedSince >= PAUSE_HIDE_AFTER)
+        {
+            if (!hiddenForPause) { hiddenForPause = true; sentKey = null; ClearActivity(); }
+            return;
+        }
+        hiddenForPause = false;
+        bool timed = !t.Paused && t.Dur > 0 && t.Pos >= 0 && t.Pos <= t.Dur;
+        long start = timed ? t.At - t.Pos : 0;
+        string key = string.Join("\u001f", t.Title, t.Artist, t.Url, t.ArtistUrl, t.Cover, t.Paused,
+            t.Status, t.Buttons, compat, timed ? t.Dur : 0);
+        // The page ticks every few seconds while playing; only a seek moves the
+        // start time by more than a second or two, so anything less is a repeat.
+        // NOTE: never put a per-song "name" in the activity — Discord treats a new
+        // name as a new activity and caches it, sticking presence on the old song.
+        if (!force && key == sentKey && Math.Abs(start - sentStart) <= 2) return;
+        sentKey = key; sentStart = start;
+        if (ready) Send(1, Build(t, start));
+    }
+
+    static string Build(Track t, long start)
+    {
+        bool hasArtist = !string.IsNullOrWhiteSpace(t.Artist);
+        string cover = BigCover(t.Cover);
+        bool linkTrack = IsUrl(t.Url), linkArtist = hasArtist && IsUrl(t.ArtistUrl);
+
+        var act = new Dictionary<string, object> { ["type"] = 2 };   // Listening
+        act["details"] = Fit(t.Title);
+        if (hasArtist) act["state"] = Fit(t.Artist);
+        if (compat == 0)
+        {
+            // The member list reads "Listening to …" the artist (like a music app
+            // does), the song, or the app's name.
+            act["status_display_type"] = t.Status == "app" ? 0 : (t.Status == "song" || !hasArtist) ? 2 : 1;
+            if (linkTrack) act["details_url"] = t.Url;
+            if (linkArtist) act["state_url"] = t.ArtistUrl;
+        }
+        if (start > 0) act["timestamps"] = new Dictionary<string, object> { ["start"] = start, ["end"] = start + t.Dur };
+
+        var assets = new Dictionary<string, object>
+        {
+            ["large_image"] = cover ?? LOGO_URL,
+            ["large_text"] = "holdonquietly",   // the line under the artist: the app watermark
+        };
+        if (compat == 0 && linkTrack) assets["large_url"] = t.Url;
+        if (t.Paused)
+        {
+            assets["small_image"] = PAUSED_URL;
+            assets["small_text"] = "Paused";
+        }
+        else if (cover != null)   // with no cover the logo is already the big image
+        {
+            assets["small_image"] = LOGO_URL;
+            assets["small_text"] = AppVersion.Length > 0 ? "holdonquietly v" + AppVersion : "holdonquietly";
+            if (compat == 0) assets["small_url"] = RELEASE_URL;
+        }
+        act["assets"] = assets;
+
+        // Discord shows these to everyone except you — that's normal, not a bug.
+        if (t.Buttons && compat < 2)
+        {
+            var buttons = new List<object>();
+            if (IsUrl(t.Url, 512)) buttons.Add(new Dictionary<string, object> { ["label"] = "Listen on SoundCloud", ["url"] = t.Url });
+            buttons.Add(new Dictionary<string, object> { ["label"] = "Get holdonquietly", ["url"] = RELEASE_URL });
+            act["buttons"] = buttons;
+        }
+
+        return JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["cmd"] = "SET_ACTIVITY",
+            ["nonce"] = Guid.NewGuid().ToString(),
+            ["args"] = new Dictionary<string, object> { ["pid"] = Environment.ProcessId, ["activity"] = act },
+        });
+    }
+
+    // Discord rejects details/state/text under 2 or over 128 characters, and one
+    // bad field fails the whole update — so every string is fitted.
+    static string Fit(string s, int max = 128)
+    {
+        s = (s ?? "").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Trim();
+        if (s.Length > max)
+        {
+            int cut = max - 1;
+            if (char.IsHighSurrogate(s[cut - 1])) cut--;   // never split an emoji
+            s = s.Substring(0, cut).TrimEnd() + "…";
+        }
+        while (s.Length < 2) s += "⠀";   // blank Braille cell: invisible, but not whitespace Discord would trim
+        return s;
+    }
+
+    static bool IsUrl(string u, int max = 256) =>
+        !string.IsNullOrEmpty(u) && u.Length <= max &&
+        Uri.TryCreate(u, UriKind.Absolute, out var x) && (x.Scheme == Uri.UriSchemeHttps || x.Scheme == Uri.UriSchemeHttp);
+
+    // The page hands over the player's 200px artwork; SoundCloud's CDN serves every
+    // artwork at 500px too, which keeps the cover sharp in Discord's card.
+    static string BigCover(string c) => IsUrl(c)
+        ? System.Text.RegularExpressions.Regex.Replace(c, @"-(t\d+x\d+|large|small|crop|badge|tiny|mini)\.(jpg|jpeg|png|webp)", "-t500x500.$2")
+        : null;
+
+    static string AppVer()
+    {
+        try { var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version; return v == null ? "" : v.ToString(3); }
+        catch { return ""; }
     }
 
     static void Send(int op, string json)
     {
-        if (pipe == null || !pipe.IsConnected) return;
-        try
+        lock (gate)
         {
-            byte[] data = Encoding.UTF8.GetBytes(json);
-            byte[] buf = new byte[8 + data.Length];
-            BitConverter.GetBytes(op).CopyTo(buf, 0);
-            BitConverter.GetBytes(data.Length).CopyTo(buf, 4);
-            data.CopyTo(buf, 8);
-            pipe.Write(buf, 0, buf.Length);
-            pipe.Flush();
-        }
-        catch { ready = false; }
-    }
-
-    static async Task ReadLoop()
-    {
-        byte[] head = new byte[8];
-        while (pipe != null && pipe.IsConnected)
-        {
+            var p = pipe;
+            if (p == null || !p.IsConnected) return;
             try
             {
-                int n = await pipe.ReadAsync(head, 0, 8);
-                if (n < 8) break;
-                int len = BitConverter.ToInt32(head, 4);
-                if (len > 0) { byte[] payload = new byte[len]; int r = 0; while (r < len) { int k = await pipe.ReadAsync(payload, r, len - r); if (k <= 0) break; r += k; } }
+                byte[] data = Encoding.UTF8.GetBytes(json);
+                byte[] buf = new byte[8 + data.Length];
+                BitConverter.GetBytes(op).CopyTo(buf, 0);
+                BitConverter.GetBytes(data.Length).CopyTo(buf, 4);
+                data.CopyTo(buf, 8);
+                p.Write(buf, 0, buf.Length);
+                p.Flush();
             }
-            catch { break; }
+            catch { ready = false; }
         }
-        ready = false;
     }
 
-    static string Esc(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", " ");
+    static async Task ReadLoop(NamedPipeClientStream p)
+    {
+        byte[] head = new byte[8];
+        try
+        {
+            while (p.IsConnected)
+            {
+                if (!await ReadExact(p, head, 8)) break;
+                int op = BitConverter.ToInt32(head, 0);
+                int len = BitConverter.ToInt32(head, 4);
+                if (len < 0 || len > (1 << 20)) break;
+                byte[] payload = new byte[len];
+                if (len > 0 && !await ReadExact(p, payload, len)) break;
+                if (op == 2) break;            // Discord closed the connection
+                if (op == 1) OnFrame(payload);
+            }
+        }
+        catch { }
+        if (pipe == p) ready = false;
+    }
+
+    static async Task<bool> ReadExact(NamedPipeClientStream p, byte[] buf, int n)
+    {
+        int r = 0;
+        while (r < n)
+        {
+            int k = await p.ReadAsync(buf, r, n - r);
+            if (k <= 0) return false;
+            r += k;
+        }
+        return true;
+    }
+
+    // Discord answers every command. An ERROR reply to SET_ACTIVITY used to be
+    // read and thrown away, so a field the client didn't accept silently took the
+    // presence down. Now it's logged and the update is resent with fewer of the
+    // newer fields (see `compat`).
+    static void OnFrame(byte[] payload)
+    {
+        try
+        {
+            var r = JsonDocument.Parse(payload).RootElement;
+            if (!r.TryGetProperty("cmd", out var c) || c.ValueKind != JsonValueKind.String || c.GetString() != "SET_ACTIVITY") return;
+            bool error = r.TryGetProperty("evt", out var e) && e.ValueKind == JsonValueKind.String && e.GetString() == "ERROR";
+            lock (gate)
+            {
+                if (error)
+                {
+                    string msg = r.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Object &&
+                                 d.TryGetProperty("message", out var mm) ? mm.ToString() : "";
+                    Program.Log("RP rejected (level " + compat + "): " + msg);
+                    if (compat < 2) { compat++; sentKey = null; Push(true); }
+                }
+                else if (sentKey != null && sentKey != loggedKey)
+                {
+                    loggedKey = sentKey;
+                    Program.Log("RP ok (level " + compat + ")");
+                }
+            }
+        }
+        catch { }
+    }
 }
