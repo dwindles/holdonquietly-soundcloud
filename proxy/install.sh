@@ -76,7 +76,9 @@ sleep 1
 page=$(curl -s --max-time 30 "https://$H/" || true)
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$H/" || echo 000)
 inj=$(printf '%s' "$page" | grep -c 'hoq.js' || true)
-left=$(printf '%s' "$page" | grep -oE '(api-v2|a-v2|i1|secure)\.(soundcloud|sndcdn)\.com' | wc -l | tr -d ' ')
+# `|| true` inside the group: zero matches is the GOOD result, and under
+# pipefail grep's exit 1 used to kill the script before the report printed.
+left=$( { printf '%s' "$page" | grep -oE '(api-v2|a-v2|i1|secure)\.(soundcloud|sndcdn)\.com' || true; } | wc -l | tr -d ' ')
 loop=$(curl -s --max-time 30 "https://$H/hoq.js" | grep -c "getAttribute('content') !== want" || true)
 
 echo "    app responds       : HTTP $code   (want 200)"
