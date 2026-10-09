@@ -319,6 +319,7 @@ class Program
         core.Navigate("https://soundcloud.com/discover");
         _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
         _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
+        _ = PhoneNowPlayingLoop();  // the phone's listening, onto the same presence
         _ = FriendsLoop();          // poll the shared friends backend
         _ = ReadWebhook();          // warm the cache, so a later failed read still has a URL
         _ = FeedLoop();             // poll the community feed
@@ -553,6 +554,68 @@ class Program
         string js = "window.__hoqPairLink && window.__hoqPairLink(" + JsonSerializer.Serialize(link) + "," + JsonSerializer.Serialize(err) + ")";
         try { await wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
     }
+
+    // Phone → Discord. Discord only takes Rich Presence from a program beside its
+    // desktop client, so the phone build reports what it's playing to the proxy
+    // (/__hoq/np, proxy/pair-server.js) and this long-polls it as the same
+    // SoundCloud account — the server matches the two by whose token each holds.
+    static async Task PhoneNowPlayingLoop()
+    {
+        long have = -1;
+        string token = "", logged = null;
+        DateTime tokenAt = default;
+        while (true)
+        {
+            try
+            {
+                if (token.Length == 0 || DateTime.UtcNow - tokenAt > TimeSpan.FromMinutes(10))
+                {
+                    token = await ReadOauthToken();
+                    tokenAt = DateTime.UtcNow;
+                }
+                if (token.Length == 0) { await Task.Delay(30000); continue; }   // signed out here
+
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(45));
+                using var req = new HttpRequestMessage(HttpMethod.Get, PROXY_ORIGIN + "/__hoq/np?v=" + have);
+                req.Headers.TryAddWithoutValidation("Authorization", "OAuth " + token);
+                using var resp = await http.SendAsync(req, cts.Token);
+                if ((int)resp.StatusCode == 401) { token = ""; await Task.Delay(30000); continue; }
+                if (!resp.IsSuccessStatusCode) { await Task.Delay(15000); continue; }
+
+                var r = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
+                long v = r.GetProperty("v").GetInt64();
+                if (v == have) continue;
+                have = v;
+                DiscordRpc.Track t = null;
+                if (r.TryGetProperty("track", out var tr) && tr.ValueKind == JsonValueKind.Object && Prop(tr, "title").Length > 0)
+                    t = new DiscordRpc.Track
+                    {
+                        Title = Prop(tr, "title"), Artist = Prop(tr, "artist"), Cover = Prop(tr, "cover"),
+                        Url = Prop(tr, "url"), ArtistUrl = Prop(tr, "artistUrl"),
+                        Pos = PropI(tr, "pos"), Dur = PropI(tr, "dur"), Paused = PropB(tr, "paused"),
+                        Status = Prop(tr, "status") is var s && s.Length > 0 ? s : "artist",
+                        Buttons = PropBool(tr, "buttons", true), PauseHide = PropBool(tr, "pauseHide", true),
+                    };
+                DiscordRpc.UpdatePhone(t, PropI(r, "age"));
+                string line = t == null ? "nothing" : "title=\"" + t.Title + "\" paused=" + t.Paused;
+                if (line != logged) { logged = line; Log("phone np <- " + line); }
+            }
+            catch (Exception ex)
+            {
+                Log("phone np: " + ex.GetType().Name);
+                await Task.Delay(15000);
+            }
+        }
+    }
+
+    // The signed-in SoundCloud token, read on the UI thread (WebView2 objects
+    // belong to it).
+    static Task<string> ReadOauthToken() =>
+        win.Dispatcher.InvokeAsync(async () =>
+        {
+            var cookies = await wv.CoreWebView2.CookieManager.GetCookiesAsync("https://soundcloud.com");
+            return cookies.FirstOrDefault(c => c.Name == "oauth_token")?.Value ?? "";
+        }).Task.Unwrap();
 
     static async Task SendHookStatus(string err)
     {
@@ -937,7 +1000,7 @@ class Program
                     rpPauseHide = PropBool(rp, "pauseHide", true);
                     rpStatus = Prop(rp, "status") is var s && s.Length > 0 ? s : "artist";
                 }
-                if (string.IsNullOrEmpty(title) || !rpOn) DiscordRpc.Clear();
+                if (string.IsNullOrEmpty(title) || !rpOn) DiscordRpc.Clear(!rpOn);
                 else DiscordRpc.Update(new DiscordRpc.Track
                 {
                     Title = title, Artist = artist, Cover = cover,
@@ -1124,17 +1187,22 @@ static class DiscordRpc
         public string Status = "artist";   // member-list line: artist | song | app
         public bool Buttons = true;
         public bool PauseHide = true;       // clear the presence after a while paused
+        public bool Phone;                  // relayed from the phone build (PhoneNowPlayingLoop)
         internal long At;                   // unix time Pos was sampled
+        internal long LastPlaying;          // unix time it was last heard playing
     }
 
     static NamedPipeClientStream pipe;
     static volatile bool ready = false;
     static readonly object gate = new object();   // serialises pipe writes + presence state
+    // Two sources: this PC's player and the phone's. This PC wins while it's
+    // playing; otherwise the phone does, and with both paused, whichever played last.
+    static Track desk, phone;
+    static bool relayOff;          // Rich Presence switched off here: the phone's stays off too
     static Track cur;              // what's showing (null = nothing playing / presence off)
     static string sentKey;         // identity of the last activity sent — dedupes ticks
     static long sentStart;
     static string loggedKey;
-    static DateTime pausedSince;
     static bool hiddenForPause;
     // status_display_type and the *_url fields need a recent Discord client. If
     // Discord rejects an update we step down and resend instead of going dark:
@@ -1157,7 +1225,7 @@ static class DiscordRpc
                 _ = ReadLoop(p);
                 // A fresh connection (often Discord restarting, maybe updated) gets
                 // the full feature set again, then the current track.
-                lock (gate) { compat = 0; sentKey = null; Push(true); }
+                lock (gate) { compat = 0; sentKey = null; Choose(true); }
                 return;
             }
             catch { }
@@ -1166,37 +1234,94 @@ static class DiscordRpc
 
     // Discord frequently isn't running (or the pipe drops) when the app starts;
     // keep trying so presence shows up whenever Discord becomes available. The
-    // paused-too-long check also lives here: a paused track sends no new ticks.
+    // paused-too-long check also lives here (a paused track sends no new ticks),
+    // and so does noticing that the phone went quiet.
     public static async Task KeepAlive()
     {
         while (true)
         {
             await Task.Delay(8000);
             if (!ready || pipe == null || !pipe.IsConnected) { ready = false; await Connect(); }
-            else lock (gate) { if (cur != null && cur.Paused) Push(false); }
+            else lock (gate) { if (cur != null || phone != null) Choose(false); }
         }
     }
+
+    static long Now() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
     public static void Update(Track t)
     {
         lock (gate)
         {
-            t.At = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            bool wasPaused = cur != null && cur.Paused;
-            if (t.Paused) { if (!wasPaused || pausedSince == default) pausedSince = DateTime.UtcNow; }
-            else { pausedSince = default; hiddenForPause = false; }
-            cur = t;
-            Push(false);
+            long now = Now();
+            t.At = now;
+            t.LastPlaying = !t.Paused ? now : desk != null && desk.LastPlaying > 0 ? desk.LastPlaying : now;
+            desk = t;
+            relayOff = false;
+            Choose(false);
         }
     }
 
-    public static void Clear()
+    // From the phone, via the server. `ageSec` is how long ago the phone sent it;
+    // null means it stopped (or turned its presence off).
+    public static void UpdatePhone(Track t, int ageSec)
     {
         lock (gate)
         {
-            cur = null; sentKey = null; pausedSince = default; hiddenForPause = false;
-            ClearActivity();
+            if (t != null)
+            {
+                t.Phone = true;
+                t.At = Now() - Math.Max(0, ageSec);
+                t.LastPlaying = !t.Paused ? t.At : phone != null && phone.LastPlaying > 0 ? phone.LastPlaying : t.At;
+            }
+            phone = t;
+            Choose(false);
         }
+    }
+
+    // Nothing playing on this PC (`off`: Rich Presence switched off here).
+    public static void Clear(bool off = false)
+    {
+        lock (gate)
+        {
+            desk = null;
+            relayOff = off;
+            Choose(false);
+        }
+    }
+
+    // Caller holds `gate`.
+    static Track Pick()
+    {
+        long now = Now();
+        var p = relayOff || phone == null || !PhoneAlive(phone, now) ? null : phone;
+        var d = desk;
+        if (d != null && !d.Paused) return d;
+        if (p != null && !p.Paused) return p;
+        if (d == null || p == null) return d ?? p;
+        return p.LastPlaying > d.LastPlaying ? p : d;
+    }
+
+    // Safari can stop reporting while the phone sits in a pocket, so a playing
+    // track is trusted until it should have ended (plus some grace) rather than
+    // dropped the moment the reports stop.
+    static bool PhoneAlive(Track p, long now)
+    {
+        if (p.Paused) return now - p.At < 30 * 60;
+        if (p.Dur > 0) return now <= p.At - p.Pos + p.Dur + 30;
+        return now - p.At < 120;
+    }
+
+    // Caller holds `gate`.
+    static void Choose(bool force)
+    {
+        var t = Pick();
+        if (t == null)
+        {
+            if (cur != null || force) { cur = null; sentKey = null; hiddenForPause = false; ClearActivity(); }
+            return;
+        }
+        cur = t;
+        Push(force);
     }
 
     // Caller holds `gate`.
@@ -1218,7 +1343,7 @@ static class DiscordRpc
         var t = cur;
         if (t == null) return;
         // Paused long enough → step off Discord rather than claim you're listening.
-        if (t.Paused && t.PauseHide && pausedSince != default && DateTime.UtcNow - pausedSince >= PAUSE_HIDE_AFTER)
+        if (t.Paused && t.PauseHide && Now() - t.LastPlaying >= (long)PAUSE_HIDE_AFTER.TotalSeconds)
         {
             if (!hiddenForPause) { hiddenForPause = true; sentKey = null; ClearActivity(); }
             return;
@@ -1227,7 +1352,7 @@ static class DiscordRpc
         bool timed = !t.Paused && t.Dur > 0 && t.Pos >= 0 && t.Pos <= t.Dur;
         long start = timed ? t.At - t.Pos : 0;
         string key = string.Join("\u001f", t.Title, t.Artist, t.Url, t.ArtistUrl, t.Cover, t.Paused,
-            t.Status, t.Buttons, compat, timed ? t.Dur : 0);
+            t.Status, t.Buttons, compat, timed ? t.Dur : 0, t.Phone);
         // The page ticks every few seconds while playing; only a seek moves the
         // start time by more than a second or two, so anything less is a repeat.
         // NOTE: never put a per-song "name" in the activity — Discord treats a new
@@ -1259,18 +1384,20 @@ static class DiscordRpc
         var assets = new Dictionary<string, object>
         {
             ["large_image"] = cover ?? LOGO_URL,
-            ["large_text"] = "holdonquietly",   // the line under the artist: the app watermark
+            // the line under the artist: the app watermark
+            ["large_text"] = t.Phone ? "holdonquietly · on phone" : "holdonquietly",
         };
         if (compat == 0 && linkTrack) assets["large_url"] = t.Url;
         if (t.Paused)
         {
             assets["small_image"] = PAUSED_URL;
-            assets["small_text"] = "Paused";
+            assets["small_text"] = t.Phone ? "Paused on phone" : "Paused";
         }
         else if (cover != null)   // with no cover the logo is already the big image
         {
             assets["small_image"] = LOGO_URL;
-            assets["small_text"] = AppVersion.Length > 0 ? "holdonquietly v" + AppVersion : "holdonquietly";
+            string app = AppVersion.Length > 0 ? "holdonquietly v" + AppVersion : "holdonquietly";
+            assets["small_text"] = t.Phone ? "On phone · " + app : app;
             if (compat == 0) assets["small_url"] = RELEASE_URL;
         }
         act["assets"] = assets;
