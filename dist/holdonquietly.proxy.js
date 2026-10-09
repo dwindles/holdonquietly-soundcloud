@@ -23,6 +23,38 @@ function scPost(cmd) {
   } catch (e) {}
 }
 
+// "Log in on your phone" — redeem side. The desktop app's QR opens the proxy with
+// SoundCloud's two login cookies in the URL fragment (never sent to any server).
+// Set them on this domain, scrub them from the address bar, and reload signed in.
+// Only ever on the proxy, never on soundcloud.com itself.
+(() => {
+  try {
+    const h = location.hash || '';
+    if (h.indexOf('#hoq-login=') !== 0) return;
+    if (!/(^|\.)holdonquietly\.com$/i.test(location.hostname)) return;
+    // Scrub first, whatever happens next, so the login never sits in the
+    // address bar or the history entry.
+    history.replaceState(null, '', location.pathname + location.search);
+    let b = h.slice(11).replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    const d = JSON.parse(atob(b));
+    // Cookie-safe characters only: a ';' in a value would smuggle in attributes.
+    const ok = (v) => typeof v === 'string' && /^[A-Za-z0-9._~+\/=-]{8,512}$/.test(v);
+    if (!ok(d.o)) return;
+    const tail = '; path=/; max-age=31536000; secure; samesite=lax';
+    const dom = '; domain=.' + location.hostname;
+    // Drop any half-session first so there's no duplicate cookie to trip on.
+    ['oauth_token', 'sc_session'].forEach((n) => {
+      document.cookie = n + '=; path=/; max-age=0';
+      document.cookie = n + '=; path=/; max-age=0' + dom;
+    });
+    document.cookie = 'oauth_token=' + d.o + tail;            // host-only, as SoundCloud sets it
+    if (ok(d.s)) document.cookie = 'sc_session=' + d.s + tail + dom;
+    document.cookie = 'soundcloud_session_hint=1; path=/; secure; samesite=lax' + dom;
+    location.reload();
+  } catch (e) {}
+})();
+
 // --- Audio tap for the visualizer / ambient nebula ---------------------------
 // SoundCloud plays through Web Audio and makes exactly ONE MediaElementSource on
 // its audio element (a same-origin blob: with crossOrigin=anonymous, so it is
@@ -4092,6 +4124,9 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-hook-remove { flex: none; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
         padding: 6px 12px; cursor: pointer; background: rgba(255,255,255,0.05); color: #c9c9d2; font-size: 12px; font-weight: 600; }
       #hoq-discord .hoq-hook-remove:hover { background: rgba(255,255,255,0.1); color: #fff; }
+      #hoq-discord .hoq-pair-btn { flex: none; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer;
+        font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
+      #hoq-discord .hoq-pair-btn:hover { filter: brightness(1.1); }
       /* Accounts */
       #hoq-discord .hoq-acct-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
       #hoq-discord .hoq-acct-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px;
@@ -4238,6 +4273,15 @@ function ensureDiscordPanel() {
         </div>
         <div class="hoq-dc-hint">Saved on this PC by the app, never in the page. In Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL.</div>
       </div>
+      <div class="hoq-dc-sec hoq-pair-sec">
+        <div class="hoq-dc-label">Phone</div>
+        <div class="hoq-rp">
+          <div class="hoq-rp-row hoq-rp-static">
+            <span><b>Log in on your phone</b><em>Scan a code and holdonquietly opens on your phone, already signed in.</em></span>
+            <button class="hoq-pair-btn" type="button">Show code</button>
+          </div>
+        </div>
+      </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Accounts</div>
         <div class="hoq-acct-list"></div>
@@ -4289,7 +4333,7 @@ function ensureDiscordPanel() {
       </div>
     </div>`;
   // Configuration lives behind the Settings sub-tab; everything else is Social.
-  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'discord webhook', 'your info'];
+  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'discord webhook', 'phone', 'your info'];
   p.querySelectorAll('.hoq-dc-sec').forEach((sec) => {
     const lab = sec.querySelector('.hoq-dc-label');
     const t = lab ? lab.textContent.trim().toLowerCase() : '';
@@ -4315,6 +4359,8 @@ function ensureDiscordPanel() {
   if (rpSec) { if (hoqHasHost()) setupRpSettings(rpSec); else rpSec.remove(); }
   const hookSec = p.querySelector('.hoq-hook-sec');
   if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
+  const pairSec = p.querySelector('.hoq-pair-sec');
+  if (pairSec) { if (hoqHasHost()) setupPairSettings(pairSec); else pairSec.remove(); }
   p.dataset.pane = 'social';
   p.querySelectorAll('.hoq-subtab').forEach((b) => {
     b.addEventListener('click', () => {
@@ -4842,6 +4888,95 @@ function setupHookSettings(sec) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
   remove.addEventListener('click', () => { remove.hidden = true; scPost('hook:clear'); });
   scPost('hook:status');
+}
+
+// Settings → Phone → "Log in on your phone". The host makes a QR from this app's
+// own SoundCloud login; it shows for a minute and is then wiped from the page.
+function setupPairSettings(sec) {
+  let modal = document.getElementById('hoq-pair-modal');
+  if (!modal) {
+    const st = document.createElement('style');
+    st.id = 'hoq-pair-css';
+    st.textContent = `
+      #hoq-pair-modal { position: fixed; inset: 0; z-index: 2147483300; display: flex; align-items: center;
+        justify-content: center; background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px); font-family: Inter,-apple-system,Arial,sans-serif; }
+      #hoq-pair-modal[hidden] { display: none !important; }
+      #hoq-pair-modal .hoq-pair-card { position: relative; width: 340px; max-width: calc(100vw - 32px);
+        box-sizing: border-box; padding: 24px 24px 20px; border-radius: 18px; text-align: center; color: #e7e7ed;
+        background: rgba(16,16,20,0.82); border: 1px solid rgba(255,255,255,0.10);
+        box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+        backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5); }
+      #hoq-pair-modal .hoq-pair-x { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px;
+        border: 0; border-radius: 50%; background: rgba(255,255,255,0.08); color: #c9c9d2;
+        font-size: 16px; line-height: 1; cursor: pointer; }
+      #hoq-pair-modal .hoq-pair-x:hover { background: rgba(255,255,255,0.16); color: #fff; }
+      #hoq-pair-modal .hoq-pair-title { font-size: 17px; font-weight: 800; color: #fff; }
+      #hoq-pair-modal .hoq-pair-sub { font-size: 12.5px; color: #9a9aa3; margin-top: 4px; }
+      #hoq-pair-modal .hoq-pair-qr { width: 240px; height: 240px; margin: 18px auto 14px; border-radius: 14px;
+        background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      #hoq-pair-modal .hoq-pair-qr img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+      #hoq-pair-modal .hoq-pair-qr.is-empty { background: rgba(255,255,255,0.05); }
+      #hoq-pair-modal .hoq-pair-qr.is-empty img { display: none; }
+      #hoq-pair-modal .hoq-pair-status { display: none; padding: 16px; font-size: 13px; color: #c9c9d2; }
+      #hoq-pair-modal .hoq-pair-qr.is-empty .hoq-pair-status { display: block; }
+      #hoq-pair-modal .hoq-pair-who { font-size: 13px; color: #c9c9d2; }
+      #hoq-pair-modal .hoq-pair-who b { color: var(--sc-accent,#ff5500); }
+      #hoq-pair-modal .hoq-pair-warn { margin-top: 10px; font-size: 11.5px; line-height: 1.45; color: #ffb4a8; }
+      #hoq-pair-modal .hoq-pair-timer { margin-top: 8px; font-size: 11px; color: #7f7f8a; font-variant-numeric: tabular-nums; }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+    modal = document.createElement('div');
+    modal.id = 'hoq-pair-modal';
+    modal.hidden = true;
+    modal.innerHTML =
+      '<div class="hoq-pair-card">' +
+        '<button class="hoq-pair-x" type="button" aria-label="Close">×</button>' +
+        '<div class="hoq-pair-title">Log in on your phone</div>' +
+        '<div class="hoq-pair-sub">Point your phone’s camera at the code.</div>' +
+        '<div class="hoq-pair-qr is-empty"><img alt="Login code"><span class="hoq-pair-status"></span></div>' +
+        '<div class="hoq-pair-who">Signs in as <b></b></div>' +
+        '<div class="hoq-pair-warn">This code is your login. Anyone who scans it gets into your SoundCloud, so don’t screenshot or share it.</div>' +
+        '<div class="hoq-pair-timer"></div>' +
+      '</div>';
+    document.body.appendChild(modal);
+  }
+  const box = modal.querySelector('.hoq-pair-qr');
+  const img = box.querySelector('img');
+  const status = box.querySelector('.hoq-pair-status');
+  const timer = modal.querySelector('.hoq-pair-timer');
+  let tick = null;
+  const close = () => {
+    modal.hidden = true;
+    img.removeAttribute('src');          // the code is a login — don't leave it in the page
+    box.classList.add('is-empty');
+    clearInterval(tick); tick = null;
+  };
+  window.__hoqPairQr = (src, err) => {
+    if (modal.hidden) return;
+    if (err || !src) { status.textContent = err || 'Couldn’t make the code.'; return; }
+    img.src = src;
+    box.classList.remove('is-empty');
+    let left = 60;
+    timer.textContent = 'Hides in ' + left + 's';
+    clearInterval(tick);
+    tick = setInterval(() => { left -= 1; timer.textContent = 'Hides in ' + left + 's'; if (left <= 0) close(); }, 1000);
+  };
+  sec.querySelector('.hoq-pair-btn').addEventListener('click', () => {
+    modal.querySelector('.hoq-pair-who b').textContent = hoqMe().name || 'your account';
+    status.textContent = 'Making your code…';
+    timer.textContent = '';
+    img.removeAttribute('src');
+    box.classList.add('is-empty');
+    modal.hidden = false;
+    scPost('pair:qr');
+  });
+  if (!modal.dataset.bound) {
+    modal.dataset.bound = '1';
+    modal.querySelector('.hoq-pair-x').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    window.addEventListener('keydown', (e) => { if (!modal.hidden && e.key === 'Escape') close(); });
+  }
 }
 
 // Push now-playing to the C# host (Discord Rich Presence + friends backend).

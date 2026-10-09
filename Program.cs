@@ -491,6 +491,39 @@ class Program
         await SendHookStatus(null);
     }
 
+    // "Log in on your phone". This app is already signed in, so it hands the phone
+    // SoundCloud's two login cookies through a QR code. They ride in the link's
+    // fragment (after #), which browsers never send to any server — not even our
+    // proxy — and the proxy page turns them back into cookies (preload:
+    // "redeem side"). Neither cookie is HttpOnly, so a page script can set them.
+    const string PROXY_ORIGIN = "https://sc.holdonquietly.com";
+
+    static async Task SendPairQr()
+    {
+        string img = "", err = "";
+        try
+        {
+            var cookies = await wv.CoreWebView2.CookieManager.GetCookiesAsync("https://soundcloud.com");
+            string oauth = cookies.FirstOrDefault(c => c.Name == "oauth_token")?.Value ?? "";
+            string sess = cookies.FirstOrDefault(c => c.Name == "sc_session")?.Value ?? "";
+            if (oauth.Length == 0) err = "Sign in to SoundCloud in this app first.";
+            else
+            {
+                string json = JsonSerializer.Serialize(new Dictionary<string, string> { ["o"] = oauth, ["s"] = sess });
+                string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+                string url = PROXY_ORIGIN + "/#hoq-login=" + b64;
+                using var gen = new QRCoder.QRCodeGenerator();
+                using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.M);
+                img = "data:image/png;base64," + Convert.ToBase64String(new QRCoder.PngByteQRCode(data).GetGraphic(8));
+                // Length only — the link itself is a login, never written anywhere.
+                Log("pair: code ready (" + url.Length + "-char link, session cookie " + (sess.Length > 0 ? "included" : "missing") + ")");
+            }
+        }
+        catch (Exception ex) { err = "Couldn't make the code."; Log("pair failed: " + ex.GetType().Name + " " + ex.Message); }
+        string js = "window.__hoqPairQr && window.__hoqPairQr(" + JsonSerializer.Serialize(img) + "," + JsonSerializer.Serialize(err) + ")";
+        try { await wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
+    }
+
     static async Task SendHookStatus(string err)
     {
         bool set = !string.IsNullOrEmpty(_webhookCache) || !string.IsNullOrEmpty(await ReadWebhook());
@@ -848,6 +881,7 @@ class Program
         if (m != null && m.StartsWith("hook:set:")) { await SetWebhook(m.Substring(9)); return; }
         if (m == "hook:clear") { await ClearWebhook(); return; }
         if (m == "hook:status") { await SendHookStatus(null); return; }
+        if (m == "pair:qr") { await SendPairQr(); return; }
         if (m != null && m.StartsWith("webhook:")) { await PostWebhook(m.Substring(8)); return; }
         if (m != null && m.StartsWith("playreq:")) { await PostWebhook(m.Substring(8), true); return; }
         if (m != null && m.StartsWith("acct:save:")) { await AcctSave(m.Substring(10)); return; }
