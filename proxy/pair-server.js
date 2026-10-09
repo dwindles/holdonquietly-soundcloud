@@ -11,6 +11,9 @@
 // burn a link before the person taps it. The claimed cookies go to
 // /#hoq-login=…, the fragment the proxy page already redeems.
 //
+// It also relays now-playing from the phone to the desktop app (/__hoq/np, see
+// below), so phone listening can show as Discord Rich Presence.
+//
 // Nothing is written to disk, and nothing is logged except counts.
 const http = require('http');
 const crypto = require('crypto');
@@ -63,8 +66,138 @@ function readBody(req, cb) {
   req.on('end', () => cb(body));
 }
 
+// ---------------------------------------------------------------------------
+// Now-playing relay, phone -> desktop, for Discord Rich Presence. Discord only
+// takes presence from a program beside its desktop client, so the phone reports
+// here and the holdonquietly app on the PC long-polls and puts it on Discord.
+// The two are matched by asking SoundCloud whose login token each one holds, so
+// there is nothing extra to pair. Only the latest track per account is kept.
+const NP_WAIT_MS = 25 * 1000;
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+const TOKEN = /^[A-Za-z0-9._~+\/=-]{8,256}$/;
+const slots = new Map();   // SoundCloud user id -> { track, at, v, waiters }
+const owners = new Map();  // sha256(token) -> { uid, exp }
+let lookups = [];          // timestamps of recent SoundCloud lookups (rate limit)
+
+async function whoIs(token) {
+  if (!TOKEN.test(token || '')) return null;
+  const h = crypto.createHash('sha256').update(token).digest('hex');
+  const c = owners.get(h);
+  if (c && c.exp > Date.now()) return c.uid;
+  // A flood of made-up tokens shouldn't turn into a flood of calls to SoundCloud.
+  const now = Date.now();
+  lookups = lookups.filter((t) => now - t < 60 * 1000);
+  if (lookups.length >= 30) return null;
+  lookups.push(now);
+  let uid = null;
+  try {
+    const r = await fetch('https://api-v2.soundcloud.com/me', {
+      headers: { Authorization: 'OAuth ' + token, Accept: 'application/json', 'User-Agent': UA, Origin: 'https://soundcloud.com' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (r.ok) { const j = await r.json(); if (j && j.id) uid = String(j.id); }
+    else if (r.status !== 401 && r.status !== 403) return null;   // a SoundCloud hiccup: don't cache it
+  } catch (e) { return null; }
+  if (owners.size > 2000) owners.clear();
+  owners.set(h, { uid, exp: now + (uid ? 30 : 1) * 60 * 1000 });
+  return uid;
+}
+
+function cookieOf(header, name) {
+  for (const part of String(header || '').split(/;\s*/)) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i) === name) return part.slice(i + 1);
+  }
+  return '';
+}
+
+function slot(uid) {
+  let s = slots.get(uid);
+  if (!s) {
+    if (slots.size > 500) slots.clear();
+    // Random start, so a desktop still holding a version from before a restart
+    // can't mistake the new state for the one it already has.
+    s = { track: null, at: 0, v: crypto.randomInt(1e9), waiters: new Set() };
+    slots.set(uid, s);
+  }
+  return s;
+}
+
+// The phone sees everything through the proxy's hostnames. Discord needs the
+// real ones: soundcloud.com links, and artwork from SoundCloud's CDN.
+function cleanTrack(d, proxyHost) {
+  const str = (v, n) => (typeof v === 'string' ? v : '').trim().slice(0, n);
+  const num = (v) => (Number.isFinite(v) && v >= 0 && v < 86400 ? Math.round(v) : 0);
+  const title = str(d.title, 200);
+  const rp = d.rp && typeof d.rp === 'object' ? d.rp : {};
+  if (!title || rp.on === false) return null;
+  const page = (v) => {
+    try {
+      const u = new URL(str(v, 512));
+      if (u.protocol !== 'https:' || (u.hostname !== 'soundcloud.com' && u.hostname !== proxyHost)) return '';
+      return 'https://soundcloud.com' + u.pathname;
+    } catch (e) { return ''; }
+  };
+  const art = (v) => {
+    try {
+      const u = new URL(str(v, 512));
+      const m = u.hostname.match(/^(i[1-4])\.(.+)$/);
+      if (u.protocol !== 'https:' || !m || (m[2] !== 'sndcdn.com' && m[2] !== proxyHost)) return '';
+      return 'https://' + m[1] + '.sndcdn.com' + u.pathname;
+    } catch (e) { return ''; }
+  };
+  return {
+    title, artist: str(d.artist, 200),
+    url: page(d.url), artistUrl: page(d.artistUrl), cover: art(d.cover),
+    pos: num(d.pos), dur: num(d.dur), paused: d.paused === true,
+    status: ['artist', 'song', 'app'].includes(rp.status) ? rp.status : 'artist',
+    buttons: rp.buttons !== false, pauseHide: rp.pauseHide !== false,
+  };
+}
+
+function npReport(req, res) {
+  readBody(req, async (body) => {
+    const uid = await whoIs(cookieOf(req.headers.cookie, 'oauth_token'));
+    if (!uid) return send(res, 401, '{"error":"not signed in"}');
+    let d;
+    try { d = JSON.parse(body); } catch (e) { return send(res, 400, '{"error":"bad json"}'); }
+    const s = slot(uid);
+    s.track = cleanTrack(d, String(req.headers['x-hoq-host'] || 'sc.holdonquietly.com'));
+    s.at = Date.now();
+    s.v++;
+    for (const wake of [...s.waiters]) wake();
+    send(res, 200, '{"ok":true}');
+  });
+}
+
+// GET /__hoq/np?v=<version it has>: answers at once if there's something newer,
+// otherwise holds the request up to 25 s for the next report.
+async function npListen(req, res) {
+  const auth = String(req.headers.authorization || '');
+  const uid = await whoIs(auth.startsWith('OAuth ') ? auth.slice(6) : '');
+  if (!uid) return send(res, 401, '{"error":"not signed in"}');
+  const s = slot(uid);
+  const have = Number(new URL(req.url, 'http://x').searchParams.get('v'));
+  const reply = () => {
+    if (res.writableEnded) return;
+    send(res, 200, JSON.stringify({ v: s.v, age: s.at ? Math.round((Date.now() - s.at) / 1000) : -1, track: s.track }));
+  };
+  if (have !== s.v) return reply();
+  const done = () => { clearTimeout(timer); s.waiters.delete(done); reply(); };
+  const timer = setTimeout(done, NP_WAIT_MS);
+  s.waiters.add(done);
+  // res, not req: since Node 16 a request's 'close' fires once its (empty) body
+  // is read, which would end every long-poll immediately.
+  res.on('close', () => { clearTimeout(timer); s.waiters.delete(done); });
+}
+
 http.createServer((req, res) => {
   const path = new URL(req.url, 'http://x').pathname;
+
+  if (path === '/__hoq/np') {
+    if (req.method === 'POST') return npReport(req, res);
+    if (req.method === 'GET') return void npListen(req, res).catch(() => send(res, 500, '{"error":"failed"}'));
+  }
 
   // Create: POST /__hoq/pair {o, s} -> {id, expiresIn}
   if (req.method === 'POST' && path === '/__hoq/pair') {

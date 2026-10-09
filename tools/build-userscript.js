@@ -557,9 +557,9 @@ console.log('wrote ' + path.join(dir, 'shortcut.js') + '  (' + SHORTCUT.split('\
      - the friends backend is reachable at /__hoq/friends — it is plain http,
        which an https page cannot fetch directly, but nginx can
 
-   So this is the most capable mobile build, not the least. Only Rich Presence
-   (Discord's local IPC) and account switching (a WebView2 profile thing) stay
-   out of reach.
+   So this is the most capable mobile build, not the least. Rich Presence (local
+   Discord IPC) goes the long way round: phone -> /__hoq/np -> the desktop app ->
+   Discord. Only account switching (a WebView2 profile thing) stays out of reach.
    ======================================================================= */
 const PROXY_POST = [
   'function scPost(cmd) {',
@@ -569,11 +569,33 @@ const PROXY_POST = [
   "    if (cmd.indexOf('webhook:') === 0) window.__hoqSend(cmd.slice(8), false);",
   "    else if (cmd.indexOf('playreq:') === 0) window.__hoqSend(cmd.slice(8), true);",
   "    else if (cmd.indexOf('open:') === 0) window.open(cmd.slice(5), '_blank');",
+  "    else if (cmd.indexOf('rpc:') === 0) window.__hoqNpRelay && window.__hoqNpRelay(cmd.slice(4));",
   '  } catch (e) {}',
   '}',
 ].join('\n');
 
 const PROXY_EXTRA = [
+  '',
+  '/* -------- reverse-proxy build: now playing -> Discord, via the desktop app -------- */',
+  '(() => {',
+  '  // Discord only takes Rich Presence from a program beside its desktop client,',
+  '  // so the phone reports to proxy/pair-server.js and the holdonquietly app on',
+  '  // the PC (signed into the same account) puts it on Discord.',
+  '  const post = (body) => {',
+  "    if (document.cookie.indexOf('oauth_token=') < 0) return;   // signed out: nobody to show it for",
+  "    fetch('/__hoq/np', { method: 'POST', headers: { 'Content-Type': 'application/json' },",
+  "      body, keepalive: true, credentials: 'same-origin' }).catch(() => {});",
+  '  };',
+  '  window.__hoqNpRelay = (json) => {',
+  '    let d;',
+  '    try { d = JSON.parse(json); } catch (e) { return; }',
+  '    // Only what Discord shows: not the friends-feed identity fields.',
+  '    post(JSON.stringify({ title: d.title, artist: d.artist, cover: d.cover, url: d.url,',
+  '      artistUrl: d.artistUrl, pos: d.pos, dur: d.dur, paused: d.paused, rp: d.rp }));',
+  '  };',
+  '  // Closing the tab stops the music, so take the presence down with it.',
+  "  window.addEventListener('pagehide', (e) => { if (!e.persisted) post(JSON.stringify({ title: '' })); });",
+  '})();',
   '',
   '/* -------- reverse-proxy build: friends feed over the local hop -------- */',
   '(() => {',
@@ -598,6 +620,7 @@ const PROXY_OUT = [
   '(function () {',
   '  if (window.__hoqLoaded) return;',
   '  window.__hoqLoaded = true;',
+  '  window.__hoqProxyBuild = true;   // presence relays through the server (preload: hoqRelaysPresence)',
   '',
 ].join('\n') + proxyPayload + '\n})();\n';
 

@@ -3,6 +3,7 @@
 (function () {
   if (window.__hoqLoaded) return;
   window.__hoqLoaded = true;
+  window.__hoqProxyBuild = true;   // presence relays through the server (preload: hoqRelaysPresence)
 // Preload runs in the SoundCloud page context. It:
 //  - injects a slim custom titlebar (SoundCloud wordmark + palette + window btns)
 //  - injects a color / gradient picker that recolors SoundCloud's orange accent
@@ -20,6 +21,7 @@ function scPost(cmd) {
     if (cmd.indexOf('webhook:') === 0) window.__hoqSend(cmd.slice(8), false);
     else if (cmd.indexOf('playreq:') === 0) window.__hoqSend(cmd.slice(8), true);
     else if (cmd.indexOf('open:') === 0) window.open(cmd.slice(5), '_blank');
+    else if (cmd.indexOf('rpc:') === 0) window.__hoqNpRelay && window.__hoqNpRelay(cmd.slice(4));
   } catch (e) {}
 }
 
@@ -4365,9 +4367,19 @@ function ensureDiscordPanel() {
   // Same for the Feed pane — the sub-tab already says "Feed".
   const feedSec = p.querySelector('.hoq-dc-sec.hoq-pane-feed');
   if (feedSec) { const dl = feedSec.querySelector('.hoq-dc-label'); if (dl) dl.remove(); }
-  // Rich Presence needs the desktop host; elsewhere the section is dead controls.
+  // Rich Presence needs the desktop host, directly or (phone) through the server;
+  // in the plain userscript the section would be dead controls.
   const rpSec = p.querySelector('.hoq-rp-sec');
-  if (rpSec) { if (hoqHasHost()) setupRpSettings(rpSec); else rpSec.remove(); }
+  if (rpSec) {
+    if (!hoqRelaysPresence()) rpSec.remove();
+    else {
+      if (!hoqHasHost()) {
+        const hint = rpSec.querySelector('.hoq-dc-hint');
+        if (hint) hint.textContent = 'Shows through the holdonquietly app on your PC — it needs to be open with Discord running. When both play, the PC wins.';
+      }
+      setupRpSettings(rpSec);
+    }
+  }
   const hookSec = p.querySelector('.hoq-hook-sec');
   if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
   const pairSec = p.querySelector('.hoq-pair-sec');
@@ -4612,7 +4624,7 @@ function updateDiscordActivity() {
   if (!p || !p.classList.contains('open')) return;
   const np = currentNowPlaying();
   // The card's header reads exactly what Discord's member list shows.
-  if (hoqHasHost()) {
+  if (hoqRelaysPresence()) {
     const line = rpStatusLine();
     const head = p.querySelector('.hoq-dc-ptext b');
     if (head) head.textContent = line;
@@ -4844,6 +4856,12 @@ function rpStatusLine() {
 // builds have no host.
 function hoqHasHost() {
   try { return !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage); } catch (e) { return false; }
+}
+
+// The phone build (the proxy) has no host either, but it relays now-playing
+// through the server to the desktop app, which puts it on Discord.
+function hoqRelaysPresence() {
+  return hoqHasHost() || !!window.__hoqProxyBuild;
 }
 
 // Settings → Discord Rich Presence controls.
@@ -7209,6 +7227,27 @@ if (document.readyState === 'loading') {
         .catch((e) => console.log('[hoq] send failed: ' + e.message));
     } catch (e) {}
   };
+})();
+
+/* -------- reverse-proxy build: now playing -> Discord, via the desktop app -------- */
+(() => {
+  // Discord only takes Rich Presence from a program beside its desktop client,
+  // so the phone reports to proxy/pair-server.js and the holdonquietly app on
+  // the PC (signed into the same account) puts it on Discord.
+  const post = (body) => {
+    if (document.cookie.indexOf('oauth_token=') < 0) return;   // signed out: nobody to show it for
+    fetch('/__hoq/np', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body, keepalive: true, credentials: 'same-origin' }).catch(() => {});
+  };
+  window.__hoqNpRelay = (json) => {
+    let d;
+    try { d = JSON.parse(json); } catch (e) { return; }
+    // Only what Discord shows: not the friends-feed identity fields.
+    post(JSON.stringify({ title: d.title, artist: d.artist, cover: d.cover, url: d.url,
+      artistUrl: d.artistUrl, pos: d.pos, dur: d.dur, paused: d.paused, rp: d.rp }));
+  };
+  // Closing the tab stops the music, so take the presence down with it.
+  window.addEventListener('pagehide', (e) => { if (!e.persisted) post(JSON.stringify({ title: '' })); });
 })();
 
 /* -------- reverse-proxy build: friends feed over the local hop -------- */
