@@ -18,7 +18,9 @@ const crypto = require('crypto');
 const PORT = 3097;
 const TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING = 50;
-const SAFE = /^[A-Za-z0-9._~+\/=-]{8,512}$/;   // same rule the page applies
+// Same rule the page applies: RFC 6265 cookie-octet (printable ASCII minus
+// space, " , ; and \). sc_session is URL-encoded JSON, so it has { } % :.
+const SAFE = /^[!#-+\--:<-\[\]-~]{8,1024}$/;
 const ID = /^\/__hoq\/pair\/([A-Za-z0-9_-]{16,64})$/;
 
 const pending = new Map();   // id -> { o, s, exp }

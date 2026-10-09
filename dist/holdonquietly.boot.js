@@ -41,7 +41,9 @@ function scPost(cmd) {
     while (b.length % 4) b += '=';
     const d = JSON.parse(atob(b));
     // Cookie-safe characters only: a ';' in a value would smuggle in attributes.
-    const ok = (v) => typeof v === 'string' && /^[A-Za-z0-9._~+\/=-]{8,512}$/.test(v);
+    // RFC 6265 cookie-octet: printable ASCII minus space, " , ; and \ (sc_session
+    // is URL-encoded JSON, so it carries { } % : — a narrower set refused it).
+    const ok = (v) => typeof v === 'string' && /^[!#-+\--:<-\[\]-~]{8,1024}$/.test(v);
     if (!ok(d.o)) return;
     const tail = '; path=/; max-age=31536000; secure; samesite=lax';
     const dom = '; domain=.' + location.hostname;
