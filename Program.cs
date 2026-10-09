@@ -524,6 +524,36 @@ class Program
         try { await wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
     }
 
+    // For when the phone can't see this screen: hand the two cookies to the proxy's
+    // pairing service (https, proxy/pair-server.js) and get back a link that works
+    // once, within 10 minutes. The link carries only a random id, not the login.
+    static async Task SendPairLink()
+    {
+        string link = "", err = "";
+        try
+        {
+            var cookies = await wv.CoreWebView2.CookieManager.GetCookiesAsync("https://soundcloud.com");
+            string oauth = cookies.FirstOrDefault(c => c.Name == "oauth_token")?.Value ?? "";
+            string sess = cookies.FirstOrDefault(c => c.Name == "sc_session")?.Value ?? "";
+            if (oauth.Length == 0) err = "Sign in to SoundCloud in this app first.";
+            else
+            {
+                string body = JsonSerializer.Serialize(new Dictionary<string, string> { ["o"] = oauth, ["s"] = sess });
+                var resp = await http.PostAsync(PROXY_ORIGIN + "/__hoq/pair", new StringContent(body, Encoding.UTF8, "application/json"));
+                if (!resp.IsSuccessStatusCode) err = "The pairing service answered " + (int)resp.StatusCode + ".";
+                else
+                {
+                    string id = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetString();
+                    link = PROXY_ORIGIN + "/__hoq/pair/" + id;
+                    Log("pair: one-time link made");
+                }
+            }
+        }
+        catch (Exception ex) { err = "Couldn't reach the pairing service."; Log("pair link failed: " + ex.GetType().Name + " " + ex.Message); }
+        string js = "window.__hoqPairLink && window.__hoqPairLink(" + JsonSerializer.Serialize(link) + "," + JsonSerializer.Serialize(err) + ")";
+        try { await wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
+    }
+
     static async Task SendHookStatus(string err)
     {
         bool set = !string.IsNullOrEmpty(_webhookCache) || !string.IsNullOrEmpty(await ReadWebhook());
@@ -882,6 +912,7 @@ class Program
         if (m == "hook:clear") { await ClearWebhook(); return; }
         if (m == "hook:status") { await SendHookStatus(null); return; }
         if (m == "pair:qr") { await SendPairQr(); return; }
+        if (m == "pair:link") { await SendPairLink(); return; }
         if (m != null && m.StartsWith("webhook:")) { await PostWebhook(m.Substring(8)); return; }
         if (m != null && m.StartsWith("playreq:")) { await PostWebhook(m.Substring(8), true); return; }
         if (m != null && m.StartsWith("acct:save:")) { await AcctSave(m.Substring(10)); return; }

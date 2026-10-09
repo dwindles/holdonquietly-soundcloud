@@ -44,6 +44,19 @@ install -m 0644 "$TMP/hoq-proxy.conf"         /etc/nginx/sites-available/hoq-pro
 install -m 0644 "$TMP/holdonquietly.proxy.js" /var/www/hoq/holdonquietly.proxy.js
 ln -sf /etc/nginx/sites-available/hoq-proxy /etc/nginx/sites-enabled/hoq-proxy
 
+# One-time phone login links: a tiny node service nginx forwards /__hoq/pair to.
+echo "==> pairing service (pm2 hoq-pair, 127.0.0.1:3097)"
+curl -fsSL "$RAW/proxy/pair-server.js" -o "$TMP/pair-server.js"
+mkdir -p /opt/hoq-pair
+install -m 0644 "$TMP/pair-server.js" /opt/hoq-pair/pair-server.js
+if command -v pm2 >/dev/null; then
+  if pm2 describe hoq-pair >/dev/null 2>&1; then pm2 restart hoq-pair --update-env >/dev/null
+  else pm2 start /opt/hoq-pair/pair-server.js --name hoq-pair >/dev/null; fi
+  pm2 save >/dev/null
+else
+  echo "    pm2 not found — run: node /opt/hoq-pair/pair-server.js"
+fi
+
 # Expand the certificate across every subdomain. HTTP-01 works for all of them
 # because the wildcard DNS record points here and the default port-80 server
 # answers unknown hostnames from /var/www/html.
