@@ -385,36 +385,117 @@ class Program
     // silently and look exactly like "it worked for a second, then stopped".
     static string _webhookCache = "";
 
+    // Fallback home for the URL, written by Settings → Discord webhook. The
+    // registry is a separate storage path from the folder above, so it still
+    // works when the file can't be read.
+    const string HOOK_REG_KEY = @"Software\holdonquietly";
+    const string HOOK_REG_VAL = "DiscordWebhook";
+
     static async Task<string> ReadWebhook()
     {
-        // Every failed attempt records WHICH check failed. The old version only
-        // logged exceptions, so "file not found" / "empty" / "not a URL" all
-        // collapsed into one "not configured" line — and on 2026-09-13 that line
-        // fired while the file sat there valid, with nothing to say why.
+        // Every failed attempt records exactly why. On 2026-10-08 an Explorer-
+        // launched copy got File.Exists=false for a file that was there with full
+        // permissions — File.Exists folds every error into "false", so the file is
+        // now opened directly and the real exception is logged.
         string why = "";
         for (int attempt = 1; attempt <= 3; attempt++)
         {
-            try
+            var reasons = new List<string>();
+            foreach (string path in WebhookFileCandidates())
             {
-                string path = WebhookPath();
-                if (!File.Exists(path)) why = "File.Exists returned false";
-                else
+                try
                 {
-                    string t = File.ReadAllText(path).Trim();
+                    string t;
+                    using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var sr = new StreamReader(fs)) t = sr.ReadToEnd().Trim();
                     if (t.StartsWith("http", StringComparison.Ordinal)) { _webhookCache = t; return t; }
-                    why = t.Length == 0 ? "file is empty" : "file does not start with http (" + t.Length + " chars)";
+                    reasons.Add(path + ": " + (t.Length == 0 ? "empty" : "not a URL (" + t.Length + " chars)"));
                 }
+                catch (FileNotFoundException) { reasons.Add(path + ": not found"); }
+                catch (DirectoryNotFoundException) { reasons.Add(path + ": folder not found"); }
+                catch (Exception ex) { reasons.Add(path + ": " + ex.GetType().Name + " 0x" + ex.HResult.ToString("x8") + " " + ex.Message); }
             }
-            catch (Exception ex) { why = ex.GetType().Name + ": " + ex.Message; }
+            string reg = ReadWebhookRegistry();
+            if (reg.StartsWith("http", StringComparison.Ordinal))
+            {
+                Log("webhook: file unreadable (" + string.Join(" | ", reasons) + ") — using the registry copy");
+                _webhookCache = reg;
+                return reg;
+            }
+            reasons.Add("registry: " + (reg.Length == 0 ? "not set" : "not a URL"));
+            why = string.Join(" | ", reasons);
             Log("webhook read attempt " + attempt + " failed: " + why);
             if (attempt < 3) await Task.Delay(300 * attempt);
         }
+        // What this process can actually see in the folder — pins down a file that
+        // exists for other programs but not for this one.
+        try
+        {
+            string d = Path.GetDirectoryName(WebhookPath());
+            Log("webhook folder as the app sees it: exists=" + Directory.Exists(d) +
+                (Directory.Exists(d) ? " files=[" + string.Join(",", Directory.GetFiles(d).Select(Path.GetFileName)) + "]" : ""));
+        }
+        catch (Exception ex) { Log("webhook folder list failed: " + ex.Message); }
         if (!string.IsNullOrEmpty(_webhookCache))
         {
-            Log("webhook: file unreadable right now, using the URL cached this session");
+            Log("webhook: unreadable right now, using the URL cached this session");
             return _webhookCache;
         }
         return "";
+    }
+
+    // The original file, then one beside the exe (handy for the portable build).
+    static IEnumerable<string> WebhookFileCandidates()
+    {
+        yield return WebhookPath();
+        yield return Path.Combine(AppContext.BaseDirectory, "webhook.txt");
+    }
+
+    static string ReadWebhookRegistry()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(HOOK_REG_KEY);
+            return ((k?.GetValue(HOOK_REG_VAL) as string) ?? "").Trim();
+        }
+        catch { return ""; }
+    }
+
+    // Settings → Discord webhook. Saved to the registry and the file; the page
+    // only ever hears back whether one is set, never the URL itself.
+    static async Task SetWebhook(string url)
+    {
+        url = (url ?? "").Trim();
+        if (!(Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps &&
+              u.AbsolutePath.StartsWith("/api/webhooks/", StringComparison.OrdinalIgnoreCase)))
+        {
+            await SendHookStatus("That isn't a Discord webhook URL.");
+            return;
+        }
+        bool reg = false, file = false;
+        try { using var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(HOOK_REG_KEY); k.SetValue(HOOK_REG_VAL, url); reg = true; }
+        catch (Exception ex) { Log("webhook save (registry) failed: " + ex.Message); }
+        try { string p = WebhookPath(); Directory.CreateDirectory(Path.GetDirectoryName(p)); File.WriteAllText(p, url); file = true; }
+        catch (Exception ex) { Log("webhook save (file) failed: " + ex.GetType().Name + " " + ex.Message); }
+        _webhookCache = url;
+        Log("webhook saved: registry=" + reg + " file=" + file);
+        await SendHookStatus(reg || file ? null : "Saved for this session only — it couldn't be written to disk.");
+    }
+
+    static async Task ClearWebhook()
+    {
+        try { using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(HOOK_REG_KEY, true); k?.DeleteValue(HOOK_REG_VAL, false); } catch { }
+        try { File.Delete(WebhookPath()); } catch { }
+        _webhookCache = "";
+        Log("webhook removed");
+        await SendHookStatus(null);
+    }
+
+    static async Task SendHookStatus(string err)
+    {
+        bool set = !string.IsNullOrEmpty(_webhookCache) || !string.IsNullOrEmpty(await ReadWebhook());
+        string js = "window.__hoqHookStatus && window.__hoqHookStatus(" + (set ? "true" : "false") + "," + JsonSerializer.Serialize(err ?? "") + ")";
+        await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
     }
 
     // Tell the page how a play request went. The button shows "Queued" the
@@ -437,7 +518,7 @@ class Program
             if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http"))
             {
                 Log((play ? "playreq" : "share") + " ABORT: webhook not configured at " + WebhookPath());
-                if (play) PlayResult(false, "no webhook set up");
+                if (play) PlayResult(false, "no webhook — add it in Settings");
                 return;
             }
 
@@ -764,6 +845,9 @@ class Program
             return;
         }
         if (m != null && m.StartsWith("saveimg:")) { await SaveImage(m.Substring(8)); return; }
+        if (m != null && m.StartsWith("hook:set:")) { await SetWebhook(m.Substring(9)); return; }
+        if (m == "hook:clear") { await ClearWebhook(); return; }
+        if (m == "hook:status") { await SendHookStatus(null); return; }
         if (m != null && m.StartsWith("webhook:")) { await PostWebhook(m.Substring(8)); return; }
         if (m != null && m.StartsWith("playreq:")) { await PostWebhook(m.Substring(8), true); return; }
         if (m != null && m.StartsWith("acct:save:")) { await AcctSave(m.Substring(10)); return; }

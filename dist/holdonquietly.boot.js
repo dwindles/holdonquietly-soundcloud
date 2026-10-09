@@ -4081,6 +4081,19 @@ function ensureDiscordPanel() {
         transition: background .12s ease, color .12s ease; }
       #hoq-discord .hoq-rp-seg button:hover { color: #fff; }
       #hoq-discord .hoq-rp-seg button.on { background: var(--sc-accent,#ff5500); color: #fff; }
+      /* Discord webhook */
+      #hoq-discord .hoq-hook-state.is-bad { color: #ffb4a8; }
+      #hoq-discord .hoq-hook-edit { display: flex; gap: 8px; padding: 0 0 12px; }
+      #hoq-discord .hoq-hook-input { flex: 1; min-width: 0; box-sizing: border-box; padding: 9px 12px; border-radius: 9px;
+        border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); color: #e4e4e6;
+        font-size: 13px; outline: none; }
+      #hoq-discord .hoq-hook-input:focus { border-color: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-hook-save { border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer; flex: none;
+        font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
+      #hoq-discord .hoq-hook-save:disabled { opacity: .6; cursor: default; }
+      #hoq-discord .hoq-hook-remove { flex: none; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+        padding: 6px 12px; cursor: pointer; background: rgba(255,255,255,0.05); color: #c9c9d2; font-size: 12px; font-weight: 600; }
+      #hoq-discord .hoq-hook-remove:hover { background: rgba(255,255,255,0.1); color: #fff; }
       /* Accounts */
       #hoq-discord .hoq-acct-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
       #hoq-discord .hoq-acct-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px;
@@ -4213,6 +4226,20 @@ function ensureDiscordPanel() {
         </div>
         <div class="hoq-dc-hint">Discord never shows you your own buttons — friends see them. Private (secret-link) tracks never get a link.</div>
       </div>
+      <div class="hoq-dc-sec hoq-hook-sec">
+        <div class="hoq-dc-label">Discord webhook</div>
+        <div class="hoq-rp">
+          <div class="hoq-rp-row hoq-rp-static">
+            <span><b class="hoq-hook-state">Checking…</b><em>Where Share and Play in Discord post to.</em></span>
+            <button class="hoq-hook-remove" type="button" hidden>Remove</button>
+          </div>
+          <div class="hoq-hook-edit">
+            <input class="hoq-hook-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a Discord webhook URL">
+            <button class="hoq-hook-save" type="button">Save</button>
+          </div>
+        </div>
+        <div class="hoq-dc-hint">Saved on this PC by the app, never in the page. In Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL.</div>
+      </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Accounts</div>
         <div class="hoq-acct-list"></div>
@@ -4264,7 +4291,7 @@ function ensureDiscordPanel() {
       </div>
     </div>`;
   // Configuration lives behind the Settings sub-tab; everything else is Social.
-  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'your info'];
+  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'discord webhook', 'your info'];
   p.querySelectorAll('.hoq-dc-sec').forEach((sec) => {
     const lab = sec.querySelector('.hoq-dc-label');
     const t = lab ? lab.textContent.trim().toLowerCase() : '';
@@ -4288,6 +4315,8 @@ function ensureDiscordPanel() {
   // Rich Presence needs the desktop host; elsewhere the section is dead controls.
   const rpSec = p.querySelector('.hoq-rp-sec');
   if (rpSec) { if (hoqHasHost()) setupRpSettings(rpSec); else rpSec.remove(); }
+  const hookSec = p.querySelector('.hoq-hook-sec');
+  if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
   p.dataset.pane = 'social';
   p.querySelectorAll('.hoq-subtab').forEach((b) => {
     b.addEventListener('click', () => {
@@ -4789,6 +4818,32 @@ function setupRpSettings(sec) {
     store('hoqRpStatus', b.dataset.v); apply();
   }));
   sync();
+}
+
+// Settings → Discord webhook. The URL goes straight to the host, which keeps
+// it on disk; the page only ever learns whether one is set.
+function setupHookSettings(sec) {
+  const state = sec.querySelector('.hoq-hook-state');
+  const input = sec.querySelector('.hoq-hook-input');
+  const save = sec.querySelector('.hoq-hook-save');
+  const remove = sec.querySelector('.hoq-hook-remove');
+  window.__hoqHookStatus = (isSet, err) => {
+    state.textContent = err || (isSet ? 'Webhook connected' : 'No webhook set');
+    state.classList.toggle('is-bad', !!err || !isSet);
+    remove.hidden = !isSet;
+    save.textContent = isSet ? 'Replace' : 'Save';
+    save.disabled = false;
+  };
+  save.addEventListener('click', () => {
+    const v = input.value.trim();
+    if (!v) { input.focus(); return; }
+    save.textContent = 'Saving…'; save.disabled = true;
+    scPost('hook:set:' + v);
+    input.value = '';
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
+  remove.addEventListener('click', () => { remove.hidden = true; scPost('hook:clear'); });
+  scPost('hook:status');
 }
 
 // Push now-playing to the C# host (Discord Rich Presence + friends backend).
