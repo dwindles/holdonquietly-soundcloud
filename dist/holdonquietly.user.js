@@ -237,6 +237,44 @@ function scPost(cmd) {
   } catch (e) {}
 })();
 
+// --- Lock screen / Now Playing controls ---------------------------------------
+// SoundCloud's player registers seekforward/seekbackward for every track, and
+// iOS shows that pair as ±10 buttons IN PLACE OF previous/next whenever both
+// exist. Refusing the pair gives the lock screen track skip, like SoundCloud's
+// own app; seekto makes its scrubber draggable. (The app's ★ is a native-only
+// control — the Media Session API has no like action, so no site can show it.)
+(() => {
+  try {
+    const MS = window.MediaSession;
+    if (!MS || !navigator.mediaSession || MS.prototype.__hoqLock) return;
+    MS.prototype.__hoqLock = true;
+    const orig = MS.prototype.setActionHandler;
+    const has = {};
+    MS.prototype.setActionHandler = function (action, handler) {
+      if (action === 'seekforward' || action === 'seekbackward') handler = null;
+      has[action] = !!handler;
+      return orig.call(this, action, handler);
+    };
+    const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); };
+    const seekTo = (sec) => {
+      const wrap = document.querySelector('.playbackTimeline__progressWrapper');
+      const dur = typeof playerProgress === 'function' ? playerProgress().dur : 0;
+      if (!wrap || !(dur > 0)) return;
+      const r = wrap.getBoundingClientRect();
+      const x = r.left + Math.max(0, Math.min(1, sec / dur)) * r.width, y = r.top + r.height / 2;
+      wrap.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+      wrap.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
+    };
+    const install = () => {
+      try { orig.call(navigator.mediaSession, 'seekto', (d) => { if (d && isFinite(d.seekTime)) seekTo(d.seekTime); }); } catch (e) {}
+      // SoundCloud registers previous/next itself; only fill in if it hasn't.
+      if (!has.nexttrack) try { orig.call(navigator.mediaSession, 'nexttrack', () => click('.skipControl__next')); } catch (e) {}
+      if (!has.previoustrack) try { orig.call(navigator.mediaSession, 'previoustrack', () => click('.skipControl__previous')); } catch (e) {}
+    };
+    setTimeout(install, 4000);
+  } catch (e) {}
+})();
+
 // --- Audio tap for the visualizer / ambient nebula ---------------------------
 // SoundCloud plays through Web Audio and makes exactly ONE MediaElementSource on
 // its audio element (a same-origin blob: with crossOrigin=anonymous, so it is
