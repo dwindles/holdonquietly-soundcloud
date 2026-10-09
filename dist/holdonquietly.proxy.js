@@ -4127,6 +4127,11 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-pair-btn { flex: none; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer;
         font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-pair-btn:hover { filter: brightness(1.1); }
+      #hoq-discord .hoq-pair-linkbtn { flex: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
+        padding: 8px 15px; cursor: pointer; font-weight: 700; font-size: 12px;
+        background: rgba(255,255,255,0.05); color: #e4e4e6; }
+      #hoq-discord .hoq-pair-linkbtn:hover { background: rgba(255,255,255,0.1); }
+      #hoq-discord .hoq-pair-linkbtn:disabled { opacity: .6; cursor: default; }
       /* Accounts */
       #hoq-discord .hoq-acct-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
       #hoq-discord .hoq-acct-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px;
@@ -4279,6 +4284,10 @@ function ensureDiscordPanel() {
           <div class="hoq-rp-row hoq-rp-static">
             <span><b>Log in on your phone</b><em>Scan a code and holdonquietly opens on your phone, already signed in.</em></span>
             <button class="hoq-pair-btn" type="button">Show code</button>
+          </div>
+          <div class="hoq-rp-row hoq-rp-static">
+            <span><b>Phone not nearby?</b><em class="hoq-pair-linkstate">Copy a link to send yourself. It works once, within 10 minutes.</em></span>
+            <button class="hoq-pair-linkbtn" type="button">Copy link</button>
           </div>
         </div>
       </div>
@@ -4962,6 +4971,23 @@ function setupPairSettings(sec) {
     clearInterval(tick);
     tick = setInterval(() => { left -= 1; timer.textContent = 'Hides in ' + left + 's'; if (left <= 0) close(); }, 1000);
   };
+  const linkBtn = sec.querySelector('.hoq-pair-linkbtn');
+  const linkState = sec.querySelector('.hoq-pair-linkstate');
+  const linkHint = linkState.textContent;
+  window.__hoqPairLink = (link, err) => {
+    linkBtn.disabled = false;
+    linkBtn.textContent = 'Copy link';
+    if (err || !link) { linkState.textContent = err || 'Couldn’t make a link.'; return; }
+    navigator.clipboard.writeText(link).then(
+      () => { linkState.textContent = 'Copied. Send it to yourself — it works once, within 10 minutes.'; },
+      () => { linkState.textContent = 'Couldn’t copy it — try again.'; });
+    setTimeout(() => { linkState.textContent = linkHint; }, 15000);
+  };
+  linkBtn.addEventListener('click', () => {
+    linkBtn.disabled = true;
+    linkBtn.textContent = 'Making…';
+    scPost('pair:link');
+  });
   sec.querySelector('.hoq-pair-btn').addEventListener('click', () => {
     modal.querySelector('.hoq-pair-who b').textContent = hoqMe().name || 'your account';
     status.textContent = 'Making your code…';
