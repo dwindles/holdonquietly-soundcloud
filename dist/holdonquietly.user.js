@@ -7427,7 +7427,7 @@ if (document.readyState === 'loading') {
     }
   };
   anonTick();
-  setInterval(anonTick, 1200);
+  setInterval(() => { if (!document.hidden) anonTick(); }, 1200);   // idle while the page is hidden (battery)
 
   // ---- route tag + Library pill row -----------------------------------
   // CSS that differs by page keys off html[data-hoq-route]: the Library
@@ -7455,7 +7455,7 @@ if (document.readyState === 'loading') {
   });
   window.addEventListener('popstate', () => setTimeout(tagRoute, 0));
   tagRoute();
-  setInterval(tagRoute, 1500);
+  setInterval(() => { if (!document.hidden) tagRoute(); }, 1500);
 
   // ---- signed out: how to sign in (proxy only) ------------------------
   // SoundCloud's own Sign in can't finish through the proxy (hoq-anon hides
@@ -7536,8 +7536,120 @@ if (document.readyState === 'loading') {
       else document.body.insertBefore(cta, document.body.firstChild);
     };
     ensureCta();
-    setInterval(ensureCta, 1200);
+    setInterval(() => { if (!document.hidden) ensureCta(); }, 1200);
   }
+
+
+  // ---- floating now-playing pill (phone) -------------------------------
+  // Modelled on SoundCloud's own app: ring-progress play button, title and
+  // artist (tap: full player), Discord, like; swipe it to skip. SoundCloud's
+  // bar stays in the DOM, invisible, doing the real work and feeding the lock
+  // screen. html.hoq-pill-on goes on only once this is live, so if anything
+  // here fails, the old bar is simply still there.
+  (() => {
+    const RING = 144.51;   // circumference, r = 23
+    const SVG = (d) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>';
+    const PLAY = SVG('<path d="M8 5.7v12.6c0 .8.9 1.3 1.6.9l9.9-6.3c.6-.4.6-1.4 0-1.8L9.6 4.8C8.9 4.4 8 4.9 8 5.7z"/>');
+    const PAUSE = SVG('<rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/>');
+    const HEART = SVG('<path d="M12 20.3s-7.3-4.4-9.2-8.9C1.4 8 3.5 4.6 7.1 4.6c2.1 0 3.6 1.1 4.9 2.8 1.3-1.7 2.8-2.8 4.9-2.8 3.6 0 5.7 3.4 4.3 6.8-1.9 4.5-9.2 8.9-9.2 8.9z"/>');
+    const SEND = SVG('<path d="M21 3 10.2 13.8"/><path d="M21 3 14.4 21l-4.2-7.2L3 9.6z"/>');
+
+    const pill = document.createElement('div');
+    pill.id = 'hoq-pill';
+    pill.innerHTML =
+      '<button class="pl-play" type="button" aria-label="Play">' +
+        '<svg class="pl-ring" viewBox="0 0 52 52" aria-hidden="true"><circle class="pl-track" cx="26" cy="26" r="23"/><circle class="pl-prog" cx="26" cy="26" r="23"/></svg>' +
+        '<span class="pl-disc">' + PLAY + '</span>' +
+      '</button>' +
+      '<div class="pl-meta" role="button" tabindex="0" aria-label="Open the player"><b class="pl-title"></b><span class="pl-artist"></span></div>' +
+      '<button class="pl-dc" type="button" aria-label="Discord" aria-haspopup="menu">' + SEND + '</button>' +
+      '<button class="pl-like" type="button" aria-label="Like">' + HEART + '</button>' +
+      '<div class="pl-pop" role="menu" hidden>' +
+        '<button type="button" role="menuitem" data-for="hoq-playbtn">Play in Discord</button>' +
+        '<button type="button" role="menuitem" data-for="hoq-share">Share to Discord</button>' +
+      '</div>';
+    const $ = (s) => pill.querySelector(s);
+    const playBtn = $('.pl-play'), disc = $('.pl-disc'), prog = $('.pl-prog'), meta = $('.pl-meta'),
+      titleEl = $('.pl-title'), artistEl = $('.pl-artist'), likeBtn = $('.pl-like'), dcBtn = $('.pl-dc'), pop = $('.pl-pop');
+    const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); return !!b; };
+
+    let shownPaused = true, baseP = -1, baseT = 0, lastKey = '';
+    const sync = () => {
+      try {
+        const np = typeof currentNowPlaying === 'function' ? currentNowPlaying() : null;
+        const live = !!(np && np.title) && typeof playerProgress === 'function';
+        H.classList.toggle('hoq-pill-on', live);
+        if (!live) return;
+        const key = np.title + '|' + np.artist;
+        if (key !== lastKey) { lastKey = key; titleEl.textContent = np.title; artistEl.textContent = np.artist || ''; baseP = -1; }
+        const pr = playerProgress();
+        if (pr.paused !== shownPaused) {
+          shownPaused = pr.paused;
+          disc.innerHTML = pr.paused ? PLAY : PAUSE;
+          playBtn.setAttribute('aria-label', pr.paused ? 'Play' : 'Pause');
+        }
+        const lb = document.querySelector('.playbackSoundBadge__like');
+        const liked = !!(lb && lb.classList.contains('sc-button-selected'));
+        if (likeBtn.classList.contains('on') !== liked) {
+          likeBtn.classList.toggle('on', liked);
+          likeBtn.setAttribute('aria-label', liked ? 'Unlike' : 'Like');
+        }
+        dcBtn.hidden = !document.getElementById('hoq-playbtn') && !document.getElementById('hoq-share');
+        // SoundCloud's clock only reads whole seconds; glide between them.
+        if (pr.pos !== baseP) { baseP = pr.pos; baseT = performance.now(); }
+        const pos = baseP + (pr.paused ? 0 : Math.min(1, (performance.now() - baseT) / 1000));
+        const frac = pr.dur > 0 ? Math.max(0, Math.min(1, pos / pr.dur)) : 0;
+        prog.style.strokeDashoffset = (RING * (1 - frac)).toFixed(2);
+      } catch (e) {}
+    };
+
+    playBtn.addEventListener('click', () => {
+      if (!click('.playControls__play')) return;
+      shownPaused = !shownPaused;   // flip at once; the next sync confirms it
+      disc.innerHTML = shownPaused ? PLAY : PAUSE;
+    });
+    const openPlayer = () => { if (typeof window.__hoqNpToggle === 'function') window.__hoqNpToggle(); };
+    meta.addEventListener('click', openPlayer);
+    meta.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPlayer(); } });
+    likeBtn.addEventListener('click', () => {
+      if (!click('.playbackSoundBadge__like')) return;
+      likeBtn.classList.toggle('on');
+      likeBtn.classList.remove('pop'); void likeBtn.offsetWidth; likeBtn.classList.add('pop');
+    });
+    dcBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pop.querySelectorAll('[data-for]').forEach((b) => { b.hidden = !document.getElementById(b.dataset.for); });
+      pop.hidden = !pop.hidden;
+    });
+    pop.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-for]');
+      if (!b) return;
+      const real = document.getElementById(b.dataset.for);
+      if (real) real.click();
+      pop.hidden = true;
+    });
+    document.addEventListener('click', (e) => { if (!pop.hidden && !pill.contains(e.target)) pop.hidden = true; }, true);
+
+    // Swipe the pill: left = next track, right = previous.
+    let sx = 0, sy = 0, st = 0;
+    pill.addEventListener('touchstart', (e) => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); }, { passive: true });
+    pill.addEventListener('touchend', (e) => {
+      const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) < 50 || Math.abs(dy) > 40 || Date.now() - st > 700 || e.target.closest('.pl-pop')) return;
+      const next = dx < 0;
+      if (!click(next ? '.skipControl__next' : '.skipControl__previous')) return;
+      meta.classList.remove('sw-l', 'sw-r'); void meta.offsetWidth; meta.classList.add(next ? 'sw-l' : 'sw-r');
+    }, { passive: true });
+
+    const mount = () => {
+      if (!document.body) { setTimeout(mount, 150); return; }
+      document.body.appendChild(pill);
+      sync();
+      setInterval(() => { if (!document.hidden) sync(); }, 250);   // idle while hidden (battery)
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
+    };
+    mount();
+  })();
 
 
   // ---- session transplant (receiving end) -----------------------------
