@@ -46,45 +46,65 @@ function scPost(cmd) {
   } catch (e) {}
 })();
 
+// <hoq-webi-bridge>
 // --- New track pages through the proxy ("webi" bridge) -----------------------
 // Signed in, SoundCloud shows track pages with its new app inside an iframe and
 // the two talk by postMessage — pinned to https://soundcloud.com both ways: the
 // frame posts to the parent with that target origin (the browser drops it when
 // the parent is our proxy), and it ignores any message whose origin isn't on
 // its TRUSTED_V2_ORIGINS list. Both ends live on the proxy (hoq-rewrites.conf
-// points webi_host here), so from INSIDE the frame: re-address what it posts to
-// the parent, and present the parent's messages as SoundCloud's. Proxy only.
+// points webi_host here): re-address what the frame posts to the parent, and
+// inside the frame present the parent's messages as SoundCloud's. Proxy only.
+//
+// Each piece is guarded on its own: Safari refused the first version's trick of
+// redefining the parent's postMessage from inside the frame, the one try/catch
+// swallowed everything after it, and song pages sat loading forever on iPhone.
 (() => {
+  const SC = 'https://soundcloud.com';
+  const isSC = (t) => t === SC || t === SC + '/';
+  if (!/(^|\.)holdonquietly\.com$/i.test(location.hostname)) return;
+
+  if (window === window.top) {
+    // The app owns its postMessage. A call addressed to SoundCloud comes from
+    // the frame: hand it to the frame's courier (below), because a message's
+    // .source is the realm of the script that called postMessage last, and the
+    // app only accepts "ready" from the frame itself.
+    try {
+      const native = window.postMessage;
+      window.__hoqNativePostMessage = native;
+      window.postMessage = function (msg, target) {
+        const a = Array.prototype.slice.call(arguments);
+        if (isSC(target)) {
+          a[1] = location.origin;
+          if (typeof window.__hoqFrameCourier === 'function') return window.__hoqFrameCourier(a);
+        }
+        return native.apply(window, a);
+      };
+    } catch (e) {}
+    return;
+  }
+  if (!/^\/n\//.test(location.pathname)) return;
+
+  // Frame: the courier is frame-realm code, so what it sends is the frame's.
+  // Only a plain property on the parent — nothing of the parent is redefined.
   try {
-    const SC = 'https://soundcloud.com';
-    if (!/(^|\.)holdonquietly\.com$/i.test(location.hostname)) return;
-    if (window !== window.top && /^\/n\//.test(location.pathname)) {
-      // Must be frame-realm code that makes the call: a message's .source is
-      // whichever realm's script called postMessage last, and the parent only
-      // accepts "ready" from the frame. (Re-addressing it from the parent's side
-      // made the parent its own sender, so the handshake never completed.)
-      // Everyone else's calls go through a parent-realm trampoline, so the
-      // parent stays the sender of its own messages.
-      const par = window.parent;
-      // Kept on the parent so a re-created frame wraps the real one, not ours.
-      const native = par.__hoqNativePostMessage || (par.__hoqNativePostMessage = par.postMessage);
-      const viaParent = new par.Function('f', 'w', 'a', 'return f.apply(w, a)');
-      Object.defineProperty(par, 'postMessage', {
-        configurable: true, writable: true,
-        value: function (msg, target) {
-          const a = Array.prototype.slice.call(arguments);
-          if (target === SC || target === SC + '/') { a[1] = location.origin; return native.apply(par, a); }
-          return viaParent(native, par, a);
-        },
-      });
-      const d = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'origin');
-      Object.defineProperty(MessageEvent.prototype, 'origin', {
-        configurable: true, enumerable: d.enumerable,
-        get() {
-          const o = d.get.call(this);
-          return o === location.origin && this.source === window.parent ? SC : o;
-        },
-      });
+    const par = window.parent;
+    const native = par.__hoqNativePostMessage;
+    if (native) par.__hoqFrameCourier = function (a) { return native.apply(par, a); };
+  } catch (e) {}
+
+  try {
+    const d = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'origin');
+    Object.defineProperty(MessageEvent.prototype, 'origin', {
+      configurable: true, enumerable: d.enumerable,
+      get() {
+        const o = d.get.call(this);
+        return o === location.origin && this.source === window.parent ? SC : o;
+      },
+    });
+  } catch (e) {}
+
+  try {
       // The new app's code loads straight from SoundCloud's asset CDN, not
       // through us, so nginx never rewrites its API hosts — and those refuse our
       // origin (/me, likes, reposts, comments all "Failed to fetch"). Send the
@@ -108,13 +128,14 @@ function scPost(cmd) {
         if (!API.test(url)) return fetch0.apply(this, arguments);
         const req = typeof input === 'string' || input instanceof URL ? fix(url) : new Request(fix(url), input);
         return fetch0.call(this, req, init).then((r) => {
-          if (!/json|text/.test(r.headers.get('content-type') || '')) return r;
+          // JSON only: buffering a stream (text/event-stream) would never finish.
+          if (!/application\/json/.test(r.headers.get('content-type') || '')) return r;
           return r.text().then((t) => new Response(unRewrite(t), { status: r.status, statusText: r.statusText, headers: r.headers }));
         });
       };
-    }
   } catch (e) {}
 })();
+// </hoq-webi-bridge>
 
 // --- Lock screen / Now Playing controls ---------------------------------------
 // SoundCloud's player registers seekforward/seekbackward for every track, and
