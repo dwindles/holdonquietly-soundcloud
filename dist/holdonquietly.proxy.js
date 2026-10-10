@@ -59,6 +59,76 @@ function scPost(cmd) {
   } catch (e) {}
 })();
 
+// --- New track pages through the proxy ("webi" bridge) -----------------------
+// Signed in, SoundCloud shows track pages with its new app inside an iframe and
+// the two talk by postMessage — pinned to https://soundcloud.com both ways: the
+// frame posts to the parent with that target origin (the browser drops it when
+// the parent is our proxy), and it ignores any message whose origin isn't on
+// its TRUSTED_V2_ORIGINS list. Both ends live on the proxy (hoq-rewrites.conf
+// points webi_host here), so from INSIDE the frame: re-address what it posts to
+// the parent, and present the parent's messages as SoundCloud's. Proxy only.
+(() => {
+  try {
+    const SC = 'https://soundcloud.com';
+    if (!/(^|\.)holdonquietly\.com$/i.test(location.hostname)) return;
+    if (window !== window.top && /^\/n\//.test(location.pathname)) {
+      // Must be frame-realm code that makes the call: a message's .source is
+      // whichever realm's script called postMessage last, and the parent only
+      // accepts "ready" from the frame. (Re-addressing it from the parent's side
+      // made the parent its own sender, so the handshake never completed.)
+      // Everyone else's calls go through a parent-realm trampoline, so the
+      // parent stays the sender of its own messages.
+      const par = window.parent;
+      // Kept on the parent so a re-created frame wraps the real one, not ours.
+      const native = par.__hoqNativePostMessage || (par.__hoqNativePostMessage = par.postMessage);
+      const viaParent = new par.Function('f', 'w', 'a', 'return f.apply(w, a)');
+      Object.defineProperty(par, 'postMessage', {
+        configurable: true, writable: true,
+        value: function (msg, target) {
+          const a = Array.prototype.slice.call(arguments);
+          if (target === SC || target === SC + '/') { a[1] = location.origin; return native.apply(par, a); }
+          return viaParent(native, par, a);
+        },
+      });
+      const d = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'origin');
+      Object.defineProperty(MessageEvent.prototype, 'origin', {
+        configurable: true, enumerable: d.enumerable,
+        get() {
+          const o = d.get.call(this);
+          return o === location.origin && this.source === window.parent ? SC : o;
+        },
+      });
+      // The new app's code loads straight from SoundCloud's asset CDN, not
+      // through us, so nginx never rewrites its API hosts — and those refuse our
+      // origin (/me, likes, reposts, comments all "Failed to fetch"). Send the
+      // calls through the proxy's subdomains, and hand back the answers with
+      // nginx's host rewrites undone: the new app only accepts artwork from
+      // SoundCloud's own hosts and crashed ("Something went wrong") on ours.
+      const H = location.hostname.replace(/\./g, '\\.');
+      const API = /^https:\/\/(api-v2|api-auth|api|graph)\.soundcloud\.com(?=[/?]|$)/;
+      const BACK = [
+        ['hls', 'cf-hls-media.sndcdn.com'], ['hls2', 'hls-media.sndcdn.com'], ['secure-cdn', 'secure.sndcdn.com'],
+        ['a-v2', 'a-v2.sndcdn.com'], ['style', 'style.sndcdn.com'], ['va', 'va.sndcdn.com'], ['wis', 'wis.sndcdn.com'],
+        ['wave', 'wave.sndcdn.com'], ['i1', 'i1.sndcdn.com'], ['i2', 'i2.sndcdn.com'], ['i3', 'i3.sndcdn.com'], ['i4', 'i4.sndcdn.com'],
+        ['api-v2', 'api-v2.soundcloud.com'], ['api-auth', 'api-auth.soundcloud.com'], ['api', 'api.soundcloud.com'],
+        ['graph', 'graph.soundcloud.com'], ['secure', 'secure.soundcloud.com'], ['pushers', 'pushers.soundcloud.com'], ['dwt', 'dwt.soundcloud.com'],
+      ].map(([sub, real]) => [new RegExp('\\b' + sub.replace(/-/g, '\\-') + '\\.' + H + '\\b', 'g'), real]);
+      const unRewrite = (t) => BACK.reduce((s, [re, real]) => s.replace(re, real), t);
+      const fix = (u) => (typeof u === 'string' && API.test(u) ? u.replace(API, (m, h) => 'https://' + h + '.' + location.hostname) : u);
+      const fetch0 = window.fetch;
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input && typeof input.url === 'string' ? input.url : '';
+        if (!API.test(url)) return fetch0.apply(this, arguments);
+        const req = typeof input === 'string' || input instanceof URL ? fix(url) : new Request(fix(url), input);
+        return fetch0.call(this, req, init).then((r) => {
+          if (!/json|text/.test(r.headers.get('content-type') || '')) return r;
+          return r.text().then((t) => new Response(unRewrite(t), { status: r.status, statusText: r.statusText, headers: r.headers }));
+        });
+      };
+    }
+  } catch (e) {}
+})();
+
 // --- Lock screen / Now Playing controls ---------------------------------------
 // SoundCloud's player registers seekforward/seekbackward for every track, and
 // iOS shows that pair as ±10 buttons IN PLACE OF previous/next whenever both
