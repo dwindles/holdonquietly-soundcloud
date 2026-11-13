@@ -1417,6 +1417,12 @@ const BASE_CSS = `
     zoom: var(--sc-list-zoom, 1) !important;
   }
 
+  /* SoundCloud's promo strip ("Keep flowing: Skip the ads... Go+") is an ad, and
+     with Social/Settings open it showed through on top of that page. Promotions
+     go everywhere; any other banner just steps aside while the tab is open. */
+  .l-product-banners .banner.m-promotion { display: none !important; }
+  html.hoq-tab .l-product-banners { display: none !important; }
+
   /* ===== Library: convert horizontal tabs into a vertical SIDE TAB ===== */
   .l-collection:has(.collectionNav) {
     display: flex !important; align-items: flex-start !important; gap: 24px !important;
@@ -4247,6 +4253,9 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-pair-btn { flex: none; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer;
         font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-pair-btn:hover { filter: brightness(1.1); }
+      #hoq-discord .hoq-hoq-pic { flex: none; width: 38px; height: 38px; border-radius: 50%; object-fit: cover;
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      #hoq-discord .hoq-hoq-sub.is-bad { color: #ff8a7a; }
       #hoq-discord .hoq-pair-linkbtn { flex: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
         padding: 8px 15px; cursor: pointer; font-weight: 700; font-size: 12px;
         background: rgba(255,255,255,0.05); color: #e4e4e6; }
@@ -4340,6 +4349,18 @@ function ensureDiscordPanel() {
           </div>
         </div>
         <div class="hoq-feed-list"><div class="hoq-dc-hint">Loading the feed…</div></div>
+      </div>
+      <div class="hoq-dc-sec hoq-hoq-sec">
+        <div class="hoq-dc-label">holdonquietly account</div>
+        <div class="hoq-rp">
+          <div class="hoq-rp-row hoq-rp-static">
+            <img class="hoq-hoq-pic" alt="" hidden>
+            <span><b class="hoq-hoq-name">Not signed in</b><em class="hoq-hoq-sub">One account for holdonquietly.com and every hoq app.</em></span>
+            <button class="hoq-pair-linkbtn hoq-hoq-profile" type="button" hidden>Profile</button>
+            <button class="hoq-pair-btn hoq-hoq-btn" type="button">Sign in</button>
+          </div>
+        </div>
+        <div class="hoq-dc-hint">Separate from your SoundCloud sign-in, which stays as it is. Signing in opens holdonquietly.com in your browser.</div>
       </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Last.fm scrobbling</div>
@@ -4462,7 +4483,7 @@ function ensureDiscordPanel() {
       </div>
     </div>`;
   // Configuration lives behind the Settings sub-tab; everything else is Social.
-  const SET_SECS = ['settings', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'discord webhook', 'phone', 'your info'];
+  const SET_SECS = ['settings', 'holdonquietly account', 'accounts', 'last.fm scrobbling', 'discord rich presence', 'discord webhook', 'phone', 'your info'];
   p.querySelectorAll('.hoq-dc-sec').forEach((sec) => {
     const lab = sec.querySelector('.hoq-dc-label');
     const t = lab ? lab.textContent.trim().toLowerCase() : '';
@@ -4498,6 +4519,8 @@ function ensureDiscordPanel() {
   }
   const hookSec = p.querySelector('.hoq-hook-sec');
   if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
+  const hoqSec = p.querySelector('.hoq-hoq-sec');
+  if (hoqSec) { if (hoqHasHost()) setupHoqAccount(hoqSec); else hoqSec.remove(); }
   const pairSec = p.querySelector('.hoq-pair-sec');
   if (pairSec) { if (hoqHasHost()) setupPairSettings(pairSec); else pairSec.remove(); }
   p.dataset.pane = 'social';
@@ -5007,6 +5030,46 @@ function setupRpSettings(sec) {
     store('hoqRpStatus', b.dataset.v); apply();
   }));
   sync();
+}
+
+// Settings → holdonquietly account: the hoq account (holdonquietly.com), which is
+// separate from SoundCloud's sign-in. The host does the whole sign-in and keeps
+// the tokens; the page only hears who's signed in (window.__hoqAccount).
+function setupHoqAccount(sec) {
+  const pic = sec.querySelector('.hoq-hoq-pic');
+  const name = sec.querySelector('.hoq-hoq-name');
+  const sub = sec.querySelector('.hoq-hoq-sub');
+  const btn = sec.querySelector('.hoq-hoq-btn');
+  const prof = sec.querySelector('.hoq-hoq-profile');
+  const blurb = sub.textContent;
+  let st = { signedIn: false, busy: false, note: '' };
+  window.__hoqAccount = (s) => {
+    st = s || st;
+    const u = st.user || {};
+    window.__hoqAccountUser = st.signedIn ? u : null;   // who's signed in, for other features
+    if (st.busy) {
+      name.textContent = 'Finish signing in in your browser…';
+      sub.textContent = 'Waiting for holdonquietly.com.';
+      btn.textContent = 'Cancel';
+    } else if (st.signedIn) {
+      name.textContent = u.name || u.username || 'Signed in';
+      sub.textContent = u.username ? '@' + u.username + (u.role && u.role !== 'user' ? ' · ' + u.role : '') : 'Signed in';
+      btn.textContent = 'Sign out';
+    } else {
+      name.textContent = 'Not signed in';
+      sub.textContent = st.note || blurb;
+      btn.textContent = 'Sign in';
+    }
+    sub.classList.toggle('is-bad', !!st.note && !st.busy && !st.signedIn);
+    prof.hidden = !(st.signedIn && u.profile);
+    const src = st.signedIn && u.picture ? u.picture : '';
+    if (src) { if (pic.getAttribute('src') !== src) pic.src = src; pic.hidden = false; }
+    else { pic.hidden = true; pic.removeAttribute('src'); }
+  };
+  pic.addEventListener('error', () => { pic.hidden = true; });
+  btn.addEventListener('click', () => scPost(st.busy ? 'hoqacct:cancel' : st.signedIn ? 'hoqacct:signout' : 'hoqacct:signin'));
+  prof.addEventListener('click', () => { const u = st.user; if (u && u.profile) scPost('open:' + u.profile); });
+  scPost('hoqacct:status');
 }
 
 // Settings → Discord webhook. The URL goes straight to the host, which keeps

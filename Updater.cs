@@ -138,13 +138,15 @@ static class Updater
 
     static void WriteSwapCmd()
     {
-        // Waits for the running exe to exit (its file lock releases), swaps in the
-        // new one, relaunches, then deletes itself.
+        // Waits for THIS process to exit (its file lock releases), swaps in the new
+        // exe, relaunches, then deletes itself. By PID, not image name: the desktop
+        // widget is also holdonquietly.exe, and while it ran the swap waited forever.
+        int pid = Environment.ProcessId;
         string c =
             "@echo off\r\n" +
             "cd /d \"%~dp0\"\r\n" +
             ":wait\r\n" +
-            "tasklist /fi \"imagename eq " + EXE + "\" | find /i \"" + EXE + "\" >nul\r\n" +
+            "tasklist /fi \"PID eq " + pid + "\" /nh /fo csv | %SystemRoot%\\System32\\find.exe \"\"\"" + pid + "\"\"\" >nul\r\n" +
             "if not errorlevel 1 (\r\n" +
             "  ping -n 2 127.0.0.1 >nul\r\n" +
             "  goto wait\r\n" +

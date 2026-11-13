@@ -65,7 +65,12 @@ class Program
         try { SetCurrentProcessExplicitAppUserModelID("holdonquietly.desktop.app"); } catch { }
         // Register a Start-Menu shortcut with the same id so Windows resolves the
         // media flyout to "holdonquietly" + our icon instead of "Unknown app".
-        try { ShortcutHelper.EnsureShortcut("holdonquietly.desktop.app", "holdonquietly", System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName); } catch { }
+        // Its own name: the desktop widget's Start-Menu shortcut is "holdonquietly",
+        // and with the same name each app kept overwriting the other's.
+        // (Not from a test copy with its own profile: that's how the taskbar pin
+        // ended up pointing at a dev build.)
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HOQ_DATADIR")))
+            try { ShortcutHelper.EnsureShortcut("holdonquietly.desktop.app", "holdonquietly SoundCloud", System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName); } catch { }
 
         var app = new Application();
         win = new Window
@@ -219,6 +224,12 @@ class Program
             string preload = EmbeddedText("preload.js");
             if (string.IsNullOrEmpty(preload)) preload = File.ReadAllText(Path.Combine(baseDir, "preload.js"));
             Log("preload read: " + preload.Length + " chars (embedded=" + (EmbeddedText("preload.js") != null) + ")");
+            // WebView2 runs this in every frame, and signed-in track pages are
+            // SoundCloud's new React app in an iframe (/n/...). The theme editing
+            // that page before React hydrated it broke it: track pages showed the
+            // previous song. Same fix as the phone build: stay out of that frame.
+            // (Wrapping is safe: the host only ever calls window.* functions.)
+            preload = "(function () {\nif (window !== window.top && /^\\/n\\//.test(location.pathname)) return;\n" + preload + "\n})();";
             await core.AddScriptToExecuteOnDocumentCreatedAsync(preload);
             Log("preload injected OK");
         }
@@ -232,10 +243,12 @@ class Program
         {
             try
             {
-                string u = e.Request.Uri;
+                // Match the host, not anywhere in the URL: a SoundCloud link that
+                // merely mentions an ad domain in its query must still load.
+                string host = new Uri(e.Request.Uri).Host;
                 foreach (var h in AD_HOSTS)
                 {
-                    if (u.IndexOf(h, StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (host.Equals(h, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + h, StringComparison.OrdinalIgnoreCase))
                     {
                         e.Response = core.Environment.CreateWebResourceResponse(null, 403, "Blocked", "");
                         return;
@@ -248,6 +261,11 @@ class Program
         // Window-control messages from the injected titlebar.
         core.WebMessageReceived += (s, e) =>
         {
+            // Only SoundCloud's own pages speak for the app. Ordinary links open in
+            // this window, and any other site there would otherwise get the same
+            // powers: "open:" hands its argument to the shell, "app:reset" wipes
+            // the profile, "hook:set" swaps the webhook.
+            if (!TrustedSource(e.Source)) { Log("message ignored from " + HostOf(e.Source)); return; }
             string m = e.TryGetWebMessageAsString();
             if (m != null && m.StartsWith("DBG")) Log(m);
             OnMessage(m);
@@ -324,6 +342,9 @@ class Program
         _ = ReadWebhook();          // warm the cache, so a later failed read still has a URL
         _ = FeedLoop();             // poll the community feed
         LastFm.Load(userData);      // restore a saved Last.fm session if there is one
+        // hoq account (holdonquietly.com): separate from the SoundCloud sign-in.
+        HoqAccount.RunJs = js => win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
+        HoqAccount.Load(userData);
         LastFm.OnStatus = (connected, u) => win.Dispatcher.InvokeAsync(() =>
         {
             try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqLastfm && window.__hoqLastfm(" + (connected ? "true" : "false") + ",\"" + (u ?? "").Replace("\\", "").Replace("\"", "") + "\")"); } catch { }
@@ -354,6 +375,22 @@ class Program
 
     static readonly HttpClient http = new HttpClient();
     const string BACKEND = "http://155.138.222.253:8790";
+
+    static string HostOf(string url) { try { return new Uri(url).Host; } catch { return "?"; } }
+    static bool TrustedSource(string url)
+    {
+        string h = HostOf(url).ToLowerInvariant();
+        return h == "soundcloud.com" || h.EndsWith(".soundcloud.com", StringComparison.Ordinal);
+    }
+
+    // Data headed into ExecuteScriptAsync as a JS expression. The friends/feed
+    // backend is plain http, so a tampered response must never become code:
+    // only JSON that parses goes through (JSON is a subset of JS), else null.
+    static string JsonOrNull(string s)
+    {
+        try { using var d = JsonDocument.Parse(s); return d.RootElement.GetRawText(); }
+        catch { return "null"; }
+    }
 
     static string Prop(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "") : "";
     static int PropI(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
@@ -754,8 +791,8 @@ class Program
         {
             try
             {
-                string json = await http.GetStringAsync(BACKEND + "/friends");
-                await win.Dispatcher.InvokeAsync(() =>
+                string json = JsonOrNull(await http.GetStringAsync(BACKEND + "/friends"));
+                if (json != "null") await win.Dispatcher.InvokeAsync(() =>
                 {
                     try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqFriends && window.__hoqFriends(" + json + ")"); } catch { }
                 });
@@ -777,7 +814,8 @@ class Program
     {
         try
         {
-            string json = await http.GetStringAsync(BACKEND + "/feed");
+            string json = JsonOrNull(await http.GetStringAsync(BACKEND + "/feed"));
+            if (json == "null") throw new InvalidDataException("feed wasnt JSON");
             await win.Dispatcher.InvokeAsync(() =>
             { try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqFeed && window.__hoqFeed(" + json + ")"); } catch { } });
         }
@@ -802,8 +840,8 @@ class Program
         try
         {
             string json = await http.GetStringAsync("https://discord.com/api/guilds/795316631655546900/widget.json");
-            if (!string.IsNullOrWhiteSpace(json) && json.TrimStart().StartsWith("{"))
-                js = "window.__hoqDcWidget && window.__hoqDcWidget(" + json + ")";
+            string ok = JsonOrNull(json);
+            if (ok.StartsWith("{")) js = "window.__hoqDcWidget && window.__hoqDcWidget(" + ok + ")";
         }
         catch { }
         await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
@@ -908,6 +946,8 @@ class Program
     // us the URL — download it (no CORS here), find 2 dominant colors, send back.
     static async Task HandleCover(string url)
     {
+        // Artwork is always https on SoundCloud's CDN; nothing else (local network) gets fetched.
+        if (!(Uri.TryCreate(url, UriKind.Absolute, out var cu) && cu.Scheme == Uri.UriSchemeHttps)) return;
         try
         {
             byte[] bytes = await http.GetByteArrayAsync(url);
@@ -967,7 +1007,9 @@ class Program
         if (m != null && m.StartsWith("cover:")) { await HandleCover(m.Substring(6)); return; }
         if (m != null && m.StartsWith("open:"))
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(m.Substring(5)) { UseShellExecute = true }); } catch { }
+            // Web links only: anything else here would be handed to the shell as a program or file.
+            if (Uri.TryCreate(m.Substring(5), UriKind.Absolute, out var ou) && (ou.Scheme == Uri.UriSchemeHttps || ou.Scheme == Uri.UriSchemeHttp))
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ou.AbsoluteUri) { UseShellExecute = true }); } catch { }
             return;
         }
         if (m != null && m.StartsWith("saveimg:")) { await SaveImage(m.Substring(8)); return; }
@@ -1021,6 +1063,10 @@ class Program
         if (m == "lastfm:connect") { _ = LastFm.Connect(); return; }
         if (m == "lastfm:disconnect") { LastFm.Disconnect(); return; }
         if (m == "lastfm:status") { LastFm.Status(); return; }
+        if (m == "hoqacct:status") { HoqAccount.Status(); return; }
+        if (m == "hoqacct:signin") { _ = HoqAccount.SignIn(); return; }
+        if (m == "hoqacct:cancel") { HoqAccount.CancelSignIn(); return; }
+        if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }
         if (m == "dcwidget") { _ = DcWidget(); return; }
         if (m == "update:apply") { Updater.ApplyAndRestart?.Invoke(); return; }
         if (m != null && m.StartsWith("win:resize:"))
