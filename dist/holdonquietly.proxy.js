@@ -4775,8 +4775,18 @@ function hoqStatsAdd(a, b) {
   const out = { plays: (a.plays || 0) + (b.plays || 0), seconds: (a.seconds || 0) + (b.seconds || 0),
     artists: Object.assign({}, a.artists), tracks: Object.assign({}, a.tracks),
     since: Math.min(a.since || Infinity, b.since || Infinity) };
-  for (const k in (b.artists || {})) out.artists[k] = (out.artists[k] || 0) + (+b.artists[k] || 0);
-  for (const k in (b.tracks || {})) out.tracks[k] = (out.tracks[k] || 0) + (+b.tracks[k] || 0);
+  // Same name in different capitals is one entry (Last.fm says "Serpuline",
+  // SoundCloud "serpuline"); the first spelling seen is the one shown.
+  const addInto = (dst, src) => {
+    const low = {};
+    for (const k in dst) low[k.toLowerCase()] = k;
+    for (const k in (src || {})) {
+      const key = low[k.toLowerCase()] || (low[k.toLowerCase()] = k);
+      dst[key] = (dst[key] || 0) + (+src[k] || 0);
+    }
+  };
+  addInto(out.artists, b.artists);
+  addInto(out.tracks, b.tracks);
   if (!isFinite(out.since)) out.since = Date.now();
   return out;
 }
