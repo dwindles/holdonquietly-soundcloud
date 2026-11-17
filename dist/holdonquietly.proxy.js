@@ -4136,6 +4136,11 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-stat-range button { border: 0; background: none; color: #a9a9b2; font-size: 11px; font-weight: 700;
         padding: 4px 11px; border-radius: 999px; cursor: pointer; }
       #hoq-discord .hoq-stat-range button.hoq-on { background: var(--sc-accent,#ff5500); color: #fff; }
+      #hoq-discord .hoq-stat-tools { display: inline-flex; align-items: center; gap: 8px; }
+      #hoq-discord .hoq-recap-btn { border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); border-radius: 999px;
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 18%, transparent); color: #fff; font-size: 11px; font-weight: 800;
+        padding: 4px 12px; cursor: pointer; letter-spacing: normal; text-transform: none; }
+      #hoq-discord .hoq-recap-btn:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 32%, transparent); }
       #hoq-discord .hoq-stat { background: rgba(12,12,14,0.55); backdrop-filter: blur(20px) saturate(1.3);
         border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; padding: 12px 13px;
         display: flex; flex-direction: column; gap: 2px; }
@@ -4373,6 +4378,7 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-hoq-pub { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 12px;
         color: #c9c9d2; cursor: pointer; width: fit-content; }
       #hoq-discord .hoq-hoq-pub[hidden] { display: none; }
+      #hoq-discord .hoq-hoq-pubs { display: flex; flex-wrap: wrap; gap: 4px 18px; }
       #hoq-discord .hoq-hoq-pub input { accent-color: var(--sc-accent,#ff5500); margin: 0; cursor: pointer; }
       #hoq-discord .hoq-hoq-pic { flex: none; width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
         background: rgba(255,255,255,0.06);
@@ -4478,7 +4484,7 @@ function ensureDiscordPanel() {
         <div class="hoq-hoq-bar">
           <div class="hoq-hoq-banner"></div>
           <img class="hoq-hoq-pic" alt="">
-          <span class="hoq-hoq-text"><span class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></span><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><span class="hoq-hoq-bio" hidden></span><span class="hoq-hoq-mini" hidden></span><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my holdonquietly profile</label></span>
+          <span class="hoq-hoq-text"><span class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></span><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><span class="hoq-hoq-bio" hidden></span><span class="hoq-hoq-mini" hidden></span><span class="hoq-hoq-pubs"><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my profile</label><label class="hoq-hoq-pub hoq-hoq-nowpub" hidden><input type="checkbox"> Show what I'm playing on my profile</label></span></span>
           <span class="hoq-hoq-btns">
             <button class="hoq-pair-linkbtn hoq-hoq-profile" type="button" hidden>Profile</button>
             <button class="hoq-pair-btn hoq-hoq-btn" type="button">Sign in</button>
@@ -4575,7 +4581,7 @@ function ensureDiscordPanel() {
         <div class="hoq-settings-host"></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
-        <div class="hoq-dc-label hoq-stat-head">Listening stats<span class="hoq-stat-range"><button type="button" data-r="all">All time</button><button type="button" data-r="30">30 days</button></span></div>
+        <div class="hoq-dc-label hoq-stat-head">Listening stats<span class="hoq-stat-tools"><button type="button" class="hoq-recap-btn">Recap</button><span class="hoq-stat-range"><button type="button" data-r="all">All time</button><button type="button" data-r="30">30 days</button></span></span></div>
         <div class="hoq-stat-row">
           <div class="hoq-stat"><b class="hoq-stat-plays">0</b><span>Tracks played</span></div>
           <div class="hoq-stat"><b class="hoq-stat-time">0m</b><span>Time listened</span></div>
@@ -4685,6 +4691,8 @@ function ensureDiscordPanel() {
       }
     });
   });
+  const recapBtn = p.querySelector('.hoq-recap-btn');
+  if (recapBtn) { if (hoqHasHost()) recapBtn.addEventListener('click', () => hoqRecapOpen()); else recapBtn.remove(); }
   p.querySelectorAll('.hoq-stat-range button').forEach((b) => b.addEventListener('click', () => {
     try { localStorage.setItem('hoqStatsRange', b.dataset.r); } catch (e) {}
     renderHoqStats();
@@ -4902,12 +4910,18 @@ function hoqStatsShown() {
 // Keeps one PC's upload well under the account's 256 KB per key.
 function hoqStatsTrim(s) {
   const top = (o, n) => Object.fromEntries(Object.entries(o || {}).sort((x, y) => y[1] - x[1]).slice(0, n).map(([k, v]) => [String(k).slice(0, 200), v]));
-  const days = {};
-  for (const k in (s.days || {})) {
-    const d = s.days[k];
-    days[k] = { plays: d.plays || 0, seconds: d.seconds || 0, artists: top(d.artists, 120), tracks: top(d.tracks, 150) };
+  // Shrink until it fits (the account takes 256 KB per entry); counts never change,
+  // only how many of the least-played names come along.
+  for (const f of [1, 0.6, 0.35, 0.2, 0.1]) {
+    const days = {};
+    for (const k in (s.days || {})) {
+      const d = s.days[k];
+      days[k] = { plays: d.plays || 0, seconds: d.seconds || 0, artists: top(d.artists, Math.ceil(60 * f)), tracks: top(d.tracks, Math.ceil(80 * f)) };
+    }
+    const out = { plays: s.plays, seconds: s.seconds, since: s.since, device: s.device, artists: top(s.artists, Math.ceil(1000 * f)), tracks: top(s.tracks, Math.ceil(1600 * f)), days };
+    if (JSON.stringify(out).length < 230000) return out;
   }
-  return { plays: s.plays, seconds: s.seconds, since: s.since, device: s.device, artists: top(s.artists, 1200), tracks: top(s.tracks, 2000), days };
+  return { plays: s.plays, seconds: s.seconds, since: s.since, device: s.device, artists: top(s.artists, 50), tracks: top(s.tracks, 50), days: {} };
 }
 function hoqStatsCard(s) {
   const best = (o) => { let b = null; for (const k in o) if (b === null || o[k] > o[b]) b = k; return b; };
@@ -4952,8 +4966,53 @@ window.__hoqCloudStats = function (resp) {
   try { localStorage.setItem('hoqStatsCloud', JSON.stringify({ uid: u.id, others })); } catch (e) {}
   renderHoqStats();
   hoqCloudPush(true);   // this PC's tally (incl. anything played while signed out) goes up now
+  hoqSettingsFromCloud(resp.items.find((it) => it && it.key === 'settings'));
 };
 setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
+
+// ---- settings follow the account ----
+// The look and the switches (accent incl. "match song cover", background, effects,
+// EQ, stats switches) live on the account as one "settings" entry; the newest one
+// wins. A PC that's behind applies it and reloads once. Per-device things stay
+// local: volume, the output device, and custom background pictures over 150 KB.
+const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
+  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic'];
+function hoqSettingsSnap() {
+  const o = {};
+  for (const k of HOQ_SYNC_KEYS) {
+    const v = localStorage.getItem(k);
+    if (v !== null && !(k === 'scCustomBg' && v.length > 150000)) o[k] = v;
+  }
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (/^scFx_[a-z]+$/.test(k)) o[k] = localStorage.getItem(k); }
+  return o;
+}
+const hoqSig = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+function hoqSyncState() { try { return JSON.parse(localStorage.getItem('hoqSettingsSync')) || {}; } catch (e) { return {}; } }
+let _settingsReady = false;   // wait for the account's copy before sending ours
+function hoqSettingsFromCloud(item) {
+  const st = hoqSyncState(), snap = hoqSettingsSnap(), sig = hoqSig(snap);
+  const remote = item && item.data && typeof item.data === 'object' && item.data.values && typeof item.data.values === 'object' ? item.data : null;
+  _settingsReady = true;
+  if (remote && (remote.ts || 0) > (st.ts || 0) && hoqSig(remote.values) !== sig) {
+    // the account has newer settings than this PC: take them
+    for (const k of Object.keys(snap)) if (!(k in remote.values) && !(k === 'scCustomBg' && snap[k].length > 150000)) localStorage.removeItem(k);
+    for (const [k, v] of Object.entries(remote.values)) if ((HOQ_SYNC_KEYS.includes(k) || /^scFx_[a-z]+$/.test(k)) && typeof v === 'string') localStorage.setItem(k, v);
+    localStorage.setItem('hoqSettingsSync', JSON.stringify({ ts: remote.ts, sig: hoqSig(hoqSettingsSnap()) }));
+    setTimeout(() => location.reload(), 300);
+    return;
+  }
+  if (remote && hoqSig(remote.values) === sig) { localStorage.setItem('hoqSettingsSync', JSON.stringify({ ts: remote.ts || 0, sig })); return; }
+  hoqSettingsPush(true);
+}
+function hoqSettingsPush(force) {
+  if (!window.__hoqAccountUser || !hoqHasHost() || !_settingsReady) return;
+  const snap = hoqSettingsSnap(), sig = hoqSig(snap), st = hoqSyncState();
+  if (!force && sig === st.sig) return;
+  const ts = Date.now();
+  localStorage.setItem('hoqSettingsSync', JSON.stringify({ ts, sig }));
+  scPost('hoqacct:stats:' + JSON.stringify({ key: 'settings', data: { ts, values: snap } }));
+}
+setInterval(() => { try { hoqSettingsPush(false); } catch (e) {} }, 20000);
 
 let _statsTitle = '', _statsLastTick = 0;
 function hoqStatsTick() {
@@ -4973,7 +5032,7 @@ function hoqStatsTick() {
   // The last counted title is kept with the stats, so a restart or reload with the
   // same song still loaded isn't counted as another play.
   if (!_statsTitle && s.last) _statsTitle = s.last;
-  // Per-day counts too (local date), for the "30 days" view. Only the last 35
+  // Per-day counts too (local date), for the "30 days" view and the monthly recap. Only the last 70
   // days are kept; the all-time totals above are separate and never trimmed.
   const dk = hoqDayKey(now);
   if (!s.days) {
@@ -4996,9 +5055,109 @@ function hoqStatsTick() {
     day.tracks[np.title] = (day.tracks[np.title] || 0) + 1;
     if (np.artist) day.artists[np.artist] = (day.artists[np.artist] || 0) + 1;
   }
-  const cutoff = hoqDayKey(now - 35 * 86400000);
+  const cutoff = hoqDayKey(now - 70 * 86400000);
   for (const k in s.days) if (k < cutoff) delete s.days[k];
   hoqStatsWrite(s);
+}
+
+// ---- monthly recap: a "your month" card from the per-day counts ----
+function hoqMonthStats(ym) {
+  const all = hoqStatsShown();
+  let w = { plays: 0, seconds: 0, artists: {}, tracks: {} }, days = 0, topDay = '', topDayN = 0;
+  for (const k in (all.days || {})) {
+    if (k.slice(0, 7) !== ym) continue;
+    const d = all.days[k];
+    w = hoqStatsAdd(w, d);
+    if (d.plays) days++;
+    if ((d.plays || 0) > topDayN) { topDayN = d.plays; topDay = k; }
+  }
+  return Object.assign(w, { days, topDay, topDayN });
+}
+function hoqRecapDraw(ym) {
+  const m = hoqMonthStats(ym);
+  const [y, mo] = ym.split('-').map(Number);
+  const monthName = new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const acc = getComputedStyle(document.documentElement).getPropertyValue('--sc-accent').trim() || '#ff5500';
+  const u = window.__hoqAccountUser;
+  const who = (u && (u.name || u.username)) || (hoqMe().name !== 'Someone' ? hoqMe().name : '');
+  const W = 1200, H = 675, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const font = (px, w) => (w || 800) + ' ' + px + 'px Inter, "Segoe UI", Arial, sans-serif';
+  const fit = (t, max) => { t = String(t); if (g.measureText(t).width <= max) return t; while (t.length > 1 && g.measureText(t + '…').width > max) t = t.slice(0, -1); return t + '…'; };
+  // background: the accent fading into near-black, with a soft glow
+  const bg = g.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, acc); bg.addColorStop(0.55, '#141418'); bg.addColorStop(1, '#0a0a0c');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(0, 0, W, H);
+  // header
+  g.fillStyle = '#fff'; g.font = font(22, 700); g.globalAlpha = 0.8;
+  g.fillText('holdonquietly · listening recap', 60, 70); g.globalAlpha = 1;
+  g.font = font(58); g.fillText(fit((who ? who + '’s ' : 'My ') + monthName, W - 120), 60, 140);
+  // big numbers
+  const nums = [[m.plays.toLocaleString(), 'plays'], [hoqFmtDur(m.seconds), 'listened'], [String(m.days), m.days === 1 ? 'day listening' : 'days listening'],
+    [m.topDay ? new Date(m.topDay + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—', 'biggest day' + (m.topDayN ? ' (' + m.topDayN + ')' : '')]];
+  nums.forEach(([v, l], i) => {
+    const x = 60 + i * 275;
+    g.fillStyle = 'rgba(255,255,255,0.07)'; g.beginPath(); g.roundRect(x, 180, 255, 110, 16); g.fill();
+    g.fillStyle = acc; g.font = font(40); g.fillText(fit(v, 225), x + 20, 238);
+    g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = font(18, 600); g.fillText(fit(l, 225), x + 20, 270);
+  });
+  // top 5 lists
+  const top = (o) => Object.entries(o || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  [['Top artists', top(m.artists), 60], ['Top songs', top(m.tracks), 620]].forEach(([title, rows, x]) => {
+    g.fillStyle = '#fff'; g.font = font(24); g.fillText(title, x, 345);
+    if (!rows.length) { g.font = font(18, 600); g.fillStyle = 'rgba(255,255,255,0.6)'; g.fillText('nothing played yet', x, 385); }
+    rows.forEach(([name, n], i) => {
+      const yy = 385 + i * 46;
+      g.fillStyle = acc; g.font = font(22); g.fillText(String(i + 1), x, yy);
+      g.fillStyle = '#fff'; g.font = font(21, 700); g.fillText(fit(name, 400), x + 34, yy);
+      g.fillStyle = 'rgba(255,255,255,0.6)'; g.font = font(17, 600); const t = n + (n === 1 ? ' play' : ' plays');
+      g.fillText(t, x + 520 - g.measureText(t).width, yy);
+    });
+  });
+  g.fillStyle = 'rgba(255,255,255,0.45)'; g.font = font(16, 600); g.fillText('holdonquietly SoundCloud', 60, H - 30);
+  return { png: c.toDataURL('image/png'), monthName, plays: m.plays };
+}
+function hoqRecapOpen() {
+  let ov = document.getElementById('hoq-recap');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'hoq-recap';
+  ov.innerHTML = '<style>#hoq-recap{position:fixed;inset:0;z-index:2147483100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);' +
+    'font-family:Inter,"Segoe UI",Arial,sans-serif}#hoq-recap .rc{width:min(860px,92vw);background:rgba(18,18,22,.96);border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:18px;' +
+    'box-shadow:0 30px 80px rgba(0,0,0,.6);color:#eee}#hoq-recap img{width:100%;border-radius:12px;display:block}#hoq-recap .row{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}' +
+    '#hoq-recap button{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#eee;border-radius:10px;padding:9px 15px;font-weight:700;font-size:13px;cursor:pointer}' +
+    '#hoq-recap button:hover{background:rgba(255,255,255,.12)}#hoq-recap button.on,#hoq-recap .go{background:var(--sc-accent,#ff5500);border-color:transparent;color:#fff}' +
+    '#hoq-recap .st{margin-left:auto;font-size:12.5px;color:#bbb}#hoq-recap .sp{flex:1}</style>' +
+    '<div class="rc"><img alt="Your listening recap"><div class="row"><button data-m="0">This month</button><button data-m="1">Last month</button><span class="sp"></span>' +
+    '<button class="go" data-a="share">Share to Discord</button><button data-a="save">Save image</button><button data-a="close">Close</button></div><div class="row"><span class="st"></span></div></div>';
+  document.body.appendChild(ov);
+  const img = ov.querySelector('img'), st = ov.querySelector('.st');
+  let cur = null;
+  const show = (back) => {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - back);
+    const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    cur = Object.assign(hoqRecapDraw(ym), { ym });
+    img.src = cur.png;
+    ov.querySelectorAll('[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === String(back)));
+    st.textContent = cur.plays ? '' : 'No plays counted for ' + cur.monthName + ' yet.';
+  };
+  window.__hoqRecapResult = (ok, text) => { st.textContent = text; };
+  ov.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (e.target === ov) { ov.remove(); return; }
+    if (!b) return;
+    if (b.dataset.m) show(Number(b.dataset.m));
+    else if (b.dataset.a === 'close') ov.remove();
+    else if (cur && (b.dataset.a === 'share' || b.dataset.a === 'save')) {
+      st.textContent = b.dataset.a === 'share' ? 'Sharing…' : 'Saving…';
+      scPost('recap:' + b.dataset.a + ':' + JSON.stringify({ png: cur.png, month: cur.ym, caption: 'my ' + cur.monthName + ' on holdonquietly' }));
+    }
+  });
+  const esc = (e) => { if (e.key === 'Escape') { ov.remove(); document.removeEventListener('keydown', esc, true); } };
+  document.addEventListener('keydown', esc, true);
+  show(0);
 }
 
 function hoqFmtDur(sec) {
@@ -5311,6 +5470,23 @@ function setupRpSettings(sec) {
 // Settings → holdonquietly account: the hoq account (holdonquietly.com), which is
 // separate from SoundCloud's sign-in. The host does the whole sign-in and keeps
 // the tokens; the page only hears who's signed in (window.__hoqAccount).
+// The hoq account state is kept here from the start; the Settings bar only draws
+// it. So stats, settings and "listening now" sync even if Settings is never opened.
+let _hoqAcct = { signedIn: false, busy: false, note: '' }, _hoqCard = null;
+const _hoqAcctViews = [];
+const _hoqAcctDraw = () => _hoqAcctViews.forEach((f) => { try { f(); } catch (e) {} });
+window.__hoqAccount = (s) => {
+  const was = !!window.__hoqAccountUser;
+  _hoqAcct = s || _hoqAcct;
+  window.__hoqAccountUser = _hoqAcct.signedIn ? (_hoqAcct.user || {}) : null;   // who's signed in, for other features
+  // Just signed in (or the app started signed in): fetch the account's stats and
+  // settings (which then sends this PC's tally up) and the profile card.
+  if (_hoqAcct.signedIn && !was) { scPost('hoqacct:pull'); scPost('hoqacct:card'); }
+  if (!_hoqAcct.signedIn) _hoqCard = null;
+  _hoqAcctDraw();
+};
+window.__hoqAccountCard = (c) => { if (c && typeof c === 'object' && _hoqAcct.signedIn) { _hoqCard = c; _hoqAcctDraw(); } };
+
 function setupHoqAccount(sec) {
   const pic = sec.querySelector('.hoq-hoq-pic');
   const name = sec.querySelector('.hoq-hoq-name');
@@ -5318,6 +5494,8 @@ function setupHoqAccount(sec) {
   const btn = sec.querySelector('.hoq-hoq-btn');
   const prof = sec.querySelector('.hoq-hoq-profile');
   const pubRow = sec.querySelector('.hoq-hoq-pub');
+  const nowRow = sec.querySelector('.hoq-hoq-nowpub');
+  const nowBox = nowRow.querySelector('input');
   const pubBox = pubRow.querySelector('input');
   const bar = sec.querySelector('.hoq-hoq-bar');
   const banner = sec.querySelector('.hoq-hoq-banner');
@@ -5370,23 +5548,23 @@ function setupHoqAccount(sec) {
       mini.hidden = false;
     } else mini.hidden = true;
   }
-  window.__hoqAccountCard = (c) => { if (c && typeof c === 'object' && st.signedIn) { card = c; drawCard(); } };
   setInterval(() => { if (st.signedIn && document.getElementById('hoq-discord')?.classList.contains('open')) drawCard(); }, 30000);
   pubBox.checked = localStorage.getItem('hoqStatsPublic') === '1';
   pubBox.addEventListener('change', () => {
     try { localStorage.setItem('hoqStatsPublic', pubBox.checked ? '1' : '0'); } catch (e) {}
     hoqCloudPush(true);
   });
-  window.__hoqAccount = (s) => {
-    const was = !!window.__hoqAccountUser;
-    st = s || st;
+  nowBox.checked = localStorage.getItem('hoqNowPublic') === '1';
+  nowBox.addEventListener('change', () => {
+    try { localStorage.setItem('hoqNowPublic', nowBox.checked ? '1' : '0'); } catch (e) {}
+    _nowSent = '__changed';   // re-send straight away (or take it down)
+    try { const np = currentNowPlaying(), pr = playerProgress(); hoqNowPush(np.title, np.artist, npPublicUrl('.playbackSoundBadge__titleLink'), np.cover, pr.paused); } catch (e) {}
+  });
+  const render = () => {
+    st = _hoqAcct; card = _hoqCard;
     const u = st.user || {};
-    window.__hoqAccountUser = st.signedIn ? u : null;   // who's signed in, for other features
     pubRow.hidden = !st.signedIn;
-    // Just signed in (or the app started signed in): fetch the account's stats,
-    // which then sends this PC's tally up.
-    if (st.signedIn && !was) { scPost('hoqacct:pull'); scPost('hoqacct:card'); }
-    if (!st.signedIn) card = null;
+    nowRow.hidden = !st.signedIn;
     if (st.busy) {
       name.textContent = 'Finish signing in in your browser…';
       sub.textContent = 'Waiting for holdonquietly.com.';
@@ -5411,7 +5589,8 @@ function setupHoqAccount(sec) {
   pic.addEventListener('error', () => { if (pic.getAttribute('src') !== HOQ_LOGO) { pic.src = HOQ_LOGO; pic.classList.add('is-logo'); } });
   btn.addEventListener('click', () => scPost(st.busy ? 'hoqacct:cancel' : st.signedIn ? 'hoqacct:signout' : 'hoqacct:signin'));
   prof.addEventListener('click', () => { const u = st.user; if (u && u.profile) scPost('open:' + u.profile); });
-  window.__hoqAccount(st);   // draw the signed-out bar (with the logo) until the host answers
+  _hoqAcctViews.push(render);
+  render();   // the current state (signed out + logo until the host answers)
   scPost('hoqacct:status');
 }
 
@@ -5569,6 +5748,20 @@ function rpcTick() {
     pos: pr.pos, dur: pr.dur, paused: pr.paused,
     rp,
   }));
+  hoqNowPush(np.title, np.artist, url, np.cover, pr.paused);
+}
+
+// "Listening now" on the person's holdonquietly profile (Settings switch). Sent on
+// a new song, then every 2 min while it plays (the profile drops it after 6 min
+// without one), and taken down on pause.
+let _nowSent = '', _nowAt = 0;
+function hoqNowPush(title, artist, url, cover, paused) {
+  if (!window.__hoqAccountUser || !hoqHasHost()) return;
+  const playing = localStorage.getItem('hoqNowPublic') === '1' && !!title && !paused;
+  const sig = playing ? title + '|' + url : 'off';
+  if (sig === _nowSent && (sig === 'off' || Date.now() - _nowAt < 120000)) return;
+  _nowSent = sig; _nowAt = Date.now();
+  scPost('hoqacct:now:' + JSON.stringify(playing ? { title, artist, url: hoqSafeUrl(url), cover: hoqSafeUrl(cover) } : { playing: false }));
 }
 
 // ---------------------------------------------------------------------------
@@ -7499,6 +7692,8 @@ function boot() {
   setInterval(() => { try { addQueueButtons(document); } catch (e) {} }, 1200);
   setInterval(() => { try { tuneNowPlayingMarquee(); } catch (e) {} }, 1500);
   setInterval(() => { try { hoqStatsTick(); } catch (e) {} }, 4000);
+  // ask who's signed in to the hoq account at boot (the Settings bar may never open)
+  if (hoqHasHost()) setTimeout(() => scPost('hoqacct:status'), 1200);
   // The player bar appears/disappears with playback, so keep the tab's bottom
   // edge honest while it's open.
   setInterval(() => {
@@ -8022,6 +8217,26 @@ if (document.readyState === 'loading') {
   };
   // Closing the tab stops the music, so take the presence down with it.
   window.addEventListener('pagehide', (e) => { if (!e.persisted) post(JSON.stringify({ title: '' })); });
+})();
+
+/* -------- reverse-proxy build: listening stats -> the desktop app -> hoq account -------- */
+(() => {
+  // The phone counts plays like the app does. Its whole tally goes to the
+  // server every couple of minutes (and on load); the holdonquietly app on the PC
+  // picks it up and adds it to the person's hoq account as this phone's entry.
+  let sent = '';
+  const push = () => {
+    if (document.cookie.indexOf('oauth_token=') < 0) return;
+    let s; try { s = hoqStatsRead(); } catch (e) { return; }
+    const sig = s.device + '|' + s.plays + '|' + s.seconds;
+    if (!s.plays || sig === sent) return;
+    sent = sig;
+    fetch('/__hoq/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign(hoqStatsTrim(s), { source: 'phone' })), credentials: 'same-origin' }).catch(() => { sent = ''; });
+  };
+  setTimeout(push, 15000);
+  setInterval(push, 120000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) push(); });
 })();
 
 /* -------- reverse-proxy build: friends feed over the local hop -------- */

@@ -191,8 +191,43 @@ async function npListen(req, res) {
   res.on('close', () => { clearTimeout(timer); s.waiters.delete(done); });
 }
 
+// Phone listening stats -> the desktop app -> the person's holdonquietly account.
+// The phone counts plays itself (same code as the app); every few minutes it
+// sends its whole tally here, and the desktop app picks it up and saves it to the
+// account as that phone's own entry, so nothing is counted twice.
+// POST /__hoq/stats (phone, cookie)  ·  GET /__hoq/stats (desktop, OAuth header)
+const STATS_MAX = 300 * 1024;
+function statsReport(req, res) {
+  let body = '', dead = false;
+  req.on('data', (c) => { body += c; if (body.length > STATS_MAX && !dead) { dead = true; req.destroy(); } });
+  req.on('end', async () => {
+    if (dead) return;
+    const uid = await whoIs(cookieOf(req.headers.cookie, 'oauth_token'));
+    if (!uid) return send(res, 401, '{"error":"not signed in"}');
+    let d;
+    try { d = JSON.parse(body); } catch (e) { return send(res, 400, '{"error":"bad json"}'); }
+    if (!d || typeof d !== 'object' || typeof d.device !== 'string' || !/^[A-Za-z0-9]{4,40}$/.test(d.device)) return send(res, 400, '{"error":"bad stats"}');
+    const s = slot(uid);
+    s.stats = JSON.stringify(d);
+    s.statsAt = Date.now();
+    send(res, 200, '{"ok":true}');
+  });
+}
+async function statsCollect(req, res) {
+  const auth = String(req.headers.authorization || '');
+  const uid = await whoIs(auth.startsWith('OAuth ') ? auth.slice(6) : '');
+  if (!uid) return send(res, 401, '{"error":"not signed in"}');
+  const s = slot(uid);
+  send(res, 200, '{"at":' + (s.statsAt || 0) + ',"stats":' + (s.stats || 'null') + '}');
+}
+
 http.createServer((req, res) => {
   const path = new URL(req.url, 'http://x').pathname;
+
+  if (path === '/__hoq/stats') {
+    if (req.method === 'POST') return statsReport(req, res);
+    if (req.method === 'GET') return void statsCollect(req, res).catch(() => send(res, 500, '{"error":"failed"}'));
+  }
 
   if (path === '/__hoq/np') {
     if (req.method === 'POST') return npReport(req, res);

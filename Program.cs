@@ -339,6 +339,7 @@ class Program
         _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
         _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
         _ = PhoneNowPlayingLoop();  // the phone's listening, onto the same presence
+        _ = PhoneStatsLoop();       // the phone's play counts, onto the hoq account
         _ = FriendsLoop();          // poll the shared friends backend
         _ = ReadWebhook();          // warm the cache, so a later failed read still has a URL
         _ = FeedLoop();             // poll the community feed
@@ -601,6 +602,48 @@ class Program
     // desktop client, so the phone build reports what it's playing to the proxy
     // (/__hoq/np, proxy/pair-server.js) and this long-polls it as the same
     // SoundCloud account — the server matches the two by whose token each holds.
+    // The phone site's listening stats (it reports its whole tally to the proxy,
+    // keyed by the SoundCloud account) go onto the hoq account as the phone's own
+    // entry, so the totals include phone listening without counting anything twice.
+    static async Task PhoneStatsLoop()
+    {
+        long lastAt = 0;
+        await Task.Delay(20000);
+        while (true)
+        {
+            try
+            {
+                if (HoqAccount.SignedIn)
+                {
+                    string token = await ReadOauthToken();
+                    if (token.Length > 0)
+                    {
+                        using var req = new HttpRequestMessage(HttpMethod.Get, PROXY_ORIGIN + "/__hoq/stats");
+                        req.Headers.TryAddWithoutValidation("Authorization", "OAuth " + token);
+                        using var resp = await http.SendAsync(req);
+                        if (resp.IsSuccessStatusCode)
+                        {
+                            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+                            var r = doc.RootElement;
+                            long at = r.TryGetProperty("at", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetInt64() : 0;
+                            if (at > 0 && at != lastAt && r.TryGetProperty("stats", out var s) && s.ValueKind == JsonValueKind.Object)
+                            {
+                                string dev = Prop(s, "device");
+                                if (System.Text.RegularExpressions.Regex.IsMatch(dev, "^[A-Za-z0-9]{4,40}$"))
+                                {
+                                    string ok = await HoqAccount.Api(HttpMethod.Put, "/api/account/me/appdata/sc-stats:" + dev, "{\"data\":" + s.GetRawText() + "}");
+                                    if (ok != null) { lastAt = at; Log("phone stats -> account (" + PropI(s, "plays") + " plays)"); await HoqStatsPull(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { Log("phone stats: " + ex.GetType().Name); }
+            await Task.Delay(TimeSpan.FromMinutes(5));
+        }
+    }
+
     static async Task PhoneNowPlayingLoop()
     {
         long have = -1;
@@ -676,6 +719,53 @@ class Program
         {
             try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqPlayResult && window.__hoqPlayResult(" + (ok ? "true" : "false") + ",\"" + r + "\")"); } catch { }
         });
+    }
+
+    // Monthly recap image (drawn by the page): post it to the Discord webhook, or
+    // save it to Pictures\holdonquietly. The page gets __hoqRecapResult(ok, text).
+    static async Task RecapImage(string json, bool share)
+    {
+        string result;
+        bool ok = false;
+        try
+        {
+            var r = JsonDocument.Parse(json).RootElement;
+            string data = Prop(r, "png"), month = Prop(r, "month"), caption = Prop(r, "caption");
+            if (!data.StartsWith("data:image/png;base64,")) throw new InvalidDataException("not a png");
+            byte[] png = Convert.FromBase64String(data.Substring(22));
+            if (png.Length > 8 * 1024 * 1024) throw new InvalidDataException("too big");
+            string safeMonth = new string(month.Where(c => char.IsAsciiLetterOrDigit(c) || c == '-').ToArray());
+            if (safeMonth.Length == 0) safeMonth = DateTime.Now.ToString("yyyy-MM");
+            if (share)
+            {
+                string wh = await ReadWebhook();
+                if (string.IsNullOrEmpty(wh) || !wh.StartsWith("http")) result = "No Discord webhook set (Settings → Discord webhook)";
+                else
+                {
+                    using var form = new MultipartFormDataContent();
+                    form.Add(new StringContent(JsonSerializer.Serialize(new { content = caption.Length > 0 ? caption[..Math.Min(caption.Length, 300)] : "my month on holdonquietly" }), Encoding.UTF8, "application/json"), "payload_json");
+                    var file = new ByteArrayContent(png);
+                    file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+                    form.Add(file, "files[0]", "recap-" + safeMonth + ".png");
+                    using var resp = await http.PostAsync(wh, form);
+                    ok = resp.IsSuccessStatusCode;
+                    result = ok ? "Shared to Discord" : "Discord said " + (int)resp.StatusCode;
+                }
+            }
+            else
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "holdonquietly");
+                Directory.CreateDirectory(dir);
+                string path = Path.Combine(dir, "recap-" + safeMonth + ".png");
+                await File.WriteAllBytesAsync(path, png);
+                System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + path + "\"");
+                ok = true;
+                result = "Saved to Pictures\\holdonquietly";
+            }
+        }
+        catch (Exception ex) { result = "Couldn't " + (share ? "share" : "save") + " it"; Log("recap: " + ex.GetType().Name + " " + ex.Message); }
+        string js = "window.__hoqRecapResult && window.__hoqRecapResult(" + (ok ? "true" : "false") + "," + JsonSerializer.Serialize(result) + ")";
+        await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
     }
 
     static async Task PostWebhook(string json, bool play = false)
@@ -1112,6 +1202,9 @@ class Program
         if (m != null && m.StartsWith("hoqacct:stats:")) { _ = HoqStatsPush(m.Substring(14)); return; }
         if (m == "hoqacct:pull") { _ = HoqStatsPull(); return; }
         if (m == "hoqacct:card") { _ = HoqCardPull(); return; }
+        if (m != null && m.StartsWith("recap:share:")) { _ = RecapImage(m.Substring(12), true); return; }
+        if (m != null && m.StartsWith("recap:save:")) { _ = RecapImage(m.Substring(11), false); return; }
+        if (m != null && m.StartsWith("hoqacct:now:")) { _ = HoqAccount.Api(HttpMethod.Put, "/api/account/me/now", JsonOrNull(m.Substring(12))); return; }
         if (m == "hoqacct:signin") { _ = HoqAccount.SignIn(); return; }
         if (m == "hoqacct:cancel") { HoqAccount.CancelSignIn(); return; }
         if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }
