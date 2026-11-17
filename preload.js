@@ -1086,7 +1086,6 @@ const BASE_CSS = `
   html.hoq-no-glow .fullHero__title, html.hoq-no-glow .soundTitle__title,
   html.hoq-no-glow .mixedSelectionModule__titleText, html.hoq-no-glow .lazyLoadingList__header,
   html.hoq-no-glow .sectionHead__title { text-shadow: none !important; }
-  html.hoq-no-glow .collectionNav.g-tabs .active a { box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important; }
   /* Grayscale covers ON (opt-in) */
   html.hoq-gray .image span, html.hoq-gray .sc-artwork, html.hoq-gray .sound__coverArt span,
   html.hoq-gray .fullHero__artwork span, html.hoq-gray .playableTile__image span { filter: grayscale(1) !important; }
@@ -1654,7 +1653,7 @@ const BASE_CSS = `
   /* ===== 3D lift on tab bars (profile tabs + library/collection nav) =====
      JS tilts the hovered tab toward the cursor; CSS gives it a lit accent lift.
      Gated by the "3D tab bars" toggle (html.hoq-no-tabtilt) and Low-end mode. */
-  .userInfoBar__tabs .profileTabs, .l-nav .collectionNav.g-tabs { perspective: 900px; }
+  .userInfoBar__tabs .profileTabs { perspective: 900px; }
   .userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link {
     transform-style: preserve-3d;
     transition: transform .16s cubic-bezier(.2,.7,.2,1), background .14s ease, color .14s ease, box-shadow .18s ease !important; }
@@ -1698,48 +1697,59 @@ const BASE_CSS = `
   /* settings note line */
   #sc-palette .pal-note { font-size: 11px; color: #8a8a90; line-height: 1.35; margin: 2px 2px 6px; }
 
-  .collectionNav.g-tabs {
-    display: flex !important; flex-direction: column !important;
-    align-items: stretch !important; gap: 3px !important;
-    background: rgba(12,12,16,0.42) !important; border: 1px solid rgba(255,255,255,0.10) !important;
-    border-radius: 14px !important; padding: 8px !important;
-    overflow: visible !important; box-sizing: border-box !important;
-    backdrop-filter: blur(24px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
-    box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
+  /* ===== Library side nav: quiet list with icons (v1.6.2) =====
+     One look for every state: muted text + icon, soft hover, accent-tinted pick.
+     No glow, no 3D lift, no frosted box (the page is already the blurred cover). */
+  .collectionNav.g-tabs, .l-nav .collectionNav.g-tabs {
+    display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 2px !important;
+    background: rgba(255,255,255,0.035) !important; border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 14px !important; padding: 6px !important; overflow: visible !important; box-sizing: border-box !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; perspective: none !important;
   }
   .collectionNav.g-tabs li, .collectionNav.g-tabs .g-tabs-item {
     display: block !important; width: 100% !important; max-width: 100% !important;
-    margin: 0 !important; border: 0 !important; box-sizing: border-box !important;
+    margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: border-box !important;
   }
-  /* Kill SoundCloud's horizontal active-underline indicator (stray line when vertical) */
-  .collectionNav.g-tabs a::before, .collectionNav.g-tabs a::after,
-  .collectionNav.g-tabs li::before, .collectionNav.g-tabs li::after,
+  /* Overview on its own, then the rest */
+  .collectionNav.g-tabs .networkTabs__library { padding-bottom: 6px !important; margin-bottom: 4px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important; }
+  .collectionNav.g-tabs a::after, .collectionNav.g-tabs li::before, .collectionNav.g-tabs li::after,
   .collectionNav.g-tabs .active::after { display: none !important; content: none !important; }
-  .collectionNav.g-tabs a {
-    display: block !important; width: 100% !important; max-width: 100% !important; text-align: left !important;
-    padding: 10px 14px !important; border-radius: 9px !important; border: 0 !important;
-    box-sizing: border-box !important; color: #b7b7ba !important;
-    font-weight: 600 !important; font-size: 14px !important;
-    box-shadow: none !important; transition: background .12s ease, color .12s ease !important;
+  .collectionNav.g-tabs a, .collectionNav.g-tabs a.g-tabs-link {
+    display: flex !important; align-items: center !important; gap: 11px !important;
+    width: 100% !important; height: 36px !important; padding: 0 12px !important; margin: 0 !important;
+    border: 0 !important; border-radius: 9px !important; box-sizing: border-box !important; text-align: left !important;
+    color: #a6a6b0 !important; font-size: 13.5px !important; font-weight: 500 !important; letter-spacing: 0 !important;
+    background: transparent !important; box-shadow: none !important; text-shadow: none !important; transform: none !important;
+    transition: background .14s ease, color .14s ease !important;
   }
-  .collectionNav.g-tabs a:hover {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 10%, rgba(255,255,255,0.05)) !important;
-    color: #fff !important;
-    box-shadow: 0 0 13px color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
+  .collectionNav.g-tabs a::before {
+    content: '' !important; display: block !important; position: static !important; flex: 0 0 18px !important;
+    width: 18px !important; height: 18px !important; border: 0 !important; background: currentColor !important; opacity: .75;
+    -webkit-mask: var(--hoq-ni) center / 18px 18px no-repeat; mask: var(--hoq-ni) center / 18px 18px no-repeat;
+    transition: opacity .14s ease, background .14s ease !important;
   }
-  /* Selected item: ONE clear indicator instead of bg + border + inset bar +
-     outer glow + text glow all stacked (which read as boxy). A soft accent
-     wash, the left accent bar, and accent text — nothing else. */
+  .collectionNav.g-tabs a:hover { background: rgba(255,255,255,0.06) !important; color: #f2f2f5 !important; box-shadow: none !important; }
+  .collectionNav.g-tabs a:hover::before { opacity: 1; }
   .collectionNav.g-tabs .active a, .collectionNav.g-tabs a.active,
-  .collectionNav.g-tabs li.active a, .collectionNav.g-tabs [aria-current] a,
-  .collectionNav.g-tabs a[aria-current] {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
-    color: color-mix(in srgb, var(--sc-accent, #ff5500) 70%, #ffffff) !important;
-    font-weight: 700 !important; border: 0 !important;
-    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important;
-    text-shadow: none !important;
+  .collectionNav.g-tabs li.active a, .collectionNav.g-tabs [aria-current] a, .collectionNav.g-tabs a[aria-current],
+  html.hoq-no-glow .collectionNav.g-tabs .active a, html.hoq-no-glow .collectionNav.g-tabs a.active {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 16%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #ffffff) !important;
+    font-weight: 600 !important; border: 0 !important; text-shadow: none !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 30%, transparent) !important;
   }
+  .collectionNav.g-tabs a.active::before, .collectionNav.g-tabs .active a::before {
+    background: var(--sc-accent, #ff5500) !important; opacity: 1; }
+  .collectionNav.g-tabs .networkTabs__library a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Crect%20x%3D%273.5%27%20y%3D%273.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3Crect%20x%3D%2713.5%27%20y%3D%273.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3Crect%20x%3D%273.5%27%20y%3D%2713.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3Crect%20x%3D%2713.5%27%20y%3D%2713.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__likes a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%2020s-7.5-4.6-7.5-10.2A4.3%204.3%200%200%201%2012%207.2a4.3%204.3%200%200%201%207.5%202.6C19.5%2015.4%2012%2020%2012%2020z%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__sets a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%206h11M4%2011h11M4%2016h7%27%2F%3E%3Ccircle%20cx%3D%2716.5%27%20cy%3D%2717%27%20r%3D%272.5%27%2F%3E%3Cpath%20d%3D%27M19%2017V8.5l2%20.8%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__albums a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%278.5%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%272.5%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__stations a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%271.8%27%2F%3E%3Cpath%20d%3D%27M8.2%208.2a5.4%205.4%200%200%200%200%207.6M15.8%208.2a5.4%205.4%200%200%201%200%207.6M5.4%205.4a9.3%209.3%200%200%200%200%2013.2M18.6%205.4a9.3%209.3%200%200%201%200%2013.2%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__following a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%279%27%20cy%3D%278%27%20r%3D%273.5%27%2F%3E%3Cpath%20d%3D%27M2.5%2020a6.5%206.5%200%200%201%2013%200M16%204.6a3.5%203.5%200%200%201%200%206.8M18.2%2014.2A6.5%206.5%200%200%201%2021.5%2020%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__purchases a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M5%208h14l-1.2%2012H6.2z%27%2F%3E%3Cpath%20d%3D%27M9%208V6.5a3%203%200%200%201%206%200V8%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__history a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%278.5%27%2F%3E%3Cpath%20d%3D%27M12%207.5V12l3%202%27%2F%3E%3C%2Fsvg%3E"); }
+  html.hoq-lowend .collectionNav.g-tabs { background: rgba(16,16,20,0.98) !important; }
 
   /* ===== Library "Filter" input — themed field with accent focus glow ===== */
   .textfield__inputWrapper .textfield__input, .collectionSection .textfield__input {
@@ -7256,7 +7266,7 @@ function setupMiniMode() {
 // with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
 // it survives SoundCloud's re-renders; gated by the "3D tab bars" toggle.
 function setupTabTilt() {
-  const SEL = '.userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link';
+  const SEL = '.userInfoBar__tabs .g-tabs-link';
   const MAX_Y = 12, MAX_X = 7, LIFT = 12;
   let cur = null, px = 0, py = 0, raf = 0;
   const reset = (t) => { if (!t) return; t.style.transform = ''; t.style.transition = 'transform .3s ease'; t.classList.remove('hoq-tt'); };
