@@ -4069,6 +4069,12 @@ function ensureDiscordPanel() {
 
       /* listening stats */
       #hoq-discord .hoq-stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+      #hoq-discord .hoq-stat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      #hoq-discord .hoq-stat-range { display: inline-flex; padding: 2px; border-radius: 999px; background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08); letter-spacing: normal; text-transform: none; }
+      #hoq-discord .hoq-stat-range button { border: 0; background: none; color: #a9a9b2; font-size: 11px; font-weight: 700;
+        padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+      #hoq-discord .hoq-stat-range button.hoq-on { background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-stat { background: rgba(12,12,14,0.55); backdrop-filter: blur(20px) saturate(1.3);
         border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; padding: 12px 13px;
         display: flex; flex-direction: column; gap: 2px; }
@@ -4482,12 +4488,12 @@ function ensureDiscordPanel() {
         <div class="hoq-settings-host"></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
-        <div class="hoq-dc-label">Listening stats</div>
+        <div class="hoq-dc-label hoq-stat-head">Listening stats<span class="hoq-stat-range"><button type="button" data-r="all">All time</button><button type="button" data-r="30">30 days</button></span></div>
         <div class="hoq-stat-row">
           <div class="hoq-stat"><b class="hoq-stat-plays">0</b><span>Tracks played</span></div>
           <div class="hoq-stat"><b class="hoq-stat-time">0m</b><span>Time listened</span></div>
           <div class="hoq-stat"><b class="hoq-stat-uniq">0</b><span>Different tracks</span></div>
-          <div class="hoq-stat"><b class="hoq-stat-since">&mdash;</b><span>Counting since</span></div>
+          <div class="hoq-stat"><b class="hoq-stat-since">&mdash;</b><span class="hoq-stat-since-l">Counting since</span></div>
         </div>
         <div class="hoq-stat-cols">
           <div><div class="hoq-dc-label">Top artists</div><ol class="hoq-top hoq-top-artists"></ol></div>
@@ -4592,6 +4598,10 @@ function ensureDiscordPanel() {
       }
     });
   });
+  p.querySelectorAll('.hoq-stat-range button').forEach((b) => b.addEventListener('click', () => {
+    try { localStorage.setItem('hoqStatsRange', b.dataset.r); } catch (e) {}
+    renderHoqStats();
+  }));
   const reset = p.querySelector('.hoq-stat-reset');
   if (reset) reset.addEventListener('click', () => {
     // Resets THIS PC's count (same device id, so the account copy is zeroed too
@@ -4608,7 +4618,7 @@ function ensureDiscordPanel() {
   name.addEventListener('change', () => localStorage.setItem('hoqDiscord', name.value.trim()));
   sc.addEventListener('change', () => localStorage.setItem('hoqSC', sc.value.trim()));
   p.querySelector('.hoq-dc-friends').innerHTML =
-    '<div class="hoq-dc-hint">No one else is sharing yet. A shared friends feed (everyone\'s now-playing here) needs a small shared server — say the word and I\'ll set it up.</div>';
+    '<div class="hoq-dc-hint">Checking who\'s listening…</div>';
   p.querySelector('.hoq-dc-open').addEventListener('click', () => scPost('open:https://discord.com/channels/' + HOQ_SERVER));
 
   // Last.fm connect/disconnect (auth + scrobbling handled in the C# host).
@@ -4773,8 +4783,29 @@ function hoqStatsAdd(a, b) {
   };
   addInto(out.artists, b.artists);
   addInto(out.tracks, b.tracks);
+  // per-day counts, merged day by day (for the 30-day view)
+  out.days = {};
+  for (const src of [a.days, b.days]) {
+    for (const k in (src || {})) {
+      const d = src[k] || {};
+      const o = out.days[k] || (out.days[k] = { plays: 0, seconds: 0, artists: {}, tracks: {} });
+      o.plays += +d.plays || 0; o.seconds += +d.seconds || 0;
+      addInto(o.artists, d.artists); addInto(o.tracks, d.tracks);
+    }
+  }
   if (!isFinite(out.since)) out.since = Date.now();
   return out;
+}
+// "2026-11-17" in local time
+function hoqDayKey(t) { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// Just the last n days (today included), built from the per-day counts.
+function hoqStatsWindow(s, n) {
+  const from = hoqDayKey(Date.now() - (n - 1) * 86400000);
+  let w = { plays: 0, seconds: 0, artists: {}, tracks: {} };
+  for (const k in (s.days || {})) if (k >= from) w = hoqStatsAdd(w, s.days[k]);
+  const p = from.split('-');
+  w.since = new Date(+p[0], +p[1] - 1, +p[2]).getTime();
+  return w;
 }
 function hoqStatsCloud() { try { return JSON.parse(localStorage.getItem('hoqStatsCloud')) || null; } catch (e) { return null; } }
 function hoqStatsShown() {
@@ -4784,7 +4815,12 @@ function hoqStatsShown() {
 // Keeps one PC's upload well under the account's 256 KB per key.
 function hoqStatsTrim(s) {
   const top = (o, n) => Object.fromEntries(Object.entries(o || {}).sort((x, y) => y[1] - x[1]).slice(0, n).map(([k, v]) => [String(k).slice(0, 200), v]));
-  return { plays: s.plays, seconds: s.seconds, since: s.since, device: s.device, artists: top(s.artists, 1500), tracks: top(s.tracks, 2500) };
+  const days = {};
+  for (const k in (s.days || {})) {
+    const d = s.days[k];
+    days[k] = { plays: d.plays || 0, seconds: d.seconds || 0, artists: top(d.artists, 120), tracks: top(d.tracks, 150) };
+  }
+  return { plays: s.plays, seconds: s.seconds, since: s.since, device: s.device, artists: top(s.artists, 1200), tracks: top(s.tracks, 2000), days };
 }
 function hoqStatsCard(s) {
   const best = (o) => { let b = null; for (const k in o) if (b === null || o[k] > o[b]) b = k; return b; };
@@ -4838,9 +4874,11 @@ function hoqStatsTick() {
   const pr = playerProgress();
   const s = hoqStatsRead();
   const now = Date.now();
+  let addSec = 0;
   if (!pr.paused && np.title) {
     // Cap the delta so a backgrounded app or a long pause can't bank hours.
-    if (_statsLastTick) s.seconds += Math.min(15, Math.round((now - _statsLastTick) / 1000));
+    if (_statsLastTick) addSec = Math.min(15, Math.round((now - _statsLastTick) / 1000));
+    s.seconds += addSec;
     _statsLastTick = now;
   } else {
     _statsLastTick = 0;
@@ -4848,13 +4886,31 @@ function hoqStatsTick() {
   // The last counted title is kept with the stats, so a restart or reload with the
   // same song still loaded isn't counted as another play.
   if (!_statsTitle && s.last) _statsTitle = s.last;
+  // Per-day counts too (local date), for the "30 days" view. Only the last 35
+  // days are kept; the all-time totals above are separate and never trimmed.
+  const dk = hoqDayKey(now);
+  if (!s.days) {
+    // Stats from before per-day counting: if they all started today, they all
+    // belong to today; anything older can't be placed and stays all-time only.
+    s.days = {};
+    if (s.since && hoqDayKey(s.since) === dk && s.plays) {
+      s.days[dk] = { plays: s.plays, seconds: s.seconds, artists: Object.assign({}, s.artists), tracks: Object.assign({}, s.tracks) };
+    }
+  }
+  const day = s.days[dk] || (s.days[dk] = { plays: 0, seconds: 0, artists: {}, tracks: {} });
+  day.seconds += addSec;
   if (np.title && np.title !== _statsTitle) {
     _statsTitle = np.title;
     s.last = np.title;
     s.plays++;
     s.tracks[np.title] = (s.tracks[np.title] || 0) + 1;
     if (np.artist) s.artists[np.artist] = (s.artists[np.artist] || 0) + 1;
+    day.plays++;
+    day.tracks[np.title] = (day.tracks[np.title] || 0) + 1;
+    if (np.artist) day.artists[np.artist] = (day.artists[np.artist] || 0) + 1;
   }
+  const cutoff = hoqDayKey(now - 35 * 86400000);
+  for (const k in s.days) if (k < cutoff) delete s.days[k];
   hoqStatsWrite(s);
 }
 
@@ -4867,8 +4923,13 @@ function hoqFmtDur(sec) {
 function renderHoqStats() {
   const p = document.getElementById('hoq-discord');
   if (!p || !p.classList.contains('open')) return;
-  const s = hoqStatsShown();
+  // "All time" or "30 days" (the switch in the Listening stats header)
+  const range = localStorage.getItem('hoqStatsRange') === '30' ? '30' : 'all';
+  p.querySelectorAll('.hoq-stat-range button').forEach((b) => b.classList.toggle('hoq-on', b.dataset.r === range));
+  const all = hoqStatsShown();
+  const s = range === '30' ? hoqStatsWindow(all, 30) : all;
   const set = (sel, v) => { const el = p.querySelector(sel); if (el) el.textContent = v; };
+  set('.hoq-stat-since-l', range === '30' ? 'Since' : 'Counting since');
   set('.hoq-stat-plays', s.plays.toLocaleString());
   set('.hoq-stat-time', hoqFmtDur(s.seconds));
   set('.hoq-stat-uniq', Object.keys(s.tracks).length.toLocaleString());
