@@ -4509,53 +4509,66 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-pair-btn { flex: none; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer;
         font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-pair-btn:hover { filter: brightness(1.1); }
-      /* Account bar: full width at the top of Settings, its own label hidden
-         (the bar names itself). */
       #hoq-discord .hoq-hoq-sec > .hoq-dc-label { display: none; }
-      #hoq-discord .hoq-hoq-bar { position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px; padding: 14px 16px;
-        margin-bottom: 6px; border-radius: 14px;
-        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 28%, rgba(255,255,255,0.08));
-        background: linear-gradient(100deg, color-mix(in srgb, var(--sc-accent,#ff5500) 16%, rgba(12,12,14,0.6)), rgba(12,12,14,0.55) 60%); }
+      /* Account card: picture | who + stats | buttons, profile switches as a
+         footer row. One quiet card: no rings, no boxed chips, no glow. */
+      #hoq-discord .hoq-hoq-bar { position: relative; overflow: hidden; display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px;
+        padding: 14px 16px; margin-bottom: 6px; border-radius: 14px;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
       #hoq-discord .hoq-hoq-bar > :not(.hoq-hoq-banner) { position: relative; z-index: 1; }
-      /* Signed in: the person's hoq profile banner (or their profile colours)
-         behind the card, darkened on the text side so it always reads. */
+      /* their banner / page background / blurred picture, kept dim so text reads */
       #hoq-discord .hoq-hoq-banner { position: absolute; inset: 0; z-index: 0; opacity: 0; transition: opacity .4s ease;
         background-size: cover; background-position: center; }
-      /* no banner: their picture, blurred big behind the card */
-      #hoq-discord .hoq-hoq-banner.is-blur { inset: -40px; filter: blur(28px) saturate(1.5) brightness(0.9); transform: scale(1.15); }
+      #hoq-discord .hoq-hoq-banner.is-blur { inset: -40px; filter: blur(30px) saturate(1.4); transform: scale(1.15); }
       #hoq-discord .hoq-hoq-banner::after { content: ''; position: absolute; inset: 0;
-        background: linear-gradient(90deg, rgba(10,10,12,0.88) 0%, rgba(10,10,12,0.66) 50%, rgba(10,10,12,0.4) 100%); }
-      #hoq-discord .hoq-hoq-bar.has-card { padding: 18px 20px; align-items: center; }
+        background: linear-gradient(90deg, rgba(12,12,15,0.9) 0%, rgba(12,12,15,0.78) 55%, rgba(12,12,15,0.6) 100%); }
       #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-banner { opacity: 1; }
-      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-pic { width: 72px; height: 72px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent), 0 8px 22px rgba(0,0,0,.45); }
-      #hoq-discord .hoq-hoq-line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
-      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-name { font-size: 18px; }
-      #hoq-discord .hoq-hoq-badges { display: flex; flex-wrap: wrap; gap: 5px; }
-      #hoq-discord .hoq-hoq-badge { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
-        padding: 2px 8px; border-radius: 999px; color: #fff;
-        background: color-mix(in srgb, var(--sc-accent,#ff5500) 30%, rgba(255,255,255,0.06));
-        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent); }
-      #hoq-discord .hoq-hoq-bio { font-size: 13px; color: #e4e4e8; max-width: 640px; overflow: hidden;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-      #hoq-discord .hoq-hoq-bio[hidden], #hoq-discord .hoq-hoq-mini[hidden] { display: none; }
-      #hoq-discord .hoq-hoq-mini { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
-      #hoq-discord .hoq-hoq-chip { font-size: 11.5px; color: #dcdce2; padding: 3px 9px; border-radius: 8px;
-        background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08); }
-      #hoq-discord .hoq-hoq-chip b { color: var(--sc-accent,#ff5500); font-weight: 800; }
-      #hoq-discord .hoq-hoq-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
-      #hoq-discord .hoq-hoq-name { font-size: 14px; color: #fff; }
-      #hoq-discord .hoq-hoq-sub { font-style: normal; font-size: 12px; color: #a9a9b2; }
-      #hoq-discord .hoq-hoq-btns { display: flex; gap: 8px; flex: none; }
-      #hoq-discord .hoq-hoq-pub { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 12px;
-        color: #c9c9d2; cursor: pointer; width: fit-content; }
-      #hoq-discord .hoq-hoq-pub[hidden] { display: none; }
-      #hoq-discord .hoq-hoq-pubs { display: flex; flex-wrap: wrap; gap: 4px 18px; }
-      #hoq-discord .hoq-hoq-pub input { accent-color: var(--sc-accent,#ff5500); margin: 0; cursor: pointer; }
-      #hoq-discord .hoq-hoq-pic { flex: none; width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
-        background: rgba(255,255,255,0.06);
-        box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
-      #hoq-discord .hoq-hoq-pic.is-logo { object-fit: contain; padding: 7px; box-sizing: border-box; }
-      #hoq-discord .hoq-hoq-sub.is-bad { color: #ff8a7a; }
+      #hoq-discord .hoq-hoq-pic { width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+        background: rgba(255,255,255,0.06); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+      #hoq-discord .hoq-hoq-pic.is-logo { object-fit: contain; padding: 9px; box-sizing: border-box; box-shadow: none; }
+      #hoq-discord .hoq-hoq-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      #hoq-discord .hoq-hoq-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      #hoq-discord .hoq-hoq-name { font-size: 15px; font-weight: 650; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-badges { display: flex; gap: 4px; flex: none; }
+      #hoq-discord .hoq-hoq-badge { font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px;
+        color: #d4d4dc; background: rgba(255,255,255,0.09); white-space: nowrap; }
+      #hoq-discord .hoq-hoq-badge:first-child { color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, #fff);
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 18%, transparent); }
+      #hoq-discord .hoq-hoq-sub { font-style: normal; font-size: 12px; color: #8e8e99; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-sub.is-bad { color: #ff8a7a; white-space: normal; }
+      #hoq-discord .hoq-hoq-bio { font-size: 12.5px; color: #d6d6dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-bio[hidden], #hoq-discord .hoq-hoq-mini[hidden], #hoq-discord .hoq-hoq-pub[hidden] { display: none; }
+      /* stats: one line of text, numbers bright, dot-separated */
+      #hoq-discord .hoq-hoq-mini { display: flex; min-width: 0; margin-top: 2px; font-size: 12px; color: #8e8e99;
+        white-space: nowrap; overflow: hidden; }
+      #hoq-discord .hoq-hoq-chip { flex: none; }
+      #hoq-discord .hoq-hoq-chip:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-chip + .hoq-hoq-chip::before { content: '·'; margin: 0 7px; color: #5c5c66; }
+      #hoq-discord .hoq-hoq-chip b { color: #f0f0f4; font-weight: 600; }
+      #hoq-discord .hoq-hoq-btns { display: flex; gap: 6px; }
+      #hoq-discord .hoq-hoq-btns button { height: 30px; padding: 0 13px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+      #hoq-discord .hoq-hoq-bar.is-in .hoq-hoq-btn { background: transparent; color: #c9c9d2;
+        border: 1px solid rgba(255,255,255,0.14); }
+      #hoq-discord .hoq-hoq-bar.is-in .hoq-hoq-btn:hover { color: #fff; border-color: rgba(255,255,255,0.28); filter: none; }
+      /* "On my profile" footer: two small toggle pills */
+      #hoq-discord .hoq-hoq-pubs { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+        margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 11.5px; color: #7d7d88; }
+      #hoq-discord .hoq-hoq-pubs:not(:has(.hoq-hoq-pub:not([hidden]))) { display: none; }
+      #hoq-discord .hoq-hoq-pubs > span { margin-right: 4px; }
+      #hoq-discord .hoq-hoq-pub { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+        border-radius: 99px; background: rgba(255,255,255,0.06); color: #b4b4be; cursor: pointer; user-select: none;
+        transition: background .14s ease, color .14s ease; }
+      #hoq-discord .hoq-hoq-pub:hover { background: rgba(255,255,255,0.1); color: #fff; }
+      #hoq-discord .hoq-hoq-pub input { position: absolute; opacity: 0; pointer-events: none; }
+      #hoq-discord .hoq-hoq-pub::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #5c5c66; transition: background .14s ease; }
+      #hoq-discord .hoq-hoq-pub:has(input:checked) { background: color-mix(in srgb, var(--sc-accent,#ff5500) 16%, transparent);
+        color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, #fff); }
+      #hoq-discord .hoq-hoq-pub:has(input:checked)::before { background: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-hoq-pub:has(input:focus-visible) { outline: 2px solid var(--sc-accent,#ff5500); outline-offset: 2px; }
+      #hoq-discord .hoq-hoq-sec { container-type: inline-size; }
+      @container (max-width: 520px) { #hoq-discord .hoq-hoq-bar { grid-template-columns: auto minmax(0, 1fr); }
+        #hoq-discord .hoq-hoq-btns { grid-column: 1 / -1; margin-top: 10px; } }
       #hoq-discord .hoq-pair-linkbtn { flex: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
         padding: 8px 15px; cursor: pointer; font-weight: 700; font-size: 12px;
         background: rgba(255,255,255,0.05); color: #e4e4e6; }
@@ -4655,11 +4668,17 @@ function ensureDiscordPanel() {
         <div class="hoq-hoq-bar">
           <div class="hoq-hoq-banner"></div>
           <img class="hoq-hoq-pic" alt="">
-          <span class="hoq-hoq-text"><span class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></span><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><span class="hoq-hoq-bio" hidden></span><span class="hoq-hoq-mini" hidden></span><span class="hoq-hoq-pubs"><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my profile</label><label class="hoq-hoq-pub hoq-hoq-nowpub" hidden><input type="checkbox"> Show what I'm playing on my profile</label></span></span>
-          <span class="hoq-hoq-btns">
+          <div class="hoq-hoq-text">
+            <div class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></div>
+            <em class="hoq-hoq-sub">Not signed in · keeps your listening stats and settings with you</em>
+            <span class="hoq-hoq-bio" hidden></span>
+            <span class="hoq-hoq-mini" hidden></span>
+          </div>
+          <div class="hoq-hoq-btns">
             <button class="hoq-pair-linkbtn hoq-hoq-profile" type="button" hidden>Profile</button>
             <button class="hoq-pair-btn hoq-hoq-btn" type="button">Sign in</button>
-          </span>
+          </div>
+          <div class="hoq-hoq-pubs"><span>On my profile</span><label class="hoq-hoq-pub" hidden title="Show my listening stats on my profile"><input type="checkbox">Listening stats</label><label class="hoq-hoq-pub hoq-hoq-nowpub" hidden title="Show what I'm playing on my profile"><input type="checkbox">Now playing</label></div>
         </div>
       </div>
       <div class="hoq-dc-sec">
@@ -5700,7 +5719,7 @@ function setupHoqAccount(sec) {
       const parts = ['@' + (c.username || u.username || '')];
       if (c.created_at) parts.push('joined ' + fmtMonth(c.created_at));
       if (typeof c.friend_count === 'number') parts.push(c.friend_count + (c.friend_count === 1 ? ' friend' : ' friends'));
-      if (typeof c.views === 'number') parts.push(c.views.toLocaleString() + ' profile views');
+      if (typeof c.views === 'number') parts.push(c.views.toLocaleString() + (c.views === 1 ? ' view' : ' views'));
       if (!c.profile_public) parts.push('profile is private');
       sub.textContent = parts.join(' · ');
       const moodTxt = c.mood && c.mood.text ? (c.mood.face ? c.mood.face + ' ' : '') + 'mood: ' + c.mood.text : '';
@@ -5713,6 +5732,7 @@ function setupHoqAccount(sec) {
       const all = hoqStatsShown(), m = hoqStatsWindow(all, 30);
       const chip = (n, l) => '<span class="hoq-hoq-chip"><b>' + hoqEsc(n) + '</b> ' + hoqEsc(l) + '</span>';
       const chips = [chip(all.plays.toLocaleString(), 'plays'), chip(hoqFmtDur(all.seconds), 'listened'), chip(m.plays.toLocaleString(), 'this month')];
+      // (top artist goes last: it's the one that gets cut short if space runs out)
       const ta = best(m.artists) || best(all.artists);
       if (ta) chips.push(chip(ta, m.plays ? 'top this month' : 'top artist'));
       mini.innerHTML = chips.join('');
@@ -5751,6 +5771,7 @@ function setupHoqAccount(sec) {
     }
     sub.classList.toggle('is-bad', !!st.note && !st.busy && !st.signedIn);
     prof.hidden = !(st.signedIn && u.profile);
+    bar.classList.toggle('is-in', !!st.signedIn);
     // Their picture when signed in, else the hoq logo — the bar never has a hole.
     const src = st.signedIn && hoqSafeUrl(u.picture) ? hoqSafeUrl(u.picture) : HOQ_LOGO;
     pic.classList.toggle('is-logo', src === HOQ_LOGO);
