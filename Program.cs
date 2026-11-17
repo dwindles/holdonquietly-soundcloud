@@ -811,6 +811,13 @@ class Program
         }
         catch (Exception ex) { Log("stats push failed: " + ex.GetType().Name); }
     }
+    // The signed-in person's profile card (banner, colours, bio, badges...) for Settings.
+    static async Task HoqCardPull()
+    {
+        string body = await HoqAccount.Api(HttpMethod.Get, "/api/account/me/card");
+        if (body == null) return;
+        HoqAccount.RunJs?.Invoke("window.__hoqAccountCard && window.__hoqAccountCard(" + JsonOrNull(body) + ")");
+    }
     static async Task HoqStatsPull()
     {
         string body = await HoqAccount.Api(HttpMethod.Get, "/api/account/me/appdata");
@@ -1104,6 +1111,7 @@ class Program
         if (m == "hoqacct:status") { HoqAccount.Status(); return; }
         if (m != null && m.StartsWith("hoqacct:stats:")) { _ = HoqStatsPush(m.Substring(14)); return; }
         if (m == "hoqacct:pull") { _ = HoqStatsPull(); return; }
+        if (m == "hoqacct:card") { _ = HoqCardPull(); return; }
         if (m == "hoqacct:signin") { _ = HoqAccount.SignIn(); return; }
         if (m == "hoqacct:cancel") { HoqAccount.CancelSignIn(); return; }
         if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }

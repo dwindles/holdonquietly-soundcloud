@@ -4299,11 +4299,34 @@ function ensureDiscordPanel() {
       /* Account bar: full width at the top of Settings, its own label hidden
          (the bar names itself). */
       #hoq-discord .hoq-hoq-sec > .hoq-dc-label { display: none; }
-      #hoq-discord .hoq-hoq-bar { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+      #hoq-discord .hoq-hoq-bar { position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px; padding: 14px 16px;
         margin-bottom: 6px; border-radius: 14px;
         border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 28%, rgba(255,255,255,0.08));
-        background: linear-gradient(100deg, color-mix(in srgb, var(--sc-accent,#ff5500) 16%, rgba(12,12,14,0.6)), rgba(12,12,14,0.55) 60%);
-        backdrop-filter: blur(20px) saturate(1.3); }
+        background: linear-gradient(100deg, color-mix(in srgb, var(--sc-accent,#ff5500) 16%, rgba(12,12,14,0.6)), rgba(12,12,14,0.55) 60%); }
+      #hoq-discord .hoq-hoq-bar > :not(.hoq-hoq-banner) { position: relative; z-index: 1; }
+      /* Signed in: the person's hoq profile banner (or their profile colours)
+         behind the card, darkened on the text side so it always reads. */
+      #hoq-discord .hoq-hoq-banner { position: absolute; inset: 0; z-index: 0; opacity: 0; transition: opacity .4s ease;
+        background-size: cover; background-position: center; }
+      #hoq-discord .hoq-hoq-banner::after { content: ''; position: absolute; inset: 0;
+        background: linear-gradient(90deg, rgba(10,10,12,0.88) 0%, rgba(10,10,12,0.66) 50%, rgba(10,10,12,0.4) 100%); }
+      #hoq-discord .hoq-hoq-bar.has-card { padding: 18px 20px; align-items: center; }
+      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-banner { opacity: 1; }
+      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-pic { width: 72px; height: 72px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent), 0 8px 22px rgba(0,0,0,.45); }
+      #hoq-discord .hoq-hoq-line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-name { font-size: 18px; }
+      #hoq-discord .hoq-hoq-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+      #hoq-discord .hoq-hoq-badge { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+        padding: 2px 8px; border-radius: 999px; color: #fff;
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 30%, rgba(255,255,255,0.06));
+        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent); }
+      #hoq-discord .hoq-hoq-bio { font-size: 13px; color: #e4e4e8; max-width: 640px; overflow: hidden;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+      #hoq-discord .hoq-hoq-bio[hidden], #hoq-discord .hoq-hoq-mini[hidden] { display: none; }
+      #hoq-discord .hoq-hoq-mini { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+      #hoq-discord .hoq-hoq-chip { font-size: 11.5px; color: #dcdce2; padding: 3px 9px; border-radius: 8px;
+        background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08); }
+      #hoq-discord .hoq-hoq-chip b { color: var(--sc-accent,#ff5500); font-weight: 800; }
       #hoq-discord .hoq-hoq-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
       #hoq-discord .hoq-hoq-name { font-size: 14px; color: #fff; }
       #hoq-discord .hoq-hoq-sub { font-style: normal; font-size: 12px; color: #a9a9b2; }
@@ -4414,8 +4437,9 @@ function ensureDiscordPanel() {
       <div class="hoq-dc-sec hoq-hoq-sec hoq-wide">
         <div class="hoq-dc-label">holdonquietly account</div>
         <div class="hoq-hoq-bar">
+          <div class="hoq-hoq-banner"></div>
           <img class="hoq-hoq-pic" alt="">
-          <span class="hoq-hoq-text"><b class="hoq-hoq-name">holdonquietly account</b><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my holdonquietly profile</label></span>
+          <span class="hoq-hoq-text"><span class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></span><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><span class="hoq-hoq-bio" hidden></span><span class="hoq-hoq-mini" hidden></span><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my holdonquietly profile</label></span>
           <span class="hoq-hoq-btns">
             <button class="hoq-pair-linkbtn hoq-hoq-profile" type="button" hidden>Profile</button>
             <button class="hoq-pair-btn hoq-hoq-btn" type="button">Sign in</button>
@@ -5256,8 +5280,53 @@ function setupHoqAccount(sec) {
   const prof = sec.querySelector('.hoq-hoq-profile');
   const pubRow = sec.querySelector('.hoq-hoq-pub');
   const pubBox = pubRow.querySelector('input');
+  const bar = sec.querySelector('.hoq-hoq-bar');
+  const banner = sec.querySelector('.hoq-hoq-banner');
+  const badges = sec.querySelector('.hoq-hoq-badges');
+  const bio = sec.querySelector('.hoq-hoq-bio');
+  const mini = sec.querySelector('.hoq-hoq-mini');
   const blurb = sub.textContent;
   let st = { signedIn: false, busy: false, note: '' };
+  let card = null;   // the profile card from holdonquietly.com (GET /me/card)
+
+  // Signed in: banner, badges, a line about them and their listening numbers.
+  const fmtMonth = (t) => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  const best = (o) => { let b = null; for (const k in (o || {})) if (b === null || o[k] > o[b]) b = k; return b; };
+  function drawCard() {
+    const on = !!(st.signedIn && !st.busy);
+    const c = on ? card : null;
+    bar.classList.toggle('has-card', !!c);
+    // banner: their profile banner, else a wash of their profile colours
+    if (c && hoqSafeUrl(c.banner)) banner.style.backgroundImage = 'url("' + hoqSafeUrl(c.banner) + '")';
+    else if (c && c.colors && /^#[0-9a-f]{6}$/i.test(c.colors.bar || '') && /^#[0-9a-f]{6}$/i.test(c.colors.box || '')) banner.style.backgroundImage = 'linear-gradient(120deg,' + c.colors.bar + ',' + c.colors.box + ')';
+    else banner.style.backgroundImage = '';
+    badges.innerHTML = c && Array.isArray(c.badges) ? c.badges.slice(0, 6).map((x) => '<span class="hoq-hoq-badge">' + hoqEsc(x && x.label) + '</span>').join('') : '';
+    if (c) {
+      const u = st.user || {};
+      const parts = ['@' + (c.username || u.username || '')];
+      if (c.created_at) parts.push('joined ' + fmtMonth(c.created_at));
+      if (typeof c.friend_count === 'number') parts.push(c.friend_count + (c.friend_count === 1 ? ' friend' : ' friends'));
+      if (typeof c.views === 'number') parts.push(c.views.toLocaleString() + ' profile views');
+      if (!c.profile_public) parts.push('profile is private');
+      sub.textContent = parts.join(' · ');
+      const moodTxt = c.mood && c.mood.text ? (c.mood.face ? c.mood.face + ' ' : '') + 'mood: ' + c.mood.text : '';
+      const line = c.headline || c.status || c.bio || '';
+      bio.textContent = [line, moodTxt].filter(Boolean).join('  ·  ');
+      bio.hidden = !bio.textContent;
+    } else bio.hidden = true;
+    // listening numbers (this PC + the account), always the live ones
+    if (on) {
+      const all = hoqStatsShown(), m = hoqStatsWindow(all, 30);
+      const chip = (n, l) => '<span class="hoq-hoq-chip"><b>' + hoqEsc(n) + '</b> ' + hoqEsc(l) + '</span>';
+      const chips = [chip(all.plays.toLocaleString(), 'plays'), chip(hoqFmtDur(all.seconds), 'listened'), chip(m.plays.toLocaleString(), 'this month')];
+      const ta = best(m.artists) || best(all.artists);
+      if (ta) chips.push(chip(ta, m.plays ? 'top this month' : 'top artist'));
+      mini.innerHTML = chips.join('');
+      mini.hidden = false;
+    } else mini.hidden = true;
+  }
+  window.__hoqAccountCard = (c) => { if (c && typeof c === 'object' && st.signedIn) { card = c; drawCard(); } };
+  setInterval(() => { if (st.signedIn && document.getElementById('hoq-discord')?.classList.contains('open')) drawCard(); }, 30000);
   pubBox.checked = localStorage.getItem('hoqStatsPublic') === '1';
   pubBox.addEventListener('change', () => {
     try { localStorage.setItem('hoqStatsPublic', pubBox.checked ? '1' : '0'); } catch (e) {}
@@ -5271,7 +5340,8 @@ function setupHoqAccount(sec) {
     pubRow.hidden = !st.signedIn;
     // Just signed in (or the app started signed in): fetch the account's stats,
     // which then sends this PC's tally up.
-    if (st.signedIn && !was) scPost('hoqacct:pull');
+    if (st.signedIn && !was) { scPost('hoqacct:pull'); scPost('hoqacct:card'); }
+    if (!st.signedIn) card = null;
     if (st.busy) {
       name.textContent = 'Finish signing in in your browser…';
       sub.textContent = 'Waiting for holdonquietly.com.';
@@ -5291,6 +5361,7 @@ function setupHoqAccount(sec) {
     const src = st.signedIn && hoqSafeUrl(u.picture) ? hoqSafeUrl(u.picture) : HOQ_LOGO;
     pic.classList.toggle('is-logo', src === HOQ_LOGO);
     if (pic.getAttribute('src') !== src) pic.src = src;
+    drawCard();
   };
   pic.addEventListener('error', () => { if (pic.getAttribute('src') !== HOQ_LOGO) { pic.src = HOQ_LOGO; pic.classList.add('is-logo'); } });
   btn.addEventListener('click', () => scPost(st.busy ? 'hoqacct:cancel' : st.signedIn ? 'hoqacct:signout' : 'hoqacct:signin'));
