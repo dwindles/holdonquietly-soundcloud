@@ -7140,52 +7140,55 @@ function setupMiniMode() {
       html.hoq-mini, html.hoq-mini body { overflow:hidden !important; background:#0b0b0e !important; }
       html.hoq-mini body > *:not(#hoq-mini):not(#hoq-discord):not(script):not(style) { display:none !important; }
       html.hoq-mini #hoq-discord { display:none !important; }
+      /* Compact player (432x152 window): cover on the left at full height,
+         title / progress / controls stacked on the right. */
       #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none;
-        flex-direction:column; gap:9px; padding:12px 14px 11px; box-sizing:border-box;
-        background:linear-gradient(180deg, rgba(20,20,26,0.6), rgba(10,10,13,0.86));
+        grid-template-columns:128px minmax(0,1fr); column-gap:14px; padding:12px; box-sizing:border-box;
+        background:#0d0d10; color:#ececf1; overflow:hidden;
         font-family:Inter,-apple-system,Arial,sans-serif; -webkit-user-select:none; user-select:none; }
-      html.hoq-mini #hoq-mini { display:flex; }
-      #hoq-mini .mn-bg { position:absolute; inset:0; z-index:0; background-size:cover; background-position:center;
-        filter:blur(28px) saturate(1.5) brightness(.5); transform:scale(1.2); opacity:.6; }
-      #hoq-mini > * { position:relative; z-index:1; }
-      #hoq-mini .mn-top { display:flex; align-items:center; gap:12px; }
-      #hoq-mini .mn-art { width:60px; height:60px; flex:0 0 60px; border-radius:10px; background:#222 center/cover no-repeat;
-        box-shadow:0 6px 20px rgba(0,0,0,0.5); cursor:pointer; }
-      #hoq-mini .mn-art:hover { outline:2px solid color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); outline-offset:1px; }
-      #hoq-mini .mn-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
-      #hoq-mini .mn-title { font-size:14px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        text-shadow:0 1px 3px rgba(0,0,0,.6); }
-      #hoq-mini .mn-artist { font-size:12px; color:#c9c9d2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        text-shadow:0 1px 3px rgba(0,0,0,.6); }
-      #hoq-mini .mn-seek { display:flex; align-items:center; gap:8px; margin-top:2px; }
-      #hoq-mini .mn-time { font-size:10.5px; color:#b7b7c0; flex:0 0 auto; font-variant-numeric:tabular-nums; white-space:nowrap; }
-      #hoq-mini input.mn-range { -webkit-appearance:none; appearance:none; height:4px; border-radius:99px; background:rgba(255,255,255,0.18); outline:none; cursor:pointer; }
-      #hoq-mini input.mn-prog { flex:1 1 auto; }
-      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
-        background:var(--sc-accent,#ff5500); box-shadow:0 0 6px color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
-      #hoq-mini input.mn-range:disabled { opacity:.45; cursor:default; }
-      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:2px; }
-      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; position:relative;
-        border:0; border-radius:50%; background:transparent; color:#d6d6de; cursor:pointer; transition:background .12s ease, color .12s ease; flex:0 0 auto; }
-      #hoq-mini .mn-btn:hover { background:rgba(255,255,255,0.12); color:#fff; }
+      html.hoq-mini #hoq-mini { display:grid; }
+      #hoq-mini .mn-bg { position:absolute; inset:-30px; z-index:0; background-size:cover; background-position:center;
+        filter:blur(30px) saturate(1.3) brightness(.42); transform:scale(1.1); }
+      #hoq-mini .mn-bg::after { content:''; position:absolute; inset:0; background:rgba(10,10,13,.35); }
+      #hoq-mini > :not(.mn-bg) { position:relative; z-index:1; }
+      #hoq-mini .mn-art { width:128px; height:128px; border-radius:10px; background:#1c1c22 center/cover no-repeat;
+        box-shadow:0 6px 18px rgba(0,0,0,.45); cursor:pointer; transition:transform .15s ease, filter .15s ease; }
+      #hoq-mini .mn-art:hover { filter:brightness(1.08); transform:scale(1.02); }
+      #hoq-mini .mn-body { min-width:0; display:flex; flex-direction:column; justify-content:space-between; padding:1px 0; }
+      #hoq-mini .mn-head { display:flex; align-items:flex-start; gap:2px; }
+      #hoq-mini .mn-meta { flex:1 1 auto; min-width:0; padding-top:2px; }
+      #hoq-mini .mn-title, #hoq-mini .mn-artist { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #hoq-mini .mn-title { font-size:13.5px; font-weight:600; color:#fff; }
+      #hoq-mini .mn-artist { margin-top:2px; font-size:12px; color:#a6a6b0; }
+      /* progress: thin filled track, thumb only while hovering the bar */
+      #hoq-mini input.mn-range { -webkit-appearance:none; appearance:none; display:block; margin:0; height:3px; border-radius:99px; outline:none; cursor:pointer;
+        background:linear-gradient(to right, var(--mn-fill,#fff) var(--p,0%), rgba(255,255,255,.18) var(--p,0%)); }
+      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:11px; height:11px; border-radius:50%;
+        background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.5); opacity:0; transition:opacity .12s ease; }
+      #hoq-mini input.mn-range:hover::-webkit-slider-thumb, #hoq-mini input.mn-range:active::-webkit-slider-thumb { opacity:1; }
+      #hoq-mini input.mn-range:disabled { opacity:.4; cursor:default; }
+      #hoq-mini input.mn-prog { width:100%; --mn-fill:var(--sc-accent,#ff5500); }
+      #hoq-mini .mn-times { display:flex; justify-content:space-between; margin-top:5px;
+        font-size:10.5px; color:#8e8e99; font-variant-numeric:tabular-nums; }
+      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:1px; margin-left:-5px; }
+      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; position:relative;
+        width:28px; height:28px; padding:0; border:0; border-radius:8px; background:transparent; color:#c9c9d2; cursor:pointer;
+        transition:background .12s ease, color .12s ease; }
+      #hoq-mini .mn-btn:hover { background:rgba(255,255,255,.1); color:#fff; }
+      #hoq-mini .mn-btn svg { width:16px; height:16px; }
       #hoq-mini .mn-btn.on { color:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-btn svg { width:17px; height:17px; }
-      #hoq-mini .mn-play { background:var(--sc-accent,#ff5500); color:#fff; width:38px; height:38px; margin:0 2px; }
-      #hoq-mini .mn-play:hover { filter:brightness(1.1); background:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-play svg { width:20px; height:20px; }
+      #hoq-mini .mn-btn.mn-sm { width:24px; height:24px; color:#8e8e99; }
+      #hoq-mini .mn-btn.mn-sm svg { width:14px; height:14px; }
+      #hoq-mini .mn-btn.mn-sm.on { color:var(--sc-accent,#ff5500); }
+      #hoq-mini .mn-play { width:34px; height:34px; margin:0 3px; border-radius:50%; background:#fff !important; color:#0d0d10 !important; }
+      #hoq-mini .mn-play:hover { transform:scale(1.05); }
+      #hoq-mini .mn-play svg { width:16px; height:16px; }
       #hoq-mini .mn-like svg { fill:none; stroke:currentColor; }
       #hoq-mini .mn-like.on svg { fill:currentColor; }
-      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; bottom:3px; right:4px; font-size:8px; font-weight:800;
-        color:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-spacer { flex:1 1 auto; }
-      #hoq-mini .mn-vol { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
-      #hoq-mini .mn-vol svg { width:16px; height:16px; color:#b7b7c0; flex:0 0 auto; }
-      #hoq-mini input.mn-volrange { width:56px; flex:0 0 56px; }
-      #hoq-mini .mn-exit { position:absolute; top:6px; right:8px; width:22px; height:22px; z-index:3;
-        border:0; border-radius:50%; background:rgba(0,0,0,0.35); color:#c9c9d2; cursor:pointer;
-        display:flex; align-items:center; justify-content:center; }
-      #hoq-mini .mn-exit svg { width:12px; height:12px; }
-      #hoq-mini .mn-exit:hover { background:rgba(0,0,0,0.6); color:#fff; }
+      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; top:3px; right:3px; font-size:8px; font-weight:800; line-height:1; }
+      #hoq-mini .mn-vol { display:flex; align-items:center; gap:6px; margin-left:auto; color:#8e8e99; }
+      #hoq-mini .mn-vol svg { width:15px; height:15px; flex:none; }
+      #hoq-mini input.mn-volrange { width:52px; --mn-fill:#d6d6de; }
     `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -7204,7 +7207,7 @@ function setupMiniMode() {
     repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
     like: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
     vol: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
   };
   const fmt = (s) => { if (!isFinite(s) || s < 0) s = 0; s = Math.floor(s); const m = Math.floor(s / 60); const ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
   let scrubbing = false, adjustingVol = false;
@@ -7215,24 +7218,23 @@ function setupMiniMode() {
     widget.id = 'hoq-mini';
     widget.innerHTML =
       '<div class="mn-bg"></div>' +
-      '<button class="mn-exit" title="Exit compact player">' + SVG.exit + '</button>' +
-      '<div class="mn-top">' +
-        '<div class="mn-art" title="Back to full app"></div>' +
-        '<div class="mn-main">' +
-          '<div class="mn-title">—</div>' +
-          '<div class="mn-artist"></div>' +
-          '<div class="mn-seek"><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0"><span class="mn-time">0:00 / 0:00</span></div>' +
+      '<div class="mn-art" title="Back to full app"></div>' +
+      '<div class="mn-body">' +
+        '<div class="mn-head">' +
+          '<div class="mn-meta"><div class="mn-title">Not playing</div><div class="mn-artist"></div></div>' +
+          '<button class="mn-btn mn-sm mn-like" title="Like">' + SVG.like + '</button>' +
+          '<button class="mn-btn mn-sm mn-exit" title="Back to full app">' + SVG.exit + '</button>' +
         '</div>' +
-      '</div>' +
-      '<div class="mn-ctrls">' +
-        '<button class="mn-btn mn-shuffle" title="Shuffle">' + SVG.shuffle + '</button>' +
-        '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
-        '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
-        '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
-        '<button class="mn-btn mn-repeat" title="Repeat">' + SVG.repeat + '</button>' +
-        '<button class="mn-btn mn-like" title="Like">' + SVG.like + '</button>' +
-        '<span class="mn-spacer"></span>' +
-        '<span class="mn-vol">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
+        '<div class="mn-seek"><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0">' +
+          '<div class="mn-times"><span class="mn-t0">0:00</span><span class="mn-t1">0:00</span></div></div>' +
+        '<div class="mn-ctrls">' +
+          '<button class="mn-btn mn-shuffle" title="Shuffle">' + SVG.shuffle + '</button>' +
+          '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
+          '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
+          '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
+          '<button class="mn-btn mn-repeat" title="Repeat">' + SVG.repeat + '</button>' +
+          '<span class="mn-vol" title="Volume (or scroll anywhere)">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
+        '</div>' +
       '</div>';
     document.body.appendChild(widget);
     // Dragging the card body moves the OS window (frameless), except on controls
@@ -7254,10 +7256,14 @@ function setupMiniMode() {
     widget.querySelector('.mn-art').addEventListener('click', () => exitMini());   // cover = back to full app
     widget.querySelector('.mn-exit').addEventListener('click', () => exitMini());
     const prog = widget.querySelector('.mn-prog');
-    prog.addEventListener('input', () => { scrubbing = true; const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-time').textContent = fmt(prog.value / 1000 * el.duration) + ' / ' + fmt(el.duration); });
+    const fillR = (r) => r.style.setProperty('--p', (r.value - r.min) / (r.max - r.min) * 100 + '%');
+    prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * el.duration); });
     prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) { try { el.currentTime = prog.value / 1000 * el.duration; } catch (e) {} } scrubbing = false; });
     const vol = widget.querySelector('.mn-volrange');
-    vol.addEventListener('input', () => { adjustingVol = true; const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } });
+    const setVol = () => { fillR(vol); const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } };
+    vol.addEventListener('input', () => { adjustingVol = true; setVol(); });
+    // scroll anywhere on the player = volume
+    widget.addEventListener('wheel', (e) => { e.preventDefault(); vol.value = Math.max(0, Math.min(100, +vol.value + (e.deltaY < 0 ? 5 : -5))); setVol(); }, { passive: false });
     vol.addEventListener('change', () => { adjustingVol = false; });
   }
 
@@ -7294,7 +7300,9 @@ function setupMiniMode() {
     set('.mn-title', s.title || 'Not playing');
     set('.mn-artist', s.artist || '');
     const art = widget.querySelector('.mn-art'); const bg = widget.querySelector('.mn-bg');
-    if (s.cover) { art.style.backgroundImage = s.cover; bg.style.backgroundImage = s.cover; }
+    // the player badge only carries a 50px thumbnail: ask for the 500px one
+    const big = s.cover ? s.cover.replace(/-(t\d+x\d+|large|small|badge|tiny)\.(jpg|png|jpeg)/i, '-t500x500.$2') : '';
+    if (big && art.style.backgroundImage !== big) { art.style.backgroundImage = big; bg.style.backgroundImage = big; }
     const pb = widget.querySelector('.mn-play'); if (pb) pb.innerHTML = s.paused ? SVG.play : SVG.pause;
     widget.querySelector('.mn-like').classList.toggle('on', s.liked);
     widget.querySelector('.mn-shuffle').classList.toggle('on', s.shuffling);
@@ -7303,12 +7311,13 @@ function setupMiniMode() {
     rpBtn.classList.toggle('one', s.repeat === 'one');
     // progress + time + volume from the actual audio element
     const el = window.__hoqMediaEl;
-    const prog = widget.querySelector('.mn-prog'); const timeEl = widget.querySelector('.mn-time'); const vol = widget.querySelector('.mn-volrange');
+    const prog = widget.querySelector('.mn-prog'); const vol = widget.querySelector('.mn-volrange');
     const dur = el && isFinite(el.duration) ? el.duration : 0;
     const cur = el ? el.currentTime : 0;
     prog.disabled = !dur;
-    if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; timeEl.textContent = fmt(cur) + ' / ' + fmt(dur); }
-    if (!adjustingVol && el) vol.value = Math.round((el.muted ? 0 : el.volume) * 100);
+    const fillR = (r) => r.style.setProperty('--p', (r.value - r.min) / (r.max - r.min) * 100 + '%');
+    if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; fillR(prog); set('.mn-t0', fmt(cur)); set('.mn-t1', fmt(dur)); }
+    if (!adjustingVol && el) { vol.value = Math.round((el.muted ? 0 : el.volume) * 100); fillR(vol); }
   }
   function enterMini() {
     document.documentElement.classList.add('hoq-mini');
