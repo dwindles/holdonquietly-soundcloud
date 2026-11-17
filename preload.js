@@ -3891,18 +3891,18 @@ function setupFeed(p) {
     renderAttached();
   });
 
-  const trackCard = (t) => (t && t.title) ? ('<a class="hoq-fi-track"' + (t.url ? ' href="' + esc(t.url) + '"' : '') + '>' + (t.cover ? '<img src="' + esc(t.cover) + '">' : '') + '<div style="min-width:0"><div class="ft-t">' + esc(t.title) + '</div><div class="ft-a">' + esc(t.artist || '') + '</div></div><span class="ft-play">▶</span></a>') : '';
+  const trackCard = (t) => (t && t.title) ? ('<a class="hoq-fi-track"' + (hoqSafeUrl(t.url) ? ' href="' + esc(hoqSafeUrl(t.url)) + '"' : '') + '>' + (hoqSafeUrl(t.cover) ? '<img src="' + esc(hoqSafeUrl(t.cover)) + '">' : '') + '<div style="min-width:0"><div class="ft-t">' + esc(t.title) + '</div><div class="ft-a">' + esc(t.artist || '') + '</div></div><span class="ft-play">▶</span></a>') : '';
   const itemHtml = (f, isPending) => {
-    const nameEl = f.url ? '<a class="hoq-fi-name" href="' + esc(f.url) + '">' + esc(f.name) + '</a>' : '<span class="hoq-fi-name">' + esc(f.name) + '</span>';
+    const nameEl = hoqSafeUrl(f.url) ? '<a class="hoq-fi-name" href="' + esc(hoqSafeUrl(f.url)) + '">' + esc(f.name) + '</a>' : '<span class="hoq-fi-name">' + esc(f.name) + '</span>';
     return '<div class="hoq-feed-item' + (f.sys ? ' sys' : '') + (isPending ? ' pending' : '') + '">' +
-      '<img class="hoq-fi-av" src="' + (f.avatar ? esc(f.avatar) : HOQ_LOGO) + '">' +
+      '<img class="hoq-fi-av" src="' + (hoqSafeUrl(f.avatar) ? esc(hoqSafeUrl(f.avatar)) : HOQ_LOGO) + '">' +
       '<div class="hoq-fi-body"><div class="hoq-fi-head">' + nameEl + '<span class="hoq-fi-time">' + (f.sys ? '' : rel(f.ts)) + '</span></div>' +
       (f.text ? '<div class="hoq-fi-text">' + esc(f.text) + '</div>' : '') + trackCard(f.track) + '</div></div>';
   };
   const render = () => {
     if (!pending.length && !feedItems.length) { list.innerHTML = '<div class="hoq-feed-empty">Nothing here yet.<br>Be the first to say something or share a track.</div>'; return; }
     list.innerHTML = pending.map((f) => itemHtml(f, true)).join('') + feedItems.map((f) => itemHtml(f, false)).join('');
-    list.querySelectorAll('.hoq-fi-track[href], a.hoq-fi-name[href]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const h = a.getAttribute('href'); if (h) location.href = h; }));
+    list.querySelectorAll('.hoq-fi-track[href], a.hoq-fi-name[href]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const h = hoqSafeUrl(a.getAttribute('href')); if (h) location.href = h; }));
   };
 
   window.__hoqFeed = function (arr) {
@@ -5215,10 +5215,12 @@ function rpcTick() {
     rp.on, rp.status, rp.buttons, rp.pauseHide].join('|');
   if (key === _lastRpc) return;
   _lastRpc = key;
+  const me = hoqMe(); // SoundCloud name/profile: the fallback when Discord isn't running
   scPost('rpc:' + JSON.stringify({
     id: myId(),
     name: localStorage.getItem('hoqDiscord') || '',
-    sc: localStorage.getItem('hoqSC') || '',
+    scName: me.name === 'Someone' ? '' : me.name,
+    sc: localStorage.getItem('hoqSC') || me.url || '',
     title: np.title, artist: np.artist, cover: np.cover,
     url, artistUrl: npPublicUrl('.playbackSoundBadge__lightLink'),
     pos: pr.pos, dur: pr.dur, paused: pr.paused,
@@ -5624,6 +5626,9 @@ function startPlayButton() {
   setInterval(refresh, 1000);   // re-enables when the track changes
 }
 
+// Links/images that came from other people (feed, friends): plain https only, so a
+// javascript: or data: URL can never run here (this page can command the app).
+function hoqSafeUrl(u) { const t = String(u == null ? '' : u).trim(); return /^https:\/\/[^\s"'<>\\]+$/i.test(t) ? t : ''; }
 function hoqEsc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); }
 
 // The C# host delivers everyone's presence here → render the friends feed.
@@ -5646,7 +5651,7 @@ window.__hoqFriends = function (list) {
     el.innerHTML = '<div class="hoq-dc-hint">Only you are on right now.</div>';
   }
   el.innerHTML += rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
-    '<img class="hoq-dc-fcover" src="' + (hoqEsc(f.cover) || HOQ_LOGO) + '">' +
+    '<img class="hoq-dc-fcover" src="' + (hoqEsc(hoqSafeUrl(f.cover)) || HOQ_LOGO) + '">' +
     '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') +
     (f.id === me ? '<em class="hoq-me">you</em>' : '') + '</b>' +
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +

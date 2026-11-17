@@ -33,20 +33,34 @@ static class LastFm
     {
         try
         {
-            path = Path.Combine(userDataDir, "lastfm.json");
-            if (File.Exists(path))
+            // The session key is a login, so it's kept DPAPI-sealed in lastfm.dat.
+            // An older plain-text lastfm.json is read once, re-saved sealed, then deleted.
+            path = Path.Combine(userDataDir, "lastfm.dat");
+            string old = Path.Combine(userDataDir, "lastfm.json");
+            string json = null;
+            if (File.Exists(path)) json = Encoding.UTF8.GetString(HoqAccount.Unprotect(File.ReadAllBytes(path)));
+            else if (File.Exists(old)) json = File.ReadAllText(old);
+            if (json != null)
             {
-                var j = JsonDocument.Parse(File.ReadAllText(path)).RootElement;
+                var j = JsonDocument.Parse(json).RootElement;
                 if (j.TryGetProperty("sk", out var s)) sk = s.GetString() ?? "";
                 if (j.TryGetProperty("user", out var u)) user = u.GetString() ?? "";
             }
+            if (File.Exists(old) && Save()) File.Delete(old);
         }
         catch { }
     }
 
-    static void Save()
+    static bool Save()
     {
-        try { File.WriteAllText(path, JsonSerializer.Serialize(new { sk, user })); } catch { }
+        try
+        {
+            string tmp = path + ".tmp";
+            File.WriteAllBytes(tmp, HoqAccount.Protect(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sk, user }))));
+            File.Move(tmp, path, true);
+            return true;
+        }
+        catch { return false; }
     }
 
     static string Sig(SortedDictionary<string, string> p)

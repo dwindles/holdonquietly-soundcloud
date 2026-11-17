@@ -162,6 +162,7 @@ class Program
             userData = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SoundCloudApp");
+        DataDir = userData;
 
         // A LONE single-file exe has no loose files beside it — pull logo.png out
         // of the embedded resources into a writable folder so the virtual host can
@@ -374,7 +375,13 @@ class Program
     };
 
     static readonly HttpClient http = new HttpClient();
-    const string BACKEND = "http://155.138.222.253:8790";
+    // Same friends/feed service as before, now over https through the proxy
+    // (builds up to v1.4.0 still use the plain-http :8790 directly).
+    const string BACKEND = "https://sc.holdonquietly.com/__hoq/fb";
+
+    // The data folder (HOQ_DATADIR for a test copy, else %LocalAppData%\SoundCloudApp).
+    // Saved accounts and webhook.txt live here so a test copy never touches the real ones.
+    static string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundCloudApp");
 
     static string HostOf(string url) { try { return new Uri(url).Host; } catch { return "?"; } }
     static bool TrustedSource(string url)
@@ -384,7 +391,7 @@ class Program
     }
 
     // Data headed into ExecuteScriptAsync as a JS expression. The friends/feed
-    // backend is plain http, so a tampered response must never become code:
+    // backend is a shared server, so whatever it returns must never become code:
     // only JSON that parses goes through (JSON is a subset of JS), else null.
     static string JsonOrNull(string s)
     {
@@ -414,9 +421,7 @@ class Program
     // config file (%LocalAppData%\SoundCloudApp\webhook.txt) — never embedded in
     // the app/repo — so the public build can't be abused to spam a channel. The
     // POST is host-side because Discord webhook endpoints don't send CORS headers.
-    static string WebhookPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SoundCloudApp", "webhook.txt");
+    static string WebhookPath() => Path.Combine(DataDir, "webhook.txt");
 
     // Remembered after the first good read. A momentary failure to read the file
     // (AV scan, another process holding it, transient IO) used to drop the request
@@ -875,7 +880,7 @@ class Program
     // so you can switch accounts on the same app instance (Instagram-style). =====
     static string AcctDir()
     {
-        string d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundCloudApp", "accounts");
+        string d = Path.Combine(DataDir, "accounts");
         Directory.CreateDirectory(d);
         return d;
     }
@@ -1051,7 +1056,11 @@ class Program
                     Status = rpStatus, Buttons = rpButtons, PauseHide = rpPauseHide,
                 });
                 Log("RP <- title=\"" + title + "\" paused=" + PropB(r, "paused") + " pos=" + PropI(r, "pos"));
-                _ = PostPresence(Prop(r, "id"), Prop(r, "name"), Prop(r, "sc"), title, artist, cover);
+                // Friends-list name: one typed in Settings, else the Discord name, else SoundCloud's.
+                string who = Prop(r, "name").Trim();
+                if (who.Length == 0) who = DiscordRpc.UserName;
+                if (string.IsNullOrEmpty(who)) who = Prop(r, "scName").Trim();
+                _ = PostPresence(Prop(r, "id"), who, Prop(r, "sc"), title, artist, cover);
                 LastFm.Track(title, artist, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
             }
             catch { }
@@ -1255,6 +1264,8 @@ static class DiscordRpc
     // 0 = everything, 1 = no status line / clickable links, 2 = also no buttons.
     static int compat = 0;
     static readonly string AppVersion = AppVer();
+    // Display name of whoever is signed in to Discord ("" until Discord answers).
+    public static volatile string UserName = "";
 
     public static async Task Connect()
     {
@@ -1558,6 +1569,17 @@ static class DiscordRpc
         try
         {
             var r = JsonDocument.Parse(payload).RootElement;
+            // The handshake reply (DISPATCH/READY) names the Discord user — the
+            // friends list shows that instead of "Someone" (display name first).
+            if (r.TryGetProperty("evt", out var ev) && ev.ValueKind == JsonValueKind.String && ev.GetString() == "READY" &&
+                r.TryGetProperty("data", out var rd) && rd.ValueKind == JsonValueKind.Object &&
+                rd.TryGetProperty("user", out var du) && du.ValueKind == JsonValueKind.Object)
+            {
+                string gn = du.TryGetProperty("global_name", out var g) && g.ValueKind == JsonValueKind.String ? g.GetString() : "";
+                string un = du.TryGetProperty("username", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() : "";
+                UserName = (!string.IsNullOrWhiteSpace(gn) ? gn : un ?? "").Trim();
+                return;
+            }
             if (!r.TryGetProperty("cmd", out var c) || c.ValueKind != JsonValueKind.String || c.GetString() != "SET_ACTIVITY") return;
             bool error = r.TryGetProperty("evt", out var e) && e.ValueKind == JsonValueKind.String && e.GetString() == "ERROR";
             lock (gate)

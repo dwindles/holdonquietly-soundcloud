@@ -327,8 +327,8 @@ static class HoqAccount
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
     const int CRYPTPROTECT_UI_FORBIDDEN = 1;
 
-    static byte[] Protect(byte[] plain) => Dpapi(plain, true);
-    static byte[] Unprotect(byte[] sealedBytes) => Dpapi(sealedBytes, false);
+    internal static byte[] Protect(byte[] plain) => Dpapi(plain, true);
+    internal static byte[] Unprotect(byte[] sealedBytes) => Dpapi(sealedBytes, false);
 
     static byte[] Dpapi(byte[] input, bool protect)
     {
