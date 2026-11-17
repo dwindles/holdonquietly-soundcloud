@@ -19,6 +19,14 @@ using Microsoft.Web.WebView2.Core;
 class Program
 {
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    // Multi-monitor: maximize / mini go to the monitor the window is ON, not the
+    // primary one (SystemParameters.WorkArea is always the primary monitor).
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO mi);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
     [DllImport("shell32.dll")] static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string id);
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
@@ -94,6 +102,34 @@ class Program
             GlassFrameThickness = new Thickness(0),
             CornerRadius = new CornerRadius(0),
         });
+
+        // Windows' own maximize (drag to the top edge, Win+Up, Snap) on a frameless
+        // window hangs ~8px past every edge and over the taskbar. Swap it for our
+        // maximize: fills the work area of the monitor the window is on.
+        win.StateChanged += (s, e) =>
+        {
+            if (win.WindowState != WindowState.Maximized) return;
+            win.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    var mon = MonitorFromWindow(Hwnd, 2);   // remember which screen it was maximized on
+                    win.WindowState = WindowState.Normal;
+                    if (miniOn) return;
+                    if (maxed) maxed = false;               // re-fit even if we thought we were maxed
+                    var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                    restoreBounds = new Rect(win.Left, win.Top, win.Width, win.Height);
+                    if (GetMonitorInfo(mon, ref mi))
+                    {
+                        var wa = mi.rcWork;
+                        MovePx(wa.Left, wa.Top, wa.Right - wa.Left, wa.Bottom - wa.Top);
+                        maxed = true;
+                    }
+                    else ToggleMaximize();
+                }
+                catch { }
+            }));
+        };
 
         wv = new WebView2();
         win.Content = wv;
@@ -1309,9 +1345,10 @@ class Program
             if (maxed) { miniWasMax = true; ToggleMaximize(); } else miniWasMax = false;
             miniRestore = new Rect(win.Left, win.Top, win.Width, win.Height);
             win.MinWidth = 0; win.MinHeight = 0;
-            win.Width = 432; win.Height = 152;
-            var wa = SystemParameters.WorkArea;
-            win.Left = wa.Right - win.Width - 24; win.Top = wa.Top + 24;
+            // top-right corner of the monitor the window is on (in device pixels)
+            var wa = WorkAreaPx(); double k = DpiScale();
+            int mw = (int)Math.Round(432 * k), mh = (int)Math.Round(152 * k), pad = (int)Math.Round(24 * k);
+            MovePx(wa.Right - mw - pad, wa.Top + pad, mw, mh);
             win.Topmost = true;
             miniOn = true;
         }
@@ -1332,13 +1369,27 @@ class Program
     }
 
     // Maximize to the working area (so it never covers the taskbar), toggle back.
+    static IntPtr Hwnd => new WindowInteropHelper(win).Handle;
+    // Work area (screen minus taskbar) of the monitor the window is mostly on.
+    static RECT WorkAreaPx()
+    {
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (GetMonitorInfo(MonitorFromWindow(Hwnd, 2 /* NEAREST */), ref mi)) return mi.rcWork;
+        var wa = SystemParameters.WorkArea; double k = DpiScale();
+        return new RECT { Left = (int)(wa.Left * k), Top = (int)(wa.Top * k), Right = (int)(wa.Right * k), Bottom = (int)(wa.Bottom * k) };
+    }
+    static double DpiScale() { try { uint d = GetDpiForWindow(Hwnd); return d > 0 ? d / 96.0 : 1; } catch { return 1; } }
+    // Device-pixel move/resize: same coordinate space as GetMonitorInfo, so it is
+    // right on every monitor whatever its scaling; WPF picks up the new bounds.
+    static void MovePx(int x, int y, int w, int h) => SetWindowPos(Hwnd, IntPtr.Zero, x, y, w, h, 0x0004 /* NOZORDER */ | 0x0010 /* NOACTIVATE */);
+
     static void ToggleMaximize()
     {
         if (!maxed)
         {
             restoreBounds = new Rect(win.Left, win.Top, win.Width, win.Height);
-            var wa = SystemParameters.WorkArea;
-            win.Left = wa.Left; win.Top = wa.Top; win.Width = wa.Width; win.Height = wa.Height;
+            var wa = WorkAreaPx();
+            MovePx(wa.Left, wa.Top, wa.Right - wa.Left, wa.Bottom - wa.Top);
             maxed = true;
         }
         else
