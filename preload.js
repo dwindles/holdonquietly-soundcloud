@@ -6909,7 +6909,9 @@ function setupOutputPicker() {
     menu.style.left = 'auto';
   };
   const isOpen = () => menu.classList.contains('show');
-  const show = async () => { place(); await render(); menu.classList.add('show'); };
+  // one header menu at a time (the buttons stop their click, so the other menu's
+  // click-outside never fires)
+  const show = async () => { document.querySelectorAll('#hoq-out-menu.show, #hoq-eq-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); }); place(); await render(); menu.classList.add('show'); };
   const close = () => { menu.classList.remove('show'); };
   btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
   // Global listeners survive header re-renders (which can drop + re-add the button),
@@ -7159,7 +7161,7 @@ function setupEqPicker() {
   }
   const place = () => { const b = document.getElementById('hoq-eq-btn'); if (!b) return; const r = b.getBoundingClientRect(); menu.style.top = (r.bottom + 8) + 'px'; menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px'; menu.style.left = 'auto'; };
   const isOpen = () => menu.classList.contains('show');
-  const show = () => { render(); place(); menu.classList.add('show'); };
+  const show = () => { document.querySelectorAll('#hoq-out-menu.show, #hoq-eq-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); }); render(); place(); menu.classList.add('show'); };
   const close = () => menu.classList.remove('show');
   reflectBtn();
   btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
