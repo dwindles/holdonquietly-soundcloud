@@ -25,6 +25,11 @@ class Program
     [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO mi);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
+    static void SetWindowLong(IntPtr h, int i, int v) => SetWindowLongPtr(h, i, (IntPtr)v);
+    [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint key, byte alpha, uint flags);
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
@@ -1246,6 +1251,28 @@ class Program
         if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }
         if (m == "dcwidget") { _ = DcWidget(); return; }
         if (m == "update:apply") { Updater.ApplyAndRestart?.Invoke(); return; }
+        // Compact player: mini:on[:WxH[:pin]] | mini:off | mini:size:WxH | mini:pin:0/1 | mini:alpha:0-100
+        if (m != null && m.StartsWith("mini:"))
+        {
+            var a = m.Split(':');
+            (int w, int h) Wh(string v) { var p = (v ?? "").Split('x'); return p.Length == 2 && int.TryParse(p[0], out int x) && int.TryParse(p[1], out int y) ? (Math.Clamp(x, 200, 900), Math.Clamp(y, 30, 400)) : (432, 152); }
+            switch (a.Length > 1 ? a[1] : "")
+            {
+                case "on": { var (w, h) = Wh(a.Length > 2 ? a[2] : null); EnterMini(w, h, a.Length <= 3 || a[3] != "0"); break; }
+                case "off": ExitMini(); break;
+                case "size": if (miniOn) { var (w, h) = Wh(a.Length > 2 ? a[2] : null); MiniResize(w, h); } break;
+                case "pin":
+                    if (miniOn)
+                    {
+                        bool pinIt = a.Length > 2 && a[2] == "1";
+                        win.Topmost = pinIt;
+                        SetWindowPos(Hwnd, (IntPtr)(pinIt ? -1 : -2) /* TOPMOST / NOTOPMOST */, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+                    }
+                    break;
+                case "alpha": if (miniOn && a.Length > 2 && int.TryParse(a[2], out int pct)) SetAlpha(pct); break;
+            }
+            return;
+        }
         if (m != null && m.StartsWith("win:resize:"))
         {
             if (!maxed && SZ.TryGetValue(m.Substring("win:resize:".Length), out int wmsz))
@@ -1257,12 +1284,6 @@ class Program
         }
         switch (m)
         {
-            case "mini:on":
-                EnterMini();
-                break;
-            case "mini:off":
-                ExitMini();
-                break;
             case "win:minimize":
                 win.WindowState = WindowState.Minimized;
                 break;
@@ -1337,7 +1358,7 @@ class Program
     static bool miniOn = false;
     static Rect miniRestore;
     static bool miniWasMax = false;
-    static void EnterMini()
+    static void EnterMini(int w = 432, int h = 152, bool pin = true)
     {
         if (miniOn) return;
         try
@@ -1347,9 +1368,9 @@ class Program
             win.MinWidth = 0; win.MinHeight = 0;
             // top-right corner of the monitor the window is on (in device pixels)
             var wa = WorkAreaPx(); double k = DpiScale();
-            int mw = (int)Math.Round(432 * k), mh = (int)Math.Round(152 * k), pad = (int)Math.Round(24 * k);
+            int mw = (int)Math.Round(w * k), mh = (int)Math.Round(h * k), pad = (int)Math.Round(24 * k);
             MovePx(wa.Right - mw - pad, wa.Top + pad, mw, mh);
-            win.Topmost = true;
+            win.Topmost = pin;
             miniOn = true;
         }
         catch { }
@@ -1360,10 +1381,65 @@ class Program
         try
         {
             win.Topmost = false;
+            SetAlpha(100);
             win.Width = miniRestore.Width; win.Height = miniRestore.Height;
             win.Left = miniRestore.X; win.Top = miniRestore.Y;
             if (miniWasMax) ToggleMaximize();
             miniOn = false;
+        }
+        catch { }
+    }
+
+    // Switch compact layouts in place: keep the top-right corner where it is.
+    static void MiniResize(int w, int h)
+    {
+        try
+        {
+            if (!GetWindowRect(Hwnd, out RECT r)) return;
+            double k = DpiScale();
+            int mw = (int)Math.Round(w * k), mh = (int)Math.Round(h * k);
+            MovePx(r.Right - mw, r.Top, mw, mh);
+        }
+        catch { }
+    }
+    // Whole-window fade ("dim when not hovered", like a game overlay). 100 = opaque
+    // and drops the layered style again so nothing is composited when not needed.
+    static bool wantLayered, layerHooked;
+    [StructLayout(LayoutKind.Sequential)] struct STYLESTRUCT { public int styleOld, styleNew; }
+    // Something in the window stack strips WS_EX_LAYERED as soon as it is set;
+    // keep it while a fade is wanted by fixing up WM_STYLECHANGING.
+    delegate IntPtr SubclassProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc proc, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] static extern IntPtr DefSubclassProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    static readonly SubclassProc _subProc = LayerSubclass;   // kept alive for the window's lifetime
+    // Runs underneath WPF: let it process WM_STYLECHANGING first, then put the
+    // layered bit back so the change actually lands.
+    static IntPtr LayerSubclass(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, UIntPtr id, UIntPtr data)
+    {
+        var r = DefSubclassProc(hWnd, msg, wParam, lParam);
+        if (msg == 0x007C && (int)wParam == -20 && wantLayered)
+        {
+            var ss = Marshal.PtrToStructure<STYLESTRUCT>(lParam);
+            if ((ss.styleNew & 0x80000) == 0) { ss.styleNew |= 0x80000; Marshal.StructureToPtr(ss, lParam, false); }
+        }
+        return r;
+    }
+    static void SetAlpha(int pct)
+    {
+        try
+        {
+            pct = Math.Clamp(pct, 15, 100);
+            var h = Hwnd;
+            if (!layerHooked) { layerHooked = true; SetWindowSubclass(h, _subProc, (UIntPtr)0x484F51, UIntPtr.Zero); }
+            wantLayered = true;
+            int ex = GetWindowLong(h, -20 /* GWL_EXSTYLE */);
+            if ((ex & 0x80000) == 0)
+            {
+                SetWindowLong(h, -20, ex | 0x80000 /* WS_EX_LAYERED */);
+                // the style change knocks the window out of the topmost band: put it back
+                if (win.Topmost) SetWindowPos(h, (IntPtr)(-1) /* HWND_TOPMOST */, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 /* NOSIZE|NOMOVE|NOACTIVATE */);
+            }
+            SetLayeredWindowAttributes(h, 0, (byte)(pct * 255 / 100), 0x2 /* LWA_ALPHA */);
         }
         catch { }
     }

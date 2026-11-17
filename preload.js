@@ -5215,7 +5215,8 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // wins. A PC that's behind applies it and reloads once. Per-device things stay
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
-  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt'];
+  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt',
+  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -6685,7 +6686,9 @@ function removeClutter() {
   // bar — not just .header — but never our own injected UI.
   safe(() => {
     document.querySelectorAll('header, nav, div').forEach((el) => {
-      if (el.closest('#sc-titlebar, #sc-palette, #sc-ad-badge')) return;
+      // (our own UI too: the compact player's Bar/Name layouts are exactly a
+      // short full-width fixed bar and got shoved 34px down)
+      if (el.closest('#sc-titlebar, #sc-palette, #sc-ad-badge, [id^="hoq-"]')) return;
       const cs = getComputedStyle(el);
       if (cs.position !== 'fixed') return;
       const r = el.getBoundingClientRect();
@@ -7189,55 +7192,80 @@ function setupMiniMode() {
       html.hoq-mini, html.hoq-mini body { overflow:hidden !important; background:#0b0b0e !important; }
       html.hoq-mini body > *:not(#hoq-mini):not(#hoq-discord):not(script):not(style) { display:none !important; }
       html.hoq-mini #hoq-discord { display:none !important; }
-      /* Compact player (432x152 window): cover on the left at full height,
-         title / progress / controls stacked on the right. */
-      #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none;
-        grid-template-columns:128px minmax(0,1fr); column-gap:14px; padding:12px; box-sizing:border-box;
-        background:#0d0d10; color:#ececf1; overflow:hidden;
+      /* Compact player. Three layouts (data-layout): player 380x112, bar 340x56,
+         name 290x34. A tools pill (layout / pin / fade / back) appears on hover;
+         the host fades the whole window when the mouse is away (overlay style). */
+      #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none; align-items:center;
+        box-sizing:border-box; background:#0d0d10; color:#ececf1; overflow:hidden;
         font-family:Inter,-apple-system,Arial,sans-serif; -webkit-user-select:none; user-select:none; }
-      html.hoq-mini #hoq-mini { display:grid; }
+      html.hoq-mini #hoq-mini { display:flex; }
       #hoq-mini .mn-bg { position:absolute; inset:-30px; z-index:0; background-size:cover; background-position:center;
-        filter:blur(30px) saturate(1.3) brightness(.42); transform:scale(1.1); }
+        filter:blur(30px) saturate(1.3) brightness(.4); transform:scale(1.1); }
       #hoq-mini .mn-bg::after { content:''; position:absolute; inset:0; background:rgba(10,10,13,.35); }
       #hoq-mini > :not(.mn-bg) { position:relative; z-index:1; }
-      #hoq-mini .mn-art { width:128px; height:128px; border-radius:10px; background:#1c1c22 center/cover no-repeat;
-        box-shadow:0 6px 18px rgba(0,0,0,.45); cursor:pointer; transition:transform .15s ease, filter .15s ease; }
-      #hoq-mini .mn-art:hover { filter:brightness(1.08); transform:scale(1.02); }
-      #hoq-mini .mn-body { min-width:0; display:flex; flex-direction:column; justify-content:space-between; padding:1px 0; }
-      #hoq-mini .mn-head { display:flex; align-items:flex-start; gap:2px; }
-      #hoq-mini .mn-meta { flex:1 1 auto; min-width:0; padding-top:2px; }
-      #hoq-mini .mn-title, #hoq-mini .mn-artist { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      #hoq-mini .mn-title { font-size:13.5px; font-weight:600; color:#fff; }
-      #hoq-mini .mn-artist { margin-top:2px; font-size:12px; color:#a6a6b0; }
-      /* progress: thin filled track, thumb only while hovering the bar */
+      #hoq-mini .mn-art { flex:none; border-radius:8px; background:#1c1c22 center/cover no-repeat; cursor:pointer;
+        box-shadow:0 4px 14px rgba(0,0,0,.4); transition:filter .15s ease; }
+      #hoq-mini .mn-art:hover { filter:brightness(1.1); }
+      #hoq-mini .mn-body { flex:1 1 auto; min-width:0; height:100%; display:flex; flex-direction:column; justify-content:center; gap:6px; }
+      #hoq-mini .mn-head { display:flex; align-items:center; gap:4px; min-width:0; }
+      #hoq-mini .mn-meta { flex:1 1 auto; min-width:0; }
+      #hoq-mini .mn-title, #hoq-mini .mn-artist, #hoq-mini .mn-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #hoq-mini .mn-title { font-size:13px; font-weight:600; color:#fff; }
+      #hoq-mini .mn-artist { margin-top:1px; font-size:11.5px; color:#a6a6b0; }
+      #hoq-mini .mn-line { flex:1 1 auto; min-width:0; font-size:12.5px; color:#fff; font-weight:600; }
+      #hoq-mini .mn-line span { color:#a6a6b0; font-weight:400; }
+      /* sliders: thin track, near-white fill (an accent from a dark cover can be as
+         dark as the track itself), thumb only on hover */
       #hoq-mini input.mn-range { -webkit-appearance:none; appearance:none; display:block; margin:0; height:3px; border-radius:99px; outline:none; cursor:pointer;
-        background:linear-gradient(to right, var(--mn-fill,#fff) var(--p,0%), rgba(255,255,255,.18) var(--p,0%)); }
-      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:11px; height:11px; border-radius:50%;
+        background:linear-gradient(to right, rgba(255,255,255,.88) var(--p,0%), rgba(255,255,255,.16) var(--p,0%)); }
+      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:10px; height:10px; border-radius:50%;
         background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.5); opacity:0; transition:opacity .12s ease; }
       #hoq-mini input.mn-range:hover::-webkit-slider-thumb, #hoq-mini input.mn-range:active::-webkit-slider-thumb { opacity:1; }
       #hoq-mini input.mn-range:disabled { opacity:.4; cursor:default; }
-      #hoq-mini input.mn-prog { width:100%; --mn-fill:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-times { display:flex; justify-content:space-between; margin-top:5px;
-        font-size:10.5px; color:#8e8e99; font-variant-numeric:tabular-nums; }
-      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:1px; margin-left:-5px; }
+      #hoq-mini .mn-seek { display:flex; align-items:center; gap:7px; font-size:10px; color:#8e8e99; font-variant-numeric:tabular-nums; }
+      #hoq-mini .mn-seek input { flex:1 1 auto; min-width:0; }
+      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:0; margin-left:-5px; }
       #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; position:relative;
-        width:28px; height:28px; padding:0; border:0; border-radius:8px; background:transparent; color:#c9c9d2; cursor:pointer;
+        width:26px; height:26px; padding:0; border:0; border-radius:7px; background:transparent; color:#c9c9d2; cursor:pointer;
         transition:background .12s ease, color .12s ease; }
       #hoq-mini .mn-btn:hover { background:rgba(255,255,255,.1); color:#fff; }
-      #hoq-mini .mn-btn svg { width:16px; height:16px; }
+      #hoq-mini .mn-btn svg { width:15px; height:15px; }
       #hoq-mini .mn-btn.on { color:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-btn.mn-sm { width:24px; height:24px; color:#8e8e99; }
-      #hoq-mini .mn-btn.mn-sm svg { width:14px; height:14px; }
-      #hoq-mini .mn-btn.mn-sm.on { color:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-play { width:34px; height:34px; margin:0 3px; border-radius:50%; background:#fff !important; color:#0d0d10 !important; }
-      #hoq-mini .mn-play:hover { transform:scale(1.05); }
-      #hoq-mini .mn-play svg { width:16px; height:16px; }
+      #hoq-mini .mn-play { width:30px; height:30px; margin:0 2px; border-radius:50%; background:#fff !important; color:#0d0d10 !important; }
+      #hoq-mini .mn-play svg { width:14px; height:14px; }
       #hoq-mini .mn-like svg { fill:none; stroke:currentColor; }
+      #hoq-mini .mn-like.on { color:var(--sc-accent,#ff5500); }
       #hoq-mini .mn-like.on svg { fill:currentColor; }
-      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; top:3px; right:3px; font-size:8px; font-weight:800; line-height:1; }
-      #hoq-mini .mn-vol { display:flex; align-items:center; gap:6px; margin-left:auto; color:#8e8e99; }
-      #hoq-mini .mn-vol svg { width:15px; height:15px; flex:none; }
-      #hoq-mini input.mn-volrange { width:52px; --mn-fill:#d6d6de; }
+      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; top:2px; right:2px; font-size:8px; font-weight:800; line-height:1; }
+      #hoq-mini .mn-vol { display:flex; align-items:center; gap:5px; margin-left:auto; color:#8e8e99; }
+      #hoq-mini .mn-vol svg { width:14px; height:14px; flex:none; }
+      #hoq-mini input.mn-volrange { width:48px; }
+      /* hover tools pill (top-right) */
+      /* tools sit in the title row (left of like) and only show on hover: they
+         take room from the title, never cover a control */
+      #hoq-mini .mn-tools { display:none; flex:none; gap:0; padding:1px; margin-right:2px; border-radius:8px; background:rgba(255,255,255,.07); }
+      #hoq-mini:hover .mn-tools { display:flex; }
+      #hoq-mini .mn-tools .mn-btn { width:22px; height:22px; color:#a6a6b0; }
+      #hoq-mini .mn-tools .mn-btn svg { width:13px; height:13px; }
+      #hoq-mini .mn-tools .mn-btn.on { color:var(--sc-accent,#ff5500); }
+      #hoq-mini .mn-flash { position:absolute; left:10px; bottom:10px; z-index:4; padding:3px 9px; border-radius:99px; max-width:calc(100% - 20px); overflow:hidden; text-overflow:ellipsis;
+        background:rgba(14,14,18,.9); font-size:11px; color:#fff; white-space:nowrap; opacity:0; transition:opacity .15s ease; pointer-events:none; }
+      #hoq-mini .mn-flash.show { opacity:1; }
+      /* layouts */
+      #hoq-mini[data-layout="player"] { padding:12px; gap:12px; }
+      #hoq-mini[data-layout="player"] .mn-art { width:88px; height:88px; }
+      #hoq-mini[data-layout="bar"] { padding:8px 10px 8px 8px; gap:10px; }
+      #hoq-mini[data-layout="bar"] .mn-art { width:40px; height:40px; border-radius:6px; }
+      #hoq-mini[data-layout="name"] { padding:5px 8px 5px 5px; gap:8px; }
+      #hoq-mini[data-layout="name"] .mn-art { width:24px; height:24px; border-radius:5px; box-shadow:none; }
+      #hoq-mini:not([data-layout="player"]) .mn-flash { bottom:auto; top:50%; left:6px; transform:translateY(-50%); }
+      #hoq-mini[data-layout="name"] .mn-tools .mn-btn { width:20px; height:20px; }
+      #hoq-mini:not([data-layout="player"]) .mn-body > :not(.mn-head) { display:none; }
+      #hoq-mini:not([data-layout="player"]) .mn-head .mn-mini-ctrls { display:flex; }
+      #hoq-mini .mn-mini-ctrls { display:none; align-items:center; }
+      #hoq-mini[data-layout="name"] .mn-mini-ctrls, #hoq-mini[data-layout="name"] .mn-meta { display:none !important; }
+      #hoq-mini:not([data-layout="name"]) .mn-line { display:none; }
+      #hoq-mini[data-layout="name"] .mn-like { width:22px; height:22px; }
     `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -7257,9 +7285,24 @@ function setupMiniMode() {
     like: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
     vol: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
     exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+    layout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v6"/></svg>',
+    fade: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>',
   };
   const fmt = (s) => { if (!isFinite(s) || s < 0) s = 0; s = Math.floor(s); const m = Math.floor(s / 60); const ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
+  const fillR = (r) => r.style.setProperty('--p', (r.value - r.min) / (r.max - r.min) * 100 + '%');
   let scrubbing = false, adjustingVol = false;
+
+  // Settings (synced with the account like the rest): layout, always on top,
+  // and how see-through the window gets while the mouse is away.
+  const LAYOUTS = { player: [380, 112], bar: [340, 56], name: [290, 34] };
+  const LAYOUT_NAMES = { player: 'Player', bar: 'Bar', name: 'Name only' };
+  const FADES = [100, 70, 50, 30];
+  const pref = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
+  const setPref = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
+  const layout = () => { const l = pref('hoqMiniLayout', 'player'); return LAYOUTS[l] ? l : 'player'; };
+  const pinned = () => pref('hoqMiniPin', '1') !== '0';
+  const fade = () => { const f = +pref('hoqMiniFade', '100'); return FADES.includes(f) ? f : 100; };
 
   let widget = document.getElementById('hoq-mini');
   if (!widget) {
@@ -7271,11 +7314,20 @@ function setupMiniMode() {
       '<div class="mn-body">' +
         '<div class="mn-head">' +
           '<div class="mn-meta"><div class="mn-title">Not playing</div><div class="mn-artist"></div></div>' +
-          '<button class="mn-btn mn-sm mn-like" title="Like">' + SVG.like + '</button>' +
-          '<button class="mn-btn mn-sm mn-exit" title="Back to full app">' + SVG.exit + '</button>' +
+          '<div class="mn-line"></div>' +
+          '<span class="mn-mini-ctrls">' +
+            '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
+            '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
+          '</span>' +
+          '<span class="mn-tools">' +
+            '<button class="mn-btn mn-t-layout" title="Layout">' + SVG.layout + '</button>' +
+            '<button class="mn-btn mn-t-pin" title="Keep on top">' + SVG.pin + '</button>' +
+            '<button class="mn-btn mn-t-fade" title="Fade when the mouse is away">' + SVG.fade + '</button>' +
+            '<button class="mn-btn mn-t-exit" title="Back to full app">' + SVG.exit + '</button>' +
+          '</span>' +
+          '<button class="mn-btn mn-like" title="Like">' + SVG.like + '</button>' +
         '</div>' +
-        '<div class="mn-seek"><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0">' +
-          '<div class="mn-times"><span class="mn-t0">0:00</span><span class="mn-t1">0:00</span></div></div>' +
+        '<div class="mn-seek"><span class="mn-t0">0:00</span><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0"><span class="mn-t1">0:00</span></div>' +
         '<div class="mn-ctrls">' +
           '<button class="mn-btn mn-shuffle" title="Shuffle">' + SVG.shuffle + '</button>' +
           '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
@@ -7284,36 +7336,60 @@ function setupMiniMode() {
           '<button class="mn-btn mn-repeat" title="Repeat">' + SVG.repeat + '</button>' +
           '<span class="mn-vol" title="Volume (or scroll anywhere)">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
         '</div>' +
-      '</div>';
+      '</div>' +
+      '<div class="mn-flash"></div>';
     document.body.appendChild(widget);
     // Dragging the card body moves the OS window (frameless), except on controls
-    // and the cover art (which is a click target — "back to full app"). Without
-    // excluding the art, mousedown starts an OS window-move and its click never
-    // lands, so clicking the cover dragged the window instead of restoring.
+    // and the cover art (which is a click target — "back to full app").
     widget.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (e.target.closest('button, input, .mn-art')) return;
       scPost('win:drag');
     });
     const clickSc = (sel) => { const el = document.querySelector(sel); if (el) el.click(); setTimeout(update, 60); };
-    widget.querySelector('.mn-prev').addEventListener('click', () => window.__hoqMedia('prev'));
-    widget.querySelector('.mn-next').addEventListener('click', () => window.__hoqMedia('next'));
-    widget.querySelector('.mn-play').addEventListener('click', () => { window.__hoqMedia('playpause'); setTimeout(update, 80); });
-    widget.querySelector('.mn-shuffle').addEventListener('click', () => clickSc('.shuffleControl'));
-    widget.querySelector('.mn-repeat').addEventListener('click', () => clickSc('.repeatControl'));
-    widget.querySelector('.mn-like').addEventListener('click', () => clickSc('.playbackSoundBadge__like'));
-    widget.querySelector('.mn-art').addEventListener('click', () => exitMini());   // cover = back to full app
-    widget.querySelector('.mn-exit').addEventListener('click', () => exitMini());
+    const on = (sel, fn) => widget.querySelectorAll(sel).forEach((b) => b.addEventListener('click', fn));
+    on('.mn-prev', () => window.__hoqMedia('prev'));
+    on('.mn-next', () => window.__hoqMedia('next'));
+    on('.mn-play', () => { window.__hoqMedia('playpause'); setTimeout(update, 80); });
+    on('.mn-shuffle', () => clickSc('.shuffleControl'));
+    on('.mn-repeat', () => clickSc('.repeatControl'));
+    on('.mn-like', () => clickSc('.playbackSoundBadge__like'));
+    on('.mn-art', () => exitMini());
+    on('.mn-t-exit', () => exitMini());
+    let flashT = 0;
+    const flash = (t) => { const f = widget.querySelector('.mn-flash'); f.textContent = t; f.classList.add('show'); clearTimeout(flashT); flashT = setTimeout(() => f.classList.remove('show'), 1300); };
+    on('.mn-t-layout', () => {
+      const keys = Object.keys(LAYOUTS), next = keys[(keys.indexOf(layout()) + 1) % keys.length];
+      setPref('hoqMiniLayout', next); applyLayout(true); flash(LAYOUT_NAMES[next]);
+    });
+    on('.mn-t-pin', () => { setPref('hoqMiniPin', pinned() ? '0' : '1'); scPost('mini:pin:' + (pinned() ? '1' : '0')); reflectTools(); flash(pinned() ? 'Kept on top' : 'Not on top'); });
+    on('.mn-t-fade', () => {
+      const next = FADES[(FADES.indexOf(fade()) + 1) % FADES.length];
+      setPref('hoqMiniFade', next); reflectTools(); flash(next === 100 ? 'Fade off' : 'Fades to ' + next + '% when the mouse is away');
+    });
+    // Overlay fade: see-through while the mouse is away, solid on hover.
+    document.documentElement.addEventListener('mouseleave', () => { if (miniOn() && fade() < 100) scPost('mini:alpha:' + fade()); });
+    document.documentElement.addEventListener('mouseenter', () => { if (miniOn()) scPost('mini:alpha:100'); });
     const prog = widget.querySelector('.mn-prog');
-    const fillR = (r) => r.style.setProperty('--p', (r.value - r.min) / (r.max - r.min) * 100 + '%');
     prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * el.duration); });
     prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) { try { el.currentTime = prog.value / 1000 * el.duration; } catch (e) {} } scrubbing = false; });
     const vol = widget.querySelector('.mn-volrange');
     const setVol = () => { fillR(vol); const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } };
     vol.addEventListener('input', () => { adjustingVol = true; setVol(); });
-    // scroll anywhere on the player = volume
-    widget.addEventListener('wheel', (e) => { e.preventDefault(); vol.value = Math.max(0, Math.min(100, +vol.value + (e.deltaY < 0 ? 5 : -5))); setVol(); }, { passive: false });
     vol.addEventListener('change', () => { adjustingVol = false; });
+    // scroll anywhere on the player = volume
+    widget.addEventListener('wheel', (e) => { e.preventDefault(); vol.value = Math.max(0, Math.min(100, +vol.value + (e.deltaY < 0 ? 5 : -5))); setVol(); flash('Volume ' + vol.value + '%'); }, { passive: false });
+  }
+  const miniOn = () => document.documentElement.classList.contains('hoq-mini');
+  function reflectTools() {
+    widget.querySelector('.mn-t-pin').classList.toggle('on', pinned());
+    widget.querySelector('.mn-t-fade').classList.toggle('on', fade() < 100);
+  }
+  function applyLayout(resize) {
+    const l = layout();
+    widget.setAttribute('data-layout', l);
+    if (resize && miniOn()) scPost('mini:size:' + LAYOUTS[l][0] + 'x' + LAYOUTS[l][1]);
+    reflectTools();
   }
 
   function np() {
@@ -7343,16 +7419,19 @@ function setupMiniMode() {
     return { title, artist, cover, paused, liked, shuffling, repeat };
   }
   function update() {
-    if (!document.documentElement.classList.contains('hoq-mini')) return;
+    if (!miniOn()) return;
     const s = np();
     const set = (sel, txt) => { const el = widget.querySelector(sel); if (el && el.textContent !== txt) el.textContent = txt; };
     set('.mn-title', s.title || 'Not playing');
     set('.mn-artist', s.artist || '');
+    const line = widget.querySelector('.mn-line');
+    const lineHtml = hoqEsc(s.title || 'Not playing') + (s.artist ? ' <span>· ' + hoqEsc(s.artist) + '</span>' : '');
+    if (line.innerHTML !== lineHtml) line.innerHTML = lineHtml;
     const art = widget.querySelector('.mn-art'); const bg = widget.querySelector('.mn-bg');
     // the player badge only carries a 50px thumbnail: ask for the 500px one
     const big = s.cover ? s.cover.replace(/-(t\d+x\d+|large|small|badge|tiny)\.(jpg|png|jpeg)/i, '-t500x500.$2') : '';
     if (big && art.style.backgroundImage !== big) { art.style.backgroundImage = big; bg.style.backgroundImage = big; }
-    const pb = widget.querySelector('.mn-play'); if (pb) pb.innerHTML = s.paused ? SVG.play : SVG.pause;
+    widget.querySelectorAll('.mn-play').forEach((pb) => { const h = s.paused ? SVG.play : SVG.pause; if (pb.innerHTML !== h) pb.innerHTML = h; });
     widget.querySelector('.mn-like').classList.toggle('on', s.liked);
     widget.querySelector('.mn-shuffle').classList.toggle('on', s.shuffling);
     const rpBtn = widget.querySelector('.mn-repeat');
@@ -7364,13 +7443,14 @@ function setupMiniMode() {
     const dur = el && isFinite(el.duration) ? el.duration : 0;
     const cur = el ? el.currentTime : 0;
     prog.disabled = !dur;
-    const fillR = (r) => r.style.setProperty('--p', (r.value - r.min) / (r.max - r.min) * 100 + '%');
     if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; fillR(prog); set('.mn-t0', fmt(cur)); set('.mn-t1', fmt(dur)); }
     if (!adjustingVol && el) { vol.value = Math.round((el.muted ? 0 : el.volume) * 100); fillR(vol); }
   }
   function enterMini() {
     document.documentElement.classList.add('hoq-mini');
-    scPost('mini:on');
+    applyLayout(false);
+    const sz = LAYOUTS[layout()];
+    scPost('mini:on:' + sz[0] + 'x' + sz[1] + ':' + (pinned() ? '1' : '0'));
     update();
     // Tighter cadence so the progress bar moves smoothly.
     if (!window.__hoqMiniTimer) window.__hoqMiniTimer = setInterval(update, 500);
@@ -7381,7 +7461,7 @@ function setupMiniMode() {
     if (window.__hoqMiniTimer) { clearInterval(window.__hoqMiniTimer); window.__hoqMiniTimer = null; }
   }
   window.__hoqExitMini = exitMini;   // let the host force-exit if needed
-  btn.addEventListener('click', () => { document.documentElement.classList.contains('hoq-mini') ? exitMini() : enterMini(); });
+  btn.addEventListener('click', () => { miniOn() ? exitMini() : enterMini(); });
 }
 
 // The profile-tab bar and the library/collection nav lean toward the cursor
