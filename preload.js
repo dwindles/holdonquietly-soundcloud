@@ -250,12 +250,200 @@ function hoqEnsureEqChain(ac) {
     return b;
   });
   for (let i = 0; i < bands.length - 1; i++) rc.call(bands[i], bands[i + 1]);
-  rc.call(bands[bands.length - 1], ac.destination);   // real connect, or we'd recurse
+  let tail = ac.destination;
+  try { tail = hoqBuildFx(ac, rc); } catch (e) { tail = ac.destination; }
+  rc.call(bands[bands.length - 1], tail);   // real connect, or we'd recurse
   ac.__hoqEqBands = bands;
   ac.__hoqEqIn = bands[0];
+  (window.__hoqFxCtxs = window.__hoqFxCtxs || []).push(ac);
   try { hoqApplyEqGains(ac); } catch (e) {}
+  try { hoqApplyFx(ac); } catch (e) {}
   return ac.__hoqEqIn;
 }
+
+// --- Volume boost + leveler + space effects (after the EQ bands) -------------
+// bands -> pre -+-> dry ---------------------+
+//               +-> convolver (reverb) -> wet +-> sum -> HP -> LP -> pan -> boost -> limiter -> out
+//               +-> delay <-> feedback (echo) +
+// Reverbs are synthesized impulse responses (no downloaded files). Everything is
+// transparent at rest: no reverb buffer, filters wide open, boost 0 dB, limiter
+// at ratio 1. The limiter only engages when boosting/levelling so a +12 dB boost
+// squashes instead of clipping.
+const HOQ_SPACES = {
+  bathroom:   { label: 'Bathroom',    tip: 'The song through the door at a party', rt: .8, pre: 2, d0: 6000, d1: 2500, wet: .45, dry: .85, lp: 650, lpQ: .8, er: [[5, .5], [9, .4], [14, .3]] },
+  shower:     { label: 'Shower',      tip: 'Bright tiled echo', rt: 1.3, pre: 1, d0: 11000, d1: 6000, wet: .55, dry: .8, er: [[3, .7], [6, .6], [9, .5], [13, .4], [17, .35], [22, .3]] },
+  room:       { label: 'Room',        tip: 'A small live room', rt: .55, pre: 4, d0: 8000, d1: 3000, wet: .3, dry: 1 },
+  hall:       { label: 'Concert hall', tip: 'Big, smooth hall', rt: 2.4, pre: 22, d0: 7000, d1: 2000, wet: .38, dry: .9 },
+  church:     { label: 'Church',      tip: 'Long stone tail', rt: 5, pre: 38, d0: 6000, d1: 1200, wet: .5, dry: .75 },
+  stadium:    { label: 'Stadium',     tip: 'Huge, with a bounce back', rt: 3.2, pre: 70, d0: 5000, d1: 1500, wet: .42, dry: .8, hp: 110, echo: .42, fb: .28, echoMix: .3 },
+  cave:       { label: 'Cave',        tip: 'Dark and echoey', rt: 3.8, pre: 30, d0: 3500, d1: 700, wet: .5, dry: .75, echo: .29, fb: .38, echoMix: .3 },
+  nextdoor:   { label: 'Next room',   tip: 'Through the wall', rt: .6, pre: 6, d0: 3000, d1: 900, wet: .35, dry: .8, lp: 320, lpQ: .7 },
+  car:        { label: 'Car outside', tip: 'Someone bumping it in the parking lot', rt: 1.8, pre: 15, d0: 4000, d1: 1200, wet: .3, dry: .9, lp: 420, lpQ: 1.6, echo: .12, fb: .1, echoMix: .18 },
+  underwater: { label: 'Underwater',  tip: 'Muffled and floaty', rt: 1.6, pre: 10, d0: 1500, d1: 400, wet: .55, dry: .7, lp: 420, lpQ: 4 },
+  radio:      { label: 'Old radio',   tip: 'Thin AM-radio tone', rt: .25, pre: 2, d0: 4000, d1: 2000, wet: .12, dry: 1, hp: 450, lp: 3200, lpQ: 1.2 },
+  phone:      { label: 'Phone speaker', tip: 'Played off a phone on the table', rt: .15, pre: 1, d0: 6000, d1: 3000, wet: .08, dry: 1, hp: 750, lp: 7000, lpQ: 1.8 },
+  tunnel:     { label: 'Tunnel',      tip: 'Metallic flutter echo', rt: 2.2, pre: 8, d0: 5000, d1: 1800, wet: .35, dry: .85, echo: .055, fb: .5, echoMix: .25 },
+  eightd:     { label: '8D',          tip: 'Circles around your head (headphones)', rt: 1.4, pre: 12, d0: 7000, d1: 2500, wet: .28, dry: .95, pan: .9 },
+};
+function hoqFxState() {
+  const g = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
+  const boost = Math.max(0, Math.min(12, +g('hoqBoost', '0') || 0));
+  const space = HOQ_SPACES[g('hoqSpace', '')] ? g('hoqSpace', '') : '';
+  let amount = +g('hoqSpaceAmt', '100'); if (!(amount >= 0 && amount <= 100)) amount = 100;
+  return { boost, level: g('hoqLevel', '0') === '1', space, amount };
+}
+function hoqMakeIR(ac, s) {
+  const sr = ac.sampleRate, pre = Math.floor(sr * s.pre / 1000);
+  const len = pre + Math.floor(sr * s.rt * 1.15) + 1;
+  const buf = ac.createBuffer(2, len, sr);
+  let seed = 0x2545f491;
+  const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return ((seed >>> 0) / 4294967296) * 2 - 1; };
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch); let lp = 0, a = 0;
+    for (let i = pre; i < len; i++) {
+      const t = (i - pre) / sr;
+      if (((i - pre) & 63) === 0) { const fc = s.d0 * Math.pow(s.d1 / s.d0, Math.min(1, t / s.rt)); a = 1 - Math.exp(-2 * Math.PI * fc / sr); }
+      lp += a * (rnd() - lp);
+      const fadeIn = Math.min(1, t / 0.004);   // no click at the reverb onset
+      d[i] = lp * Math.exp(-6.9 * t / s.rt) * fadeIn;
+    }
+    (s.er || []).forEach(([ms, gn], k) => {   // discrete early reflections (tiles/walls)
+      const idx = Math.floor(sr * (ms + (ch ? 0.7 * (k + 1) : 0)) / 1000);
+      if (idx < len) d[idx] += gn * (k % 2 ? -1 : 1) * 0.6;
+    });
+  }
+  // Normalise energy so wet ~ the dry level regardless of length: sum(h^2) = 1.
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch); let e = 0;
+    for (let i = 0; i < len; i++) e += d[i] * d[i];
+    const k = e > 0 ? 1 / Math.sqrt(e) : 0;
+    for (let i = 0; i < len; i++) d[i] *= k;
+  }
+  return buf;
+}
+function hoqBuildFx(ac, rc) {
+  const n = {};
+  n.pre = ac.createGain();
+  n.dry = ac.createGain();
+  n.conv = ac.createConvolver(); n.conv.normalize = false;
+  n.wet = ac.createGain(); n.wet.gain.value = 0;
+  n.delay = ac.createDelay(1.5); n.delay.delayTime.value = 0.3;
+  n.fb = ac.createGain(); n.fb.gain.value = 0;
+  n.echoLp = ac.createBiquadFilter(); n.echoLp.type = 'lowpass'; n.echoLp.frequency.value = 3000;
+  n.echoOut = ac.createGain(); n.echoOut.gain.value = 0;
+  n.sum = ac.createGain();
+  n.hp = ac.createBiquadFilter(); n.hp.type = 'highpass'; n.hp.frequency.value = 10; n.hp.Q.value = 0.7;
+  n.lp = ac.createBiquadFilter(); n.lp.type = 'lowpass'; n.lp.frequency.value = Math.min(20000, ac.sampleRate / 2 - 100); n.lp.Q.value = 0.7;
+  n.panTrim = ac.createGain();   // panning stereo folds L+R onto one side (+6 dB); trim for 8D
+  n.pan = ac.createStereoPanner();
+  n.clip = ac.createWaveShaper(); n.clip.oversample = 'none';   // curve only while boosting/effects
+  n.osc = ac.createOscillator(); n.osc.frequency.value = 0.11;
+  n.oscAmt = ac.createGain(); n.oscAmt.gain.value = 0;
+  n.agc = ac.createGain();       // "even out volume": slow auto-gain toward one loudness
+  n.meter = ac.createAnalyser(); n.meter.fftSize = 2048;
+  n.boost = ac.createGain();
+  n.lim = ac.createDynamicsCompressor();
+  n.lim.threshold.value = 0; n.lim.knee.value = 0; n.lim.ratio.value = 1; n.lim.attack.value = 0.003; n.lim.release.value = 0.25;
+  rc.call(n.pre, n.dry); rc.call(n.dry, n.sum);
+  rc.call(n.pre, n.conv); rc.call(n.conv, n.wet); rc.call(n.wet, n.sum);
+  rc.call(n.pre, n.delay); rc.call(n.delay, n.echoLp); rc.call(n.echoLp, n.fb); rc.call(n.fb, n.delay);
+  rc.call(n.echoLp, n.echoOut); rc.call(n.echoOut, n.sum);
+  rc.call(n.sum, n.hp); rc.call(n.hp, n.lp); rc.call(n.lp, n.panTrim); rc.call(n.panTrim, n.pan); rc.call(n.pan, n.agc); rc.call(n.agc, n.boost); rc.call(n.pan, n.meter);
+  rc.call(n.boost, n.lim); rc.call(n.lim, n.clip); rc.call(n.clip, ac.destination);
+  rc.call(n.osc, n.oscAmt); rc.call(n.oscAmt, n.pan.pan);
+  try { n.osc.start(); } catch (e) {}
+  n.irs = {};
+  ac.__hoqFx = n;
+  return n.pre;
+}
+function hoqApplyFx(ac) {
+  const n = ac && ac.__hoqFx; if (!n) return;
+  const st = hoqFxState(), t = ac.currentTime, nyq = Math.min(20000, ac.sampleRate / 2 - 100);
+  const set = (p, v, tc) => { try { p.setTargetAtTime(v, t, tc || 0.04); } catch (e) { p.value = v; } };
+  const s = st.space ? HOQ_SPACES[st.space] : null, a = s ? st.amount / 100 : 0;
+  // reverb buffer: swap while the wet path is faded out so it never clicks
+  if (n.curSpace !== st.space) {
+    n.curSpace = st.space;
+    try { n.wet.gain.cancelScheduledValues(t); n.wet.gain.setValueAtTime(0, t); } catch (e) { n.wet.gain.value = 0; }
+    try {
+      if (s) { if (!n.irs[st.space]) n.irs[st.space] = hoqMakeIR(ac, s); n.conv.buffer = n.irs[st.space]; }
+      else n.conv.buffer = null;
+    } catch (e) {}
+  }
+  set(n.wet.gain, s ? s.wet * a : 0, 0.08);
+  set(n.dry.gain, s ? 1 - (1 - s.dry) * a : 1);
+  const echoOn = s && s.echo;
+  if (echoOn) set(n.delay.delayTime, s.echo, 0.01);
+  set(n.fb.gain, echoOn ? s.fb * a : 0);
+  set(n.echoOut.gain, echoOn ? s.echoMix * a : 0);
+  set(n.hp.frequency, s && s.hp ? 10 * Math.pow(s.hp / 10, a) : 10, 0.06);
+  set(n.lp.frequency, s && s.lp ? nyq * Math.pow(s.lp / nyq, a) : nyq, 0.06);
+  set(n.lp.Q, s && s.lp ? 0.7 + ((s.lpQ || 0.7) - 0.7) * a : 0.7);
+  set(n.oscAmt.gain, s && s.pan ? s.pan * a : 0, 0.2);
+  set(n.panTrim.gain, s && s.pan ? 1 - 0.3 * a : 1, 0.2);
+  if (!(s && s.pan)) set(n.pan.pan, 0, 0.2);
+  // Soft clipper catches the few peaks the compressor's attack lets through.
+  // Identity below 0.8, smooth knee to 1.0 above. No curve at rest = bit-exact pass.
+  const needClip = st.boost > 0 || st.level || !!s;
+  if (needClip && !n.clipCurve) {
+    const N = 4097, c = new Float32Array(N);
+    for (let i = 0; i < N; i++) { const x = (i / (N - 1)) * 4 - 2, ax = Math.abs(x); c[i] = ax <= 0.8 ? x : Math.sign(x) * (0.8 + 0.2 * Math.tanh((ax - 0.8) / 0.2)); }
+    n.clipCurve = c;
+  }
+  try { n.clip.curve = needClip ? n.clipCurve : null; } catch (e) {}
+  set(n.boost.gain, Math.pow(10, st.boost / 20));
+  hoqAgc(ac, st.level);
+  // limiter: off (ratio 1) at rest; brickwall-ish when boosting / levelling / heavy reverb
+  if (st.boost > 0 || st.level || (s && s.wet * a > 0.3)) {
+    set(n.lim.threshold, -1.5, 0.1); set(n.lim.knee, 0, 0.1); set(n.lim.ratio, 20, 0.1);
+    n.lim.attack.value = 0.002; n.lim.release.value = 0.2;
+  } else {
+    set(n.lim.threshold, 0, 0.1); set(n.lim.knee, 0, 0.1); set(n.lim.ratio, 1, 0.1);
+  }
+}
+// Auto-volume: measures loudness (pre-boost) a few times a second, keeps a ~3 s
+// running average, and glides a gain toward a -16 dB RMS target (max +12/-9 dB).
+// Silence/gaps between songs are ignored so it doesn't pump up the noise floor.
+const HOQ_AGC_TARGET = -16;
+function hoqAgc(ac, on) {
+  const n = ac.__hoqFx; if (!n) return;
+  if (!on) {
+    if (n.agcTimer) { clearInterval(n.agcTimer); n.agcTimer = 0; }
+    try { n.agc.gain.setTargetAtTime(1, ac.currentTime, 0.3); } catch (e) { n.agc.gain.value = 1; }
+    n.agcPow = 0; return;
+  }
+  if (n.agcTimer) return;
+  const buf = new Float32Array(n.meter.fftSize);
+  n.agcPow = 0;
+  n.agcTimer = setInterval(() => {
+    try {
+      if (ac.state !== 'running') return;
+      n.meter.getFloatTimeDomainData(buf);
+      let e = 0; for (let i = 0; i < buf.length; i++) e += buf[i] * buf[i];
+      const p = e / buf.length;
+      if (p < 1e-5) return;                                // below -50 dB: silence, hold
+      n.agcPow = n.agcPow ? n.agcPow * 0.92 + p * 0.08 : p;   // ~3 s average at 4 Hz
+      const db = 10 * Math.log10(n.agcPow);
+      const want = Math.max(-9, Math.min(12, HOQ_AGC_TARGET - db));
+      n.agc.gain.setTargetAtTime(Math.pow(10, want / 20), ac.currentTime, 1.2);
+      n.agcDb = want;
+    } catch (e) {}
+  }, 250);
+}
+window.__hoqFX = {
+  spaces: HOQ_SPACES,
+  get: hoqFxState,
+  set(patch) {
+    const map = { boost: 'hoqBoost', space: 'hoqSpace', amount: 'hoqSpaceAmt', level: 'hoqLevel' };
+    Object.keys(patch || {}).forEach((k) => {
+      if (!map[k]) return;
+      let v = patch[k]; if (k === 'level') v = v ? '1' : '0';
+      try { localStorage.setItem(map[k], String(v)); } catch (e) {}
+    });
+    (window.__hoqFxCtxs || []).forEach((ac) => { try { hoqApplyFx(ac); } catch (e) {} });
+  },
+  active() { const s = hoqFxState(); return s.boost > 0 || s.level || !!s.space; },
+};
 function hoqApplyEqGains(ac) {
   const bands = ac && ac.__hoqEqBands; if (!bands) return;
   let on = false, gains = [0, 0, 0, 0, 0, 0];
@@ -293,7 +481,7 @@ window.__hoqEQ = {
   set(gains, on) {
     try { localStorage.setItem('hoqEQ', JSON.stringify(gains)); } catch (e) {}
     try { localStorage.setItem('hoqEQOn', on ? '1' : '0'); } catch (e) {}
-    try { if (window.__hoqSCAC) hoqApplyEqGains(window.__hoqSCAC); } catch (e) {}
+    (window.__hoqFxCtxs || []).forEach((ac) => { try { hoqApplyEqGains(ac); } catch (e) {} });
   },
 };
 
@@ -4949,7 +5137,7 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // wins. A PC that's behind applies it and reloads once. Per-device things stay
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
-  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic'];
+  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -6671,30 +6859,63 @@ function setupEqPicker() {
     const st = document.createElement('style');
     st.id = 'hoq-eq-css';
     st.textContent = `
-      #hoq-eq-menu { width:288px; }
-      #hoq-eq-menu .hoq-eq-top { display:flex; align-items:center; justify-content:space-between; padding:2px 4px 10px; }
-      #hoq-eq-menu .hoq-eq-title { font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8a8a95; }
-      .hoq-eq-sw { position:relative; width:38px; height:21px; flex:0 0 38px; border-radius:99px; cursor:pointer;
-        background:rgba(255,255,255,0.10); border:1.5px solid rgba(255,255,255,0.20); transition:background .16s ease, border-color .16s ease; }
-      .hoq-eq-sw::after { content:''; position:absolute; top:1.5px; left:1.5px; width:15px; height:15px; border-radius:50%;
-        background:#e7e7ed; transition:transform .18s cubic-bezier(.34,1.56,.64,1), width .18s ease; }
-      .hoq-eq-sw.on { background:var(--sc-accent,#ff5500); border-color:var(--sc-accent,#ff5500);
-        box-shadow:0 0 10px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
-      .hoq-eq-sw.on::after { transform:translateX(17px); background:#fff; }
-      #hoq-eq-menu .hoq-eq-presets { display:flex; flex-wrap:wrap; gap:6px; padding:0 2px 12px; }
-      .hoq-eq-preset { padding:5px 11px; border-radius:99px; border:1px solid rgba(255,255,255,0.14);
-        background:rgba(255,255,255,0.04); color:#c9c9d2; font-size:12px; cursor:pointer; transition:all .12s ease; }
-      .hoq-eq-preset:hover { background:rgba(255,255,255,0.10); color:#fff; }
-      .hoq-eq-preset.sel { background:var(--sc-accent,#ff5500); border-color:var(--sc-accent,#ff5500); color:#fff; }
-      .hoq-eq-row { display:flex; align-items:center; gap:10px; padding:4px 2px; }
-      .hoq-eq-row .f { width:34px; flex:0 0 34px; font-size:11px; color:#8a8a95; text-align:right; }
-      .hoq-eq-row .v { width:34px; flex:0 0 34px; font-size:11px; color:#c9c9d2; text-align:left; font-variant-numeric:tabular-nums; }
-      .hoq-eq-row input[type=range] { flex:1 1 auto; -webkit-appearance:none; appearance:none; height:4px; border-radius:99px;
-        background:rgba(255,255,255,0.16); outline:none; }
-      .hoq-eq-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px;
-        border-radius:50%; background:var(--sc-accent,#ff5500); cursor:pointer;
-        box-shadow:0 0 8px color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
-      .hoq-eq-note { padding:8px 4px 2px; font-size:11px; color:#7f7f8a; }
+      #hoq-eq-menu { width:300px; padding:8px; max-height:calc(100vh - 90px); overflow-y:auto; overflow-x:hidden;
+        --eq-a: var(--sc-accent,#ff5500); --eq-tint: color-mix(in srgb, var(--eq-a) 20%, transparent);
+        --eq-on: color-mix(in srgb, var(--eq-a) 65%, #fff); --eq-track: rgba(255,255,255,0.12); }
+      #hoq-eq-menu button { font-family:inherit; }
+      .hoq-eq-tabs { display:flex; padding:2px; margin:0 0 10px; border-radius:9px; background:rgba(255,255,255,0.06); }
+      .hoq-eq-tab { flex:1 1 0; position:relative; height:26px; border:0; border-radius:7px; background:transparent;
+        color:#9a9aa6; font-size:12px; font-weight:500; cursor:pointer; transition:background .15s ease, color .15s ease; }
+      .hoq-eq-tab:hover { color:#e6e6ec; }
+      .hoq-eq-tab.sel { background:rgba(255,255,255,0.11); color:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); }
+      .hoq-eq-tab i { display:inline-block; vertical-align:middle; margin:-2px 0 0 6px; width:5px; height:5px; border-radius:50%; background:var(--eq-a); }
+      .hoq-eq-sec { padding:4px 6px; }
+      .hoq-eq-sec + .hoq-eq-sec { margin-top:6px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.07); }
+      .hoq-eq-h { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:22px; margin-bottom:10px;
+        font-size:13px; font-weight:600; color:#ececf1; }
+      .hoq-eq-h b { font-weight:500; color:#9a9aa6; font-variant-numeric:tabular-nums; }
+      .hoq-eq-h small { display:block; margin-top:2px; font-size:11px; font-weight:400; color:#7d7d88; }
+      .hoq-eq-sec > .hoq-eq-h:last-child { margin-bottom:0; }
+      .hoq-eq-sw { position:relative; width:34px; height:20px; flex:0 0 34px; border-radius:99px; cursor:pointer;
+        background:rgba(255,255,255,0.14); transition:background .18s ease; }
+      .hoq-eq-sw::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+        background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.35); transition:transform .2s cubic-bezier(.3,1.4,.6,1); }
+      .hoq-eq-sw.on { background:var(--eq-a); }
+      .hoq-eq-sw.on::after { transform:translateX(14px); }
+      /* chips: quiet by default, tinted (not solid) when picked */
+      .hoq-eq-chips { display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; }
+      .hoq-eq-chips.c3 { grid-template-columns:repeat(3, 1fr); }
+      .hoq-eq-preset, .hoq-eq-space { height:28px; padding:0 4px; border:0; border-radius:7px; background:rgba(255,255,255,0.05);
+        color:#b9b9c3; font-size:12px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        transition:background .12s ease, color .12s ease; }
+      .hoq-eq-preset:hover, .hoq-eq-space:hover { background:rgba(255,255,255,0.10); color:#fff; }
+      .hoq-eq-preset.sel, .hoq-eq-space.sel { background:var(--eq-tint); color:var(--eq-on);
+        box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--eq-a) 40%, transparent); }
+      /* segmented steps (boost) */
+      .hoq-eq-seg { display:flex; margin-top:12px; padding:2px; border-radius:8px; background:rgba(255,255,255,0.05); }
+      .hoq-eq-seg .hoq-eq-preset { flex:1 1 0; height:24px; background:transparent; font-size:11.5px; font-variant-numeric:tabular-nums; }
+      .hoq-eq-seg .hoq-eq-preset.sel { background:rgba(255,255,255,0.11); color:#fff; box-shadow:none; }
+      /* sliders: thin filled track + white thumb */
+      #hoq-eq-menu input[type=range] { -webkit-appearance:none; appearance:none; margin:0; outline:none; cursor:pointer;
+        height:4px; border-radius:99px; background:linear-gradient(to right, var(--eq-a) var(--p,0%), var(--eq-track) var(--p,0%)); }
+      #hoq-eq-menu input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px;
+        border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.45); transition:transform .1s ease; }
+      #hoq-eq-menu input[type=range]:active::-webkit-slider-thumb { transform:scale(1.15); }
+      #hoq-eq-menu input[type=range]:disabled { opacity:.35; cursor:default; }
+      .hoq-eq-line { display:flex; align-items:center; gap:10px; }
+      .hoq-eq-line input { flex:1 1 auto; }
+      .hoq-eq-line span { font-size:11px; color:#7d7d88; font-variant-numeric:tabular-nums; min-width:30px; text-align:right; }
+      /* EQ faders: vertical, filled from the 0 dB centre line */
+      .hoq-eq-faders { position:relative; display:grid; grid-template-columns:repeat(6, 1fr); padding:2px 0 0; margin-bottom:12px; }
+      .hoq-eq-faders::before { content:''; position:absolute; left:8px; right:8px; top:75px; height:1px; background:rgba(255,255,255,0.08); }
+      .hoq-eq-fader { display:flex; flex-direction:column; align-items:center; gap:6px; }
+      .hoq-eq-fader .v { height:12px; font-size:10.5px; color:#9a9aa6; font-variant-numeric:tabular-nums; }
+      .hoq-eq-fader .f { font-size:10.5px; color:#7d7d88; }
+      #hoq-eq-menu .hoq-eq-fader input[type=range] { writing-mode:vertical-lr; direction:rtl; width:4px; height:110px;
+        background:linear-gradient(to top, var(--eq-track) min(50%, var(--p,50%)), var(--eq-a) min(50%, var(--p,50%)),
+          var(--eq-a) max(50%, var(--p,50%)), var(--eq-track) max(50%, var(--p,50%))); }
+      .hoq-eq-off .hoq-eq-faders { opacity:.45; }
+      .hoq-eq-tip { margin-top:10px; font-size:11px; color:#7d7d88; line-height:1.4; }
     `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -6714,35 +6935,101 @@ function setupEqPicker() {
     Vocal: [-2, -1, 2, 4, 3, 1],
     Treble: [0, 0, 0, 2, 4, 6],
     Punch: [5, 2, -1, 0, 2, 4],
+    // tiny/old PC speakers can't move air below ~100 Hz: cut it (it only distorts)
+    // and lift the upper-bass + presence instead so it still sounds full and loud
+    'Old PC': [-6, 5, 3, 1, 3, 2],
+    Night: [-3, -1, 1, 2, 1, -2],
   };
-  const reflectBtn = () => btn.classList.toggle('on', window.__hoqEQ.isOn());
+  const FX = window.__hoqFX;
+  const reflectBtn = () => btn.classList.toggle('on', window.__hoqEQ.isOn() || (FX && FX.active()));
+  let tab = 'eq'; try { tab = localStorage.getItem('hoqEqTab') || 'eq'; } catch (e) {}
+  if (!FX && tab !== 'eq') tab = 'eq';
+
+  function tabsHtml() {
+    if (!FX) return '';
+    const s = FX.get();
+    const dot = { eq: window.__hoqEQ.isOn(), vol: s.boost > 0 || s.level, space: !!s.space };
+    return '<div class="hoq-eq-tabs">' + [['eq', 'EQ'], ['vol', 'Volume'], ['space', 'Space']].map(([k, l]) =>
+      '<button class="hoq-eq-tab' + (tab === k ? ' sel' : '') + '" data-t="' + k + '">' + l + (dot[k] ? '<i></i>' : '') + '</button>').join('') + '</div>';
+  }
+  function bindTabs() {
+    menu.querySelectorAll('.hoq-eq-tab').forEach((el) => el.addEventListener('click', (e) => {
+      e.stopPropagation(); tab = el.getAttribute('data-t'); try { localStorage.setItem('hoqEqTab', tab); } catch (er) {} render(); place();
+    }));
+  }
+  // range fill: --p = how far along the track the value sits
+  const fill = (el) => { const mn = +el.min, mx = +el.max; el.style.setProperty('--p', ((+el.value - mn) / (mx - mn) * 100) + '%'); };
+  const dbTxt = (v) => (v > 0 ? '+' : '') + v;
+
+  function renderVol() {
+    const s = FX.get();
+    let h = tabsHtml();
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Boost<b class="hoq-eq-big">' + (s.boost > 0 ? '+' + s.boost + ' dB' : 'Off') + '</b></div>';
+    h += '<div class="hoq-eq-line"><input type="range" class="hoq-boost" min="0" max="12" step="1" value="' + s.boost + '"></div>';
+    h += '<div class="hoq-eq-seg">' + [0, 3, 6, 9, 12].map((v) =>
+      '<button class="hoq-eq-preset' + (s.boost === v ? ' sel' : '') + '" data-b="' + v + '">' + (v ? '+' + v : 'Off') + '</button>').join('') + '</div></div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h"><div>Even out volume<small>Every song plays at the same loudness</small></div>' +
+      '<div class="hoq-eq-sw hoq-lvl' + (s.level ? ' on' : '') + '" role="switch" aria-checked="' + s.level + '"></div></div></div>';
+    h += '<div class="hoq-eq-sec hoq-eq-tip" style="border:0;margin:0;padding-top:0">For quiet tracks or weak speakers. A limiter keeps it from crackling.</div>';
+    menu.innerHTML = h; bindTabs();
+    const big = menu.querySelector('.hoq-eq-big');
+    const r = menu.querySelector('.hoq-boost'); fill(r);
+    r.addEventListener('input', () => {
+      fill(r); FX.set({ boost: +r.value }); big.textContent = +r.value > 0 ? '+' + r.value + ' dB' : 'Off'; reflectBtn();
+      menu.querySelectorAll('[data-b]').forEach((p) => p.classList.toggle('sel', +p.getAttribute('data-b') === +r.value));
+    });
+    r.addEventListener('change', () => render());
+    menu.querySelectorAll('[data-b]').forEach((el) => el.addEventListener('click', () => { FX.set({ boost: +el.getAttribute('data-b') }); reflectBtn(); render(); }));
+    menu.querySelector('.hoq-lvl').addEventListener('click', () => { FX.set({ level: !FX.get().level }); reflectBtn(); render(); });
+  }
+  function renderSpace() {
+    const s = FX.get(), sp = FX.spaces;
+    let h = tabsHtml();
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Space<b>' + (s.space ? hoqEsc(sp[s.space].label) : 'Off') + '</b></div>';
+    h += '<div class="hoq-eq-chips c3"><button class="hoq-eq-space' + (!s.space ? ' sel' : '') + '" data-s="">Off</button>' +
+      Object.keys(sp).map((k) => '<button class="hoq-eq-space' + (s.space === k ? ' sel' : '') + '" data-s="' + k + '" title="' + hoqEsc(sp[k].tip || '') + '">' + hoqEsc(sp[k].label) + '</button>').join('') + '</div>';
+    h += '<div class="hoq-eq-tip">' + (s.space ? hoqEsc(sp[s.space].tip || '') : 'Put the music somewhere. Stacks with the EQ.') + '</div></div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Amount<b class="hoq-amt-v">' + (s.space ? s.amount + '%' : '–') + '</b></div>' +
+      '<div class="hoq-eq-line"><input type="range" class="hoq-amt" min="0" max="100" step="5" value="' + s.amount + '"' + (s.space ? '' : ' disabled') + '></div></div>';
+    menu.innerHTML = h; bindTabs();
+    menu.querySelectorAll('.hoq-eq-space').forEach((el) => el.addEventListener('click', () => { FX.set({ space: el.getAttribute('data-s') }); reflectBtn(); render(); }));
+    const r = menu.querySelector('.hoq-amt'), v = menu.querySelector('.hoq-amt-v'); fill(r);
+    r.addEventListener('input', () => { fill(r); FX.set({ amount: +r.value }); v.textContent = r.value + '%'; });
+  }
 
   function render() {
+    if (tab === 'vol') return renderVol();
+    if (tab === 'space') return renderSpace();
     const gains = window.__hoqEQ.get();
     const on = window.__hoqEQ.isOn();
     const presetName = Object.keys(PRESETS).find((k) => PRESETS[k].every((v, i) => v === (gains[i] || 0)));
-    let h = '<div class="hoq-eq-top"><span class="hoq-eq-title">Equalizer</span><div class="hoq-eq-sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '"></div></div>';
-    h += '<div class="hoq-eq-presets">' + Object.keys(PRESETS).map((k) =>
-      '<button class="hoq-eq-preset' + (presetName === k ? ' sel' : '') + '" data-p="' + k + '">' + k + '</button>').join('') + '</div>';
-    h += window.__hoqEQ.freqs.map((f, i) =>
-      '<div class="hoq-eq-row"><span class="f">' + window.__hoqEQ.labels[i] + '</span>' +
-      '<input type="range" min="-12" max="12" step="1" value="' + (gains[i] || 0) + '" data-i="' + i + '">' +
-      '<span class="v" data-v="' + i + '">' + ((gains[i] || 0) > 0 ? '+' : '') + (gains[i] || 0) + '</span></div>').join('');
-    h += '<div class="hoq-eq-note">Applies to SoundCloud only. Off = flat (bypassed).</div>';
-    menu.innerHTML = h;
+    let h = tabsHtml() + '<div class="hoq-eq-sec' + (on ? '' : ' hoq-eq-off') + '"><div class="hoq-eq-h">Equalizer<div class="hoq-eq-sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '"></div></div>';
+    h += '<div class="hoq-eq-faders">' + window.__hoqEQ.freqs.map((f, i) =>
+      '<div class="hoq-eq-fader"><span class="v" data-v="' + i + '">' + dbTxt(gains[i] || 0) + '</span>' +
+      '<input type="range" min="-12" max="12" step="1" value="' + (gains[i] || 0) + '" data-i="' + i + '" title="' + window.__hoqEQ.labels[i] + ' Hz">' +
+      '<span class="f">' + window.__hoqEQ.labels[i] + '</span></div>').join('') + '</div>';
+    h += '<div class="hoq-eq-chips">' + Object.keys(PRESETS).map((k) =>
+      '<button class="hoq-eq-preset' + (presetName === k ? ' sel' : '') + '" data-p="' + k + '">' + k + '</button>').join('') + '</div></div>';
+    menu.innerHTML = h; bindTabs();
     menu.querySelector('.hoq-eq-sw').addEventListener('click', () => { window.__hoqEQ.set(window.__hoqEQ.get(), !window.__hoqEQ.isOn()); reflectBtn(); render(); });
     menu.querySelectorAll('.hoq-eq-preset').forEach((el) => el.addEventListener('click', () => {
       window.__hoqEQ.set(PRESETS[el.getAttribute('data-p')].slice(), true); reflectBtn(); render();
     }));
-    menu.querySelectorAll('input[type=range]').forEach((el) => el.addEventListener('input', () => {
-      const g = window.__hoqEQ.get(); g[+el.getAttribute('data-i')] = +el.value;
-      window.__hoqEQ.set(g, true);
-      const v = menu.querySelector('.v[data-v="' + el.getAttribute('data-i') + '"]'); if (v) v.textContent = (+el.value > 0 ? '+' : '') + el.value;
-      reflectBtn();
-      // update preset highlight without a full re-render (keeps slider focus)
-      const gg = window.__hoqEQ.get(); const pn = Object.keys(PRESETS).find((k) => PRESETS[k].every((vv, i) => vv === (gg[i] || 0)));
-      menu.querySelectorAll('.hoq-eq-preset').forEach((p) => p.classList.toggle('sel', p.getAttribute('data-p') === pn));
-    }));
+    menu.querySelectorAll('.hoq-eq-fader input[type=range]').forEach((el) => {
+      fill(el);
+      el.addEventListener('input', () => {
+        fill(el);
+        const g = window.__hoqEQ.get(); g[+el.getAttribute('data-i')] = +el.value;
+        window.__hoqEQ.set(g, true);
+        const v = menu.querySelector('.v[data-v="' + el.getAttribute('data-i') + '"]'); if (v) v.textContent = dbTxt(+el.value);
+        reflectBtn();
+        menu.querySelector('.hoq-eq-sec').classList.remove('hoq-eq-off');
+        const sw = menu.querySelector('.hoq-eq-sw'); if (sw) sw.classList.add('on');
+        // update preset highlight without a full re-render (keeps slider focus)
+        const gg = window.__hoqEQ.get(); const pn = Object.keys(PRESETS).find((k) => PRESETS[k].every((vv, i) => vv === (gg[i] || 0)));
+        menu.querySelectorAll('.hoq-eq-preset').forEach((p) => p.classList.toggle('sel', p.getAttribute('data-p') === pn));
+      });
+    });
   }
   const place = () => { const b = document.getElementById('hoq-eq-btn'); if (!b) return; const r = b.getBoundingClientRect(); menu.style.top = (r.bottom + 8) + 'px'; menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px'; menu.style.left = 'auto'; };
   const isOpen = () => menu.classList.contains('show');
@@ -6752,7 +7039,9 @@ function setupEqPicker() {
   btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
   if (!window.__hoqEqBound) {
     window.__hoqEqBound = true;
-    document.addEventListener('click', (e) => { const b = document.getElementById('hoq-eq-btn'); if (isOpen() && !menu.contains(e.target) && (!b || !b.contains(e.target))) close(); });
+    // composedPath, not contains(): clicking a chip re-renders the menu, so the
+    // target is already detached by the time this runs.
+    document.addEventListener('click', (e) => { const b = document.getElementById('hoq-eq-btn'); const p = e.composedPath ? e.composedPath() : [e.target]; if (isOpen() && !p.includes(menu) && (!b || !p.includes(b))) close(); });
     window.addEventListener('keydown', (e) => { if (isOpen() && e.key === 'Escape') close(); });
     window.addEventListener('resize', () => { if (isOpen()) place(); });
   }
