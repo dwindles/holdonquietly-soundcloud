@@ -2455,6 +2455,32 @@ const BASE_CSS = `
   }
   .dropdownMenu:not(:has(.dropdownContent)) .sc-button:hover * { color: #fff !important; }
 
+  /* ===== Header "..." menu (.moreMenu): same look as the EQ / output menus ===== */
+  .dropdownMenu:has(.moreMenu) {
+    background: rgba(12,12,16,0.78) !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 14px !important; box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
+  }
+  .moreMenu, .moreMenu.m-light { width: 220px !important; padding: 6px !important; box-sizing: border-box !important;
+    background: transparent !important; border: 0 !important; box-shadow: none !important; }
+  .moreMenu .headerMenu__list { margin: 0 !important; padding: 0 !important; border: 0 !important; }
+  .moreMenu .headerMenu__list + .headerMenu__list { margin-top: 4px !important; padding-top: 4px !important;
+    border-top: 1px solid rgba(255,255,255,0.07) !important; }
+  .moreMenu .headerMenu__link, .moreMenu .moreMenu__link {
+    display: flex !important; align-items: center !important; height: 32px !important; padding: 0 10px !important;
+    border: 0 !important; border-radius: 8px !important; background: transparent !important; box-shadow: none !important;
+    color: #d6d6de !important; font-size: 13px !important; font-weight: 500 !important; text-decoration: none !important;
+    transition: background .12s ease, color .12s ease !important;
+  }
+  .moreMenu .headerMenu__link:hover, .moreMenu .moreMenu__link:hover, .moreMenu .headerMenu__link:focus-visible {
+    background: rgba(255,255,255,0.07) !important; color: #fff !important;
+  }
+  /* Go+ upsell: a quiet accent line, not a shout */
+  .moreMenu .moreMenu__link.m-highlight { color: color-mix(in srgb, var(--sc-accent, #ff5500) 65%, #fff) !important; }
+  .moreMenu .moreMenu__link.m-highlight:hover { background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important; }
+  /* Sign out: muted, warns on hover */
+  .moreMenu a[href="/logout"] { color: #9a9aa6 !important; }
+  .moreMenu a[href="/logout"]:hover { color: #ff8a7a !important; background: rgba(255,90,70,0.10) !important; }
+
   /* ===== Comment-sort dropdown (.linkMenu: Newest / Oldest / Track Time) =====
      Same acrylic glass as the header popovers (.dropdownMenu) — low-alpha fill so
      the frost actually shows, slim rows. */
