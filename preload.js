@@ -4620,7 +4620,7 @@ function ensureDiscordPanel() {
     <div class="hoq-dc-card">
       <div class="hoq-dc-top">
         <img class="hoq-dc-logo" src="${HOQ_LOGO}">
-        <div class="hoq-dc-titles"><span>hoq</span></div>
+        <div class="hoq-dc-titles"><span>holdonquietly</span></div>
         <div class="hoq-dc-accent" title="Current accent"><i class="a1"></i><i class="a2"></i></div>
       </div>
       <div class="hoq-sub">
