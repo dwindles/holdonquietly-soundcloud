@@ -165,6 +165,25 @@ static class HoqAccount
         finally { gate.Release(); }
     }
 
+    // Call a hoq accounts API as the signed-in person (app data, profile card).
+    // Returns the response body, or null when signed out / refused / offline.
+    public static async Task<string> Api(HttpMethod method, string path, string jsonBody = null)
+    {
+        try
+        {
+            string at = await AccessToken();
+            if (string.IsNullOrEmpty(at)) return null;
+            using var req = new HttpRequestMessage(method, ORIGIN + path);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", at);
+            if (jsonBody != null) req.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            using var resp = await http.SendAsync(req);
+            string body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) { Program.Log("hoq account: " + method + " " + path + " answered " + (int)resp.StatusCode); return null; }
+            return body;
+        }
+        catch (Exception ex) { Program.Log("hoq account: " + path + " failed (" + ex.GetType().Name + ")"); return null; }
+    }
+
     static async Task RefreshProfile()
     {
         try { if (!string.IsNullOrEmpty(await AccessToken())) await LoadUser(); }

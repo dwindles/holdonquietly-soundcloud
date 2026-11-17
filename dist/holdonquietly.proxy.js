@@ -4280,8 +4280,26 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-pair-btn { flex: none; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer;
         font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-pair-btn:hover { filter: brightness(1.1); }
-      #hoq-discord .hoq-hoq-pic { flex: none; width: 38px; height: 38px; border-radius: 50%; object-fit: cover;
+      /* Account bar: full width at the top of Settings, its own label hidden
+         (the bar names itself). */
+      #hoq-discord .hoq-hoq-sec > .hoq-dc-label { display: none; }
+      #hoq-discord .hoq-hoq-bar { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+        margin-bottom: 6px; border-radius: 14px;
+        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 28%, rgba(255,255,255,0.08));
+        background: linear-gradient(100deg, color-mix(in srgb, var(--sc-accent,#ff5500) 16%, rgba(12,12,14,0.6)), rgba(12,12,14,0.55) 60%);
+        backdrop-filter: blur(20px) saturate(1.3); }
+      #hoq-discord .hoq-hoq-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+      #hoq-discord .hoq-hoq-name { font-size: 14px; color: #fff; }
+      #hoq-discord .hoq-hoq-sub { font-style: normal; font-size: 12px; color: #a9a9b2; }
+      #hoq-discord .hoq-hoq-btns { display: flex; gap: 8px; flex: none; }
+      #hoq-discord .hoq-hoq-pub { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 12px;
+        color: #c9c9d2; cursor: pointer; width: fit-content; }
+      #hoq-discord .hoq-hoq-pub[hidden] { display: none; }
+      #hoq-discord .hoq-hoq-pub input { accent-color: var(--sc-accent,#ff5500); margin: 0; cursor: pointer; }
+      #hoq-discord .hoq-hoq-pic { flex: none; width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+        background: rgba(255,255,255,0.06);
         box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      #hoq-discord .hoq-hoq-pic.is-logo { object-fit: contain; padding: 7px; box-sizing: border-box; }
       #hoq-discord .hoq-hoq-sub.is-bad { color: #ff8a7a; }
       #hoq-discord .hoq-pair-linkbtn { flex: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
         padding: 8px 15px; cursor: pointer; font-weight: 700; font-size: 12px;
@@ -4377,17 +4395,16 @@ function ensureDiscordPanel() {
         </div>
         <div class="hoq-feed-list"><div class="hoq-dc-hint">Loading the feed…</div></div>
       </div>
-      <div class="hoq-dc-sec hoq-hoq-sec">
+      <div class="hoq-dc-sec hoq-hoq-sec hoq-wide">
         <div class="hoq-dc-label">holdonquietly account</div>
-        <div class="hoq-rp">
-          <div class="hoq-rp-row hoq-rp-static">
-            <img class="hoq-hoq-pic" alt="" hidden>
-            <span><b class="hoq-hoq-name">Not signed in</b><em class="hoq-hoq-sub">One account for holdonquietly.com and every hoq app.</em></span>
+        <div class="hoq-hoq-bar">
+          <img class="hoq-hoq-pic" alt="">
+          <span class="hoq-hoq-text"><b class="hoq-hoq-name">holdonquietly account</b><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my holdonquietly profile</label></span>
+          <span class="hoq-hoq-btns">
             <button class="hoq-pair-linkbtn hoq-hoq-profile" type="button" hidden>Profile</button>
             <button class="hoq-pair-btn hoq-hoq-btn" type="button">Sign in</button>
-          </div>
+          </span>
         </div>
-        <div class="hoq-dc-hint">Separate from your SoundCloud sign-in, which stays as it is. Signing in opens holdonquietly.com in your browser.</div>
       </div>
       <div class="hoq-dc-sec">
         <div class="hoq-dc-label">Last.fm scrobbling</div>
@@ -4490,7 +4507,7 @@ function ensureDiscordPanel() {
           <div><div class="hoq-dc-label">Top artists</div><ol class="hoq-top hoq-top-artists"></ol></div>
           <div><div class="hoq-dc-label">Top tracks</div><ol class="hoq-top hoq-top-tracks"></ol></div>
         </div>
-        <div class="hoq-dc-hint">Counted locally by the app &mdash; SoundCloud exposes no history API. <button class="hoq-stat-reset">Reset</button></div>
+        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. Sign in to your holdonquietly account (Settings) to keep them on your account. <button class="hoq-stat-reset">Reset</button></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Friends listening</div>
@@ -4547,7 +4564,14 @@ function ensureDiscordPanel() {
   const hookSec = p.querySelector('.hoq-hook-sec');
   if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
   const hoqSec = p.querySelector('.hoq-hoq-sec');
-  if (hoqSec) { if (hoqHasHost()) setupHoqAccount(hoqSec); else hoqSec.remove(); }
+  if (hoqSec) {
+    if (hoqHasHost()) {
+      setupHoqAccount(hoqSec);
+      // Lead the Settings pane with it — under the (long) palette nobody found it.
+      const firstSet = p.querySelector('.hoq-dc-sec.hoq-pane-set');
+      if (firstSet && firstSet !== hoqSec) firstSet.parentNode.insertBefore(hoqSec, firstSet);
+    } else hoqSec.remove();
+  }
   const pairSec = p.querySelector('.hoq-pair-sec');
   if (pairSec) { if (hoqHasHost()) setupPairSettings(pairSec); else pairSec.remove(); }
   p.dataset.pane = 'social';
@@ -4584,9 +4608,12 @@ function ensureDiscordPanel() {
   });
   const reset = p.querySelector('.hoq-stat-reset');
   if (reset) reset.addEventListener('click', () => {
-    try { localStorage.removeItem('hoqStats'); } catch (e) {}
+    // Resets THIS PC's count (same device id, so the account copy is zeroed too
+    // on the next sync); other PCs and restored stats on the account stay.
+    try { localStorage.setItem('hoqStats', JSON.stringify({ device: hoqStatsRead().device })); } catch (e) {}
     _statsTitle = ''; _statsLastTick = 0;
     renderHoqStats();
+    hoqCloudPush(true);
   });
   const name = p.querySelector('.hoq-dc-name');
   const sc = p.querySelector('.hoq-dc-sc');
@@ -4730,10 +4757,84 @@ function hoqStatsRead() {
     s.plays = s.plays || 0; s.seconds = s.seconds || 0;
     s.artists = s.artists || {}; s.tracks = s.tracks || {};
     if (!s.since) s.since = Date.now();
+    // Which PC this tally is. Lives INSIDE hoqStats on purpose: if the local
+    // copy is ever wiped, a fresh id starts and the old tally on the account is
+    // never overwritten by a smaller one.
+    if (!s.device) s.device = 'd' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     return s;
-  } catch (e) { return { plays: 0, seconds: 0, artists: {}, tracks: {}, since: Date.now() }; }
+  } catch (e) { return { plays: 0, seconds: 0, artists: {}, tracks: {}, since: Date.now(), device: 'd' + Date.now().toString(36) }; }
 }
 function hoqStatsWrite(s) { try { localStorage.setItem('hoqStats', JSON.stringify(s)); } catch (e) {} }
+
+// ---- stats on the holdonquietly account ----
+// Each PC uploads its own tally as "sc-stats:<device>". The app shows this PC's
+// tally plus every other one on the account (cached, so it still shows after
+// signing out). Listening while signed out is in this PC's tally, so it lands
+// on the account at the next sign-in. Nothing is ever counted twice.
+function hoqStatsAdd(a, b) {
+  const out = { plays: (a.plays || 0) + (b.plays || 0), seconds: (a.seconds || 0) + (b.seconds || 0),
+    artists: Object.assign({}, a.artists), tracks: Object.assign({}, a.tracks),
+    since: Math.min(a.since || Infinity, b.since || Infinity) };
+  for (const k in (b.artists || {})) out.artists[k] = (out.artists[k] || 0) + (+b.artists[k] || 0);
+  for (const k in (b.tracks || {})) out.tracks[k] = (out.tracks[k] || 0) + (+b.tracks[k] || 0);
+  if (!isFinite(out.since)) out.since = Date.now();
+  return out;
+}
+function hoqStatsCloud() { try { return JSON.parse(localStorage.getItem('hoqStatsCloud')) || null; } catch (e) { return null; } }
+function hoqStatsShown() {
+  const s = hoqStatsRead(), c = hoqStatsCloud(), u = window.__hoqAccountUser;
+  return c && c.others && (!u || c.uid === u.id) ? hoqStatsAdd(s, c.others) : s;
+}
+// Keeps one PC's upload well under the account's 256 KB per key.
+function hoqStatsTrim(s) {
+  const top = (o, n) => Object.fromEntries(Object.entries(o || {}).sort((x, y) => y[1] - x[1]).slice(0, n).map(([k, v]) => [String(k).slice(0, 200), v]));
+  return { plays: s.plays, seconds: s.seconds, since: s.since, device: s.device, artists: top(s.artists, 1500), tracks: top(s.tracks, 2500) };
+}
+function hoqStatsCard(s) {
+  const best = (o) => { let b = null; for (const k in o) if (b === null || o[k] > o[b]) b = k; return b; };
+  const rows = [
+    { label: 'plays', value: s.plays.toLocaleString() },
+    { label: 'time listened', value: hoqFmtDur(s.seconds) },
+    { label: 'different tracks', value: Object.keys(s.tracks).length.toLocaleString() },
+  ];
+  const ta = best(s.artists), tt = best(s.tracks);
+  if (ta) rows.push({ label: 'top artist', value: ta });
+  if (tt) rows.push({ label: 'top track', value: tt });
+  rows.push({ label: 'counting since', value: new Date(s.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) });
+  return rows;
+}
+let _cloudSig = '', _cardState = '';
+function hoqCloudPush(force) {
+  const u = window.__hoqAccountUser;
+  if (!u || !u.id || !hoqHasHost()) return;
+  const s = hoqStatsRead();
+  hoqStatsWrite(s);   // pins the device id before it goes up
+  const pub = localStorage.getItem('hoqStatsPublic') === '1';
+  const sig = u.id + '|' + s.device + '|' + s.plays + '|' + s.seconds + '|' + pub;
+  if (!force && sig === _cloudSig) return;
+  _cloudSig = sig;
+  const msg = { key: 'sc-stats:' + s.device, data: hoqStatsTrim(s) };
+  if (pub) msg.card = hoqStatsCard(hoqStatsShown());
+  else if (_cardState !== 'off') msg.card = [];
+  _cardState = pub ? 'on' : 'off';
+  scPost('hoqacct:stats:' + JSON.stringify(msg));
+}
+// The host answers 'hoqacct:pull' with everything this app keeps on the account.
+window.__hoqCloudStats = function (resp) {
+  const u = window.__hoqAccountUser;
+  if (!u || !resp || !Array.isArray(resp.items)) return;
+  const mine = 'sc-stats:' + hoqStatsRead().device;
+  let others = null;
+  for (const it of resp.items) {
+    if (!it || typeof it.key !== 'string' || it.key.indexOf('sc-stats:') !== 0 || it.key === mine) continue;
+    if (!it.data || typeof it.data !== 'object') continue;
+    others = hoqStatsAdd(others || {}, it.data);
+  }
+  try { localStorage.setItem('hoqStatsCloud', JSON.stringify({ uid: u.id, others })); } catch (e) {}
+  renderHoqStats();
+  hoqCloudPush(true);   // this PC's tally (incl. anything played while signed out) goes up now
+};
+setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 
 let _statsTitle = '', _statsLastTick = 0;
 function hoqStatsTick() {
@@ -4748,8 +4849,12 @@ function hoqStatsTick() {
   } else {
     _statsLastTick = 0;
   }
+  // The last counted title is kept with the stats, so a restart or reload with the
+  // same song still loaded isn't counted as another play.
+  if (!_statsTitle && s.last) _statsTitle = s.last;
   if (np.title && np.title !== _statsTitle) {
     _statsTitle = np.title;
+    s.last = np.title;
     s.plays++;
     s.tracks[np.title] = (s.tracks[np.title] || 0) + 1;
     if (np.artist) s.artists[np.artist] = (s.artists[np.artist] || 0) + 1;
@@ -4766,7 +4871,7 @@ function hoqFmtDur(sec) {
 function renderHoqStats() {
   const p = document.getElementById('hoq-discord');
   if (!p || !p.classList.contains('open')) return;
-  const s = hoqStatsRead();
+  const s = hoqStatsShown();
   const set = (sel, v) => { const el = p.querySelector(sel); if (el) el.textContent = v; };
   set('.hoq-stat-plays', s.plays.toLocaleString());
   set('.hoq-stat-time', hoqFmtDur(s.seconds));
@@ -5068,12 +5173,24 @@ function setupHoqAccount(sec) {
   const sub = sec.querySelector('.hoq-hoq-sub');
   const btn = sec.querySelector('.hoq-hoq-btn');
   const prof = sec.querySelector('.hoq-hoq-profile');
+  const pubRow = sec.querySelector('.hoq-hoq-pub');
+  const pubBox = pubRow.querySelector('input');
   const blurb = sub.textContent;
   let st = { signedIn: false, busy: false, note: '' };
+  pubBox.checked = localStorage.getItem('hoqStatsPublic') === '1';
+  pubBox.addEventListener('change', () => {
+    try { localStorage.setItem('hoqStatsPublic', pubBox.checked ? '1' : '0'); } catch (e) {}
+    hoqCloudPush(true);
+  });
   window.__hoqAccount = (s) => {
+    const was = !!window.__hoqAccountUser;
     st = s || st;
     const u = st.user || {};
     window.__hoqAccountUser = st.signedIn ? u : null;   // who's signed in, for other features
+    pubRow.hidden = !st.signedIn;
+    // Just signed in (or the app started signed in): fetch the account's stats,
+    // which then sends this PC's tally up.
+    if (st.signedIn && !was) scPost('hoqacct:pull');
     if (st.busy) {
       name.textContent = 'Finish signing in in your browser…';
       sub.textContent = 'Waiting for holdonquietly.com.';
@@ -5083,19 +5200,21 @@ function setupHoqAccount(sec) {
       sub.textContent = u.username ? '@' + u.username + (u.role && u.role !== 'user' ? ' · ' + u.role : '') : 'Signed in';
       btn.textContent = 'Sign out';
     } else {
-      name.textContent = 'Not signed in';
+      name.textContent = 'holdonquietly account';
       sub.textContent = st.note || blurb;
       btn.textContent = 'Sign in';
     }
     sub.classList.toggle('is-bad', !!st.note && !st.busy && !st.signedIn);
     prof.hidden = !(st.signedIn && u.profile);
-    const src = st.signedIn && u.picture ? u.picture : '';
-    if (src) { if (pic.getAttribute('src') !== src) pic.src = src; pic.hidden = false; }
-    else { pic.hidden = true; pic.removeAttribute('src'); }
+    // Their picture when signed in, else the hoq logo — the bar never has a hole.
+    const src = st.signedIn && hoqSafeUrl(u.picture) ? hoqSafeUrl(u.picture) : HOQ_LOGO;
+    pic.classList.toggle('is-logo', src === HOQ_LOGO);
+    if (pic.getAttribute('src') !== src) pic.src = src;
   };
-  pic.addEventListener('error', () => { pic.hidden = true; });
+  pic.addEventListener('error', () => { if (pic.getAttribute('src') !== HOQ_LOGO) { pic.src = HOQ_LOGO; pic.classList.add('is-logo'); } });
   btn.addEventListener('click', () => scPost(st.busy ? 'hoqacct:cancel' : st.signedIn ? 'hoqacct:signout' : 'hoqacct:signin'));
   prof.addEventListener('click', () => { const u = st.user; if (u && u.profile) scPost('open:' + u.profile); });
+  window.__hoqAccount(st);   // draw the signed-out bar (with the logo) until the host answers
   scPost('hoqacct:status');
 }
 
@@ -5674,10 +5793,9 @@ window.__hoqFriends = function (list) {
       'Presence only posts while a track is playing.</div>';
     return;
   }
-  if (!others.length) {
-    el.innerHTML = '<div class="hoq-dc-hint">Only you are on right now.</div>';
-  }
-  el.innerHTML += rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
+  // Rebuilt from scratch every poll. This used to `+=` onto whatever was there,
+  // so with anyone else listening the whole list stacked up again every 15 s.
+  el.innerHTML = (others.length ? '' : '<div class="hoq-dc-hint">Only you are on right now.</div>') + rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
     '<img class="hoq-dc-fcover" src="' + (hoqEsc(hoqSafeUrl(f.cover)) || HOQ_LOGO) + '">' +
     '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') +
     (f.id === me ? '<em class="hoq-me">you</em>' : '') + '</b>' +

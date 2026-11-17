@@ -789,6 +789,35 @@ class Program
         }
     }
 
+    // Listening stats on the hoq account. The page sends this PC's tally
+    // ({ key: "sc-stats:<device>", data, card? }) and the host saves it as the
+    // signed-in person; card = the rows for their profile ([] takes it off).
+    static async Task HoqStatsPush(string json)
+    {
+        try
+        {
+            using var d = JsonDocument.Parse(json);
+            var r = d.RootElement;
+            string key = Prop(r, "key");
+            if (key.Length == 0 || key.Length > 64 || !key.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '_' || c == ':' || c == '-')) return;
+            if (r.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                string ok = await HoqAccount.Api(HttpMethod.Put, "/api/account/me/appdata/" + key, "{\"data\":" + data.GetRawText() + "}");
+                if (ok == null) return;   // signed out / offline: the page tries again later
+            }
+            if (r.TryGetProperty("card", out var card) && card.ValueKind == JsonValueKind.Array)
+                await HoqAccount.Api(HttpMethod.Put, "/api/account/me/appstats", "{\"stats\":" + card.GetRawText() + "}");
+            HoqAccount.RunJs?.Invoke("window.__hoqCloudPushed && window.__hoqCloudPushed(" + JsonSerializer.Serialize(key) + ")");
+        }
+        catch (Exception ex) { Log("stats push failed: " + ex.GetType().Name); }
+    }
+    static async Task HoqStatsPull()
+    {
+        string body = await HoqAccount.Api(HttpMethod.Get, "/api/account/me/appdata");
+        if (body == null) return;
+        HoqAccount.RunJs?.Invoke("window.__hoqCloudStats && window.__hoqCloudStats(" + JsonOrNull(body) + ")");
+    }
+
     // Poll everyone's presence and hand it to the page to render the friends feed.
     static async Task FriendsLoop()
     {
@@ -1073,6 +1102,8 @@ class Program
         if (m == "lastfm:disconnect") { LastFm.Disconnect(); return; }
         if (m == "lastfm:status") { LastFm.Status(); return; }
         if (m == "hoqacct:status") { HoqAccount.Status(); return; }
+        if (m != null && m.StartsWith("hoqacct:stats:")) { _ = HoqStatsPush(m.Substring(14)); return; }
+        if (m == "hoqacct:pull") { _ = HoqStatsPull(); return; }
         if (m == "hoqacct:signin") { _ = HoqAccount.SignIn(); return; }
         if (m == "hoqacct:cancel") { HoqAccount.CancelSignIn(); return; }
         if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }
