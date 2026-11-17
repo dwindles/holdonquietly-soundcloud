@@ -487,6 +487,15 @@ const BASE_CSS = `
   html.sc-coverbg .playControls::before,
   html.sc-coverbg .playControls__inner,
   html.sc-coverbg .playControls__bg { background: transparent !important; }
+  /* Panels that sit on the page itself (library sidebar, the hoq tab's cards,
+     rows and stats) don't re-blur what's behind them: it's already the blurred
+     cover, so a second blur adds nothing you can see, and on some GPUs WebView2
+     draws it in tiles with a hard line across the panel. Bars and pop-ups that
+     float over moving content (header, player, menus) keep their blur. */
+  html.sc-coverbg .l-nav .collectionNav.g-tabs,
+  html.sc-coverbg #hoq-discord .hoq-dc-card *:not([id$="-modal"]):not(.hoq-pop) {
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  }
 
   /* ===== Scrollbar =====
      Hide EVERY native scrollbar (no reserved gutter on the window edge — that was
@@ -4025,7 +4034,8 @@ function ensureDiscordPanel() {
       html.hoq-tab .l-listen-wrapper,
       html.hoq-tab .webiIframe,
       html.hoq-tab .l-collection,
-      html.hoq-tab .stream { display: none !important; }
+      html.hoq-tab .stream,
+      html.hoq-tab .webAuthContainerWrapper { display: none !important; }
       @media (min-width: 900px) {
         #hoq-discord .hoq-dc-card { padding: 28px 30px; }
         #hoq-discord .hoq-dc-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0 26px; align-items: start; }
