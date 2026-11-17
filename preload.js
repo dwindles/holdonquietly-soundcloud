@@ -232,6 +232,51 @@ function scPost(cmd) {
   } catch (e) {}
 })();
 
+// --- Output-device watchdog -------------------------------------------------------
+// A chosen output that stops taking audio (monitor/HDMI asleep or switched input,
+// headset unplugged, device grabbed exclusively) freezes the AudioContext clock.
+// SoundCloud then waits forever and EVERY song shows as buffering. If the clock
+// stalls while a song should be playing, fall back to the system default for this
+// session (the saved choice is kept) and say so. When Windows reports a device
+// change, the saved device is tried again.
+(() => {
+  try {
+    let lastAc = -1, lastWall = 0, stalls = 0, fellBackFrom = '';
+    const playingNow = () => { const b = document.querySelector('.playControls__play'); return !!b && /^pause/i.test(b.getAttribute('aria-label') || ''); };
+    const fallBack = (why) => {
+      const id = window.__hoqSinkId || '';
+      if (!id) return false;
+      fellBackFrom = id; window.__hoqSinkId = '';          // session only: localStorage keeps the choice
+      try { window.__hoqApplySink(); } catch (e) {}
+      try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Switched to your default speakers', 'Your chosen output stopped responding' + (why ? ' (' + why + ')' : '') + '. It will be tried again when it reconnects.'); } catch (e) {}
+      return true;
+    };
+    window.__hoqSinkWatch = { get fellBackFrom() { return fellBackFrom; } };
+    setInterval(() => {
+      const ac = window.__hoqSCAC; if (!ac) return;
+      if (!ac.__hoqErrHooked) { ac.__hoqErrHooked = true; try { ac.addEventListener('error', () => fallBack('device error')); } catch (e) {} }
+      const now = performance.now() / 1000;
+      if (playingNow() && ac.state === 'suspended') { try { ac.resume(); } catch (e) {} }
+      if (playingNow() && ac.state === 'running' && lastAc >= 0 && now - lastWall > 0.5) {
+        const rate = (ac.currentTime - lastAc) / (now - lastWall);
+        stalls = rate < 0.5 ? stalls + 1 : 0;
+        if (stalls >= 3) { stalls = 0; fallBack(''); }
+      } else stalls = 0;
+      lastAc = ac.currentTime; lastWall = now;
+    }, 1500);
+    navigator.mediaDevices && navigator.mediaDevices.addEventListener && navigator.mediaDevices.addEventListener('devicechange', () => {
+      if (!fellBackFrom) return;
+      navigator.mediaDevices.enumerateDevices().then((ds) => {
+        if (!ds.some((d) => d.kind === 'audiooutput' && d.deviceId === fellBackFrom)) return;
+        let saved = ''; try { saved = localStorage.getItem('hoqSinkId') || ''; } catch (e) {}
+        if (saved !== fellBackFrom) { fellBackFrom = ''; return; }   // they picked something else meanwhile
+        window.__hoqSinkId = fellBackFrom; fellBackFrom = '';
+        try { window.__hoqApplySink(); } catch (e) {}
+      }).catch(() => {});
+    });
+  } catch (e) {}
+})();
+
 // --- Equalizer -----------------------------------------------------------------
 // A 6-band graphic EQ spliced into SoundCloud's own audio graph at the very last
 // stage. Rather than reroute SC's source (which risks breaking its volume), we
@@ -5005,6 +5050,10 @@ window.__hoqUpdate = function (state, ver) {
         '<span>Restart to finish installing.</span></div>' +
         '<button class="go">Restart</button><button class="x">×</button>';
       el.querySelector('.go').onclick = () => scPost('update:apply');
+    } else if (state === 'notice') {   // (state, title, detail): a short heads-up
+      el.innerHTML = '<div class="ic">!</div><div class="tx"><b>' + hoqEsc(ver) + '</b>' +
+        '<span>' + hoqEsc(arguments[2] || '') + '</span></div><button class="x">×</button>';
+      setTimeout(() => { try { el.classList.remove('show'); setTimeout(() => el.remove(), 400); } catch (e) {} }, 9000);
     } else { // 'done'
       el.innerHTML = '<div class="ic">✓</div><div class="tx"><b>Updated to ' + v + '</b>' +
         '<span>You’re on the latest version.</span></div><button class="x">×</button>';
