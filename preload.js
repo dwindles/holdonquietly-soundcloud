@@ -6693,32 +6693,41 @@ function setupOutputPicker() {
       #hoq-out-btn:hover { color:#fff; }
       #hoq-out-btn.on { color:var(--sc-accent,#ff5500); }
       #hoq-out-btn svg { width:22px; height:22px; }
-      #hoq-out-menu { position:fixed; z-index:2147483000; min-width:260px; max-width:340px;
-        padding:8px; border-radius:14px;
-        background:rgba(12,12,16,0.72); border:1px solid rgba(255,255,255,0.10);
+      #hoq-out-menu { position:fixed; z-index:2147483000; width:310px; max-height:calc(100vh - 80px); overflow-y:auto;
+        padding:6px; border-radius:14px; box-sizing:border-box;
+        background:rgba(12,12,16,0.78); border:1px solid rgba(255,255,255,0.09);
         box-shadow:0 18px 52px rgba(0,0,0,0.55);
         backdrop-filter:blur(24px) saturate(1.5); -webkit-backdrop-filter:blur(24px) saturate(1.5);
         color:#e7e7ed; font-family:Inter,-apple-system,Arial,sans-serif;
         opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none;
         transition:opacity .13s ease, transform .13s ease; }
       #hoq-out-menu.show { opacity:1; transform:none; pointer-events:auto; }
-      .hoq-out-head { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-        color:#8a8a95; padding:6px 8px 8px; }
-      .hoq-out-item { display:flex; align-items:center; gap:9px; width:100%; box-sizing:border-box;
-        padding:9px 10px; border:0; border-radius:9px; background:transparent; color:#e7e7ed;
-        font-size:13.5px; text-align:left; cursor:pointer; transition:background .12s ease; }
-      .hoq-out-item:hover { background:rgba(255,255,255,0.07); }
-      .hoq-out-item .tick { width:15px; height:15px; flex:0 0 15px; color:var(--sc-accent,#ff5500); opacity:0; }
+      #hoq-out-menu button { font-family:inherit; }
+      .hoq-out-head { padding:8px 10px 8px; font-size:13px; font-weight:600; color:#ececf1; }
+      .hoq-out-group { padding:10px 10px 4px; font-size:11px; font-weight:500; color:#7d7d88; }
+      .hoq-out-sep { height:1px; margin:4px 6px; background:rgba(255,255,255,0.07); }
+      .hoq-out-item { display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box; min-height:44px;
+        padding:6px 10px 6px 7px; border:0; border-radius:9px; background:transparent; color:#e2e2e8;
+        text-align:left; cursor:pointer; transition:background .12s ease; }
+      .hoq-out-item:hover { background:rgba(255,255,255,0.06); }
+      .hoq-out-ic { flex:0 0 30px; width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
+        background:rgba(255,255,255,0.06); color:#a6a6b0; transition:background .12s ease, color .12s ease; }
+      .hoq-out-ic svg { width:16px; height:16px; }
+      .hoq-out-txt { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
+      .hoq-out-txt b, .hoq-out-txt small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .hoq-out-txt b { font-size:13px; font-weight:500; color:#ececf1; }
+      .hoq-out-txt small { font-size:11px; color:#7d7d88; }
+      .hoq-out-item .tick { width:14px; height:14px; flex:0 0 14px; color:var(--sc-accent,#ff5500); opacity:0; }
+      .hoq-out-item.sel { background:color-mix(in srgb, var(--sc-accent,#ff5500) 13%, transparent); }
       .hoq-out-item.sel .tick { opacity:1; }
-      .hoq-out-item.sel { color:#fff; }
-      .hoq-out-item .lbl { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .hoq-out-locked { padding:6px 8px 4px; }
-      .hoq-out-enable { display:inline-flex; align-items:center; gap:7px; margin-top:4px;
-        padding:8px 12px; border:0; border-radius:9px; cursor:pointer; font-size:13px; font-weight:600;
-        color:#fff; background:var(--sc-accent,#ff5500);
-        box-shadow:0 4px 16px color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
-      .hoq-out-note { padding:8px 8px 4px; font-size:11px; line-height:1.45; color:#7f7f8a; }
-      .hoq-out-msg { padding:6px 8px 2px; font-size:11.5px; color:var(--sc-accent,#ff5500); }
+      .hoq-out-item.sel .hoq-out-txt b { color:#fff; font-weight:600; }
+      .hoq-out-item.sel .hoq-out-ic { background:color-mix(in srgb, var(--sc-accent,#ff5500) 22%, transparent); color:var(--sc-accent,#ff5500); }
+      .hoq-out-locked { padding:6px 10px 4px; }
+      .hoq-out-enable { display:inline-flex; align-items:center; height:30px; padding:0 13px; border:0; border-radius:8px;
+        cursor:pointer; font-size:12.5px; font-weight:600; color:#fff; background:var(--sc-accent,#ff5500); }
+      .hoq-out-note { padding:8px 10px 6px; font-size:11px; line-height:1.45; color:#7d7d88; }
+      .hoq-out-msg { padding:6px 10px 4px; font-size:11.5px; color:color-mix(in srgb, var(--sc-accent,#ff5500) 60%, #fff); }
+      .hoq-out-msg:empty { display:none; }
       html.hoq-lowend #hoq-out-menu, html.hoq-no-frost #hoq-out-menu {
         background:rgba(16,16,20,0.98); backdrop-filter:none; -webkit-backdrop-filter:none; }
     `;
@@ -6777,6 +6786,26 @@ function setupOutputPicker() {
     } catch (e) { msg('Audio permission is needed to list device names.'); }
   };
 
+  // "Speakers (2- Focusrite USB Audio)" -> { name: 'Speakers', sub: 'Focusrite USB Audio' }
+  const splitLabel = (label) => {
+    const m = /^(.*?)\s*\(([^()]+)\)\s*$/.exec(label || '');
+    const name = (m ? m[1] : label || '').trim(), sub = m ? m[2].replace(/^\d+\s*-\s*/, '').trim() : '';
+    return name ? { name, sub } : { name: sub || label || 'Device', sub: '' };
+  };
+  const IC = {
+    speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><circle cx="12" cy="14.5" r="3.5"/><circle cx="12" cy="7" r="1"/></svg>',
+    display: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg>',
+    phones: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="2.5" y="14" width="4.5" height="7" rx="1.8"/><rect x="17" y="14" width="4.5" height="7" rx="1.8"/></svg>',
+    virtual: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7V3M15 7V3"/><path d="M6.5 7h11v4a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5V21"/></svg>',
+    system: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10"/><path d="M9.5 10.5 11.5 12.5 15 8.5"/></svg>',
+  };
+  const kindOf = (label) => {
+    if (/VB-Audio|Virtual|\bCABLE\b|Voicemeeter|Steam Streaming|NVIDIA Broadcast|Voicemod|SteelSeries Sonar/i.test(label)) return 'virtual';
+    if (/High Definition Audio Device|HDMI|DisplayPort|Display Audio|NVIDIA High Definition|Intel.*Display/i.test(label)) return 'display';
+    if (/head(phone|set)|earbuds?|airpods|buds|arctis|hyperx|wh-1000|bluetooth/i.test(label)) return 'phones';
+    return 'speaker';
+  };
+
   async function render() {
     let outs = [];
     try {
@@ -6786,21 +6815,34 @@ function setupOutputPicker() {
     // Labels are blank until an audio permission is granted once.
     const named = outs.filter((d) => d.deviceId && d.label);
     const locked = named.length === 0;
-
-    let html = '<div class="hoq-out-head">Play SoundCloud out of</div>';
     const cur = window.__hoqSinkId || '';
-    const row = (id, label) =>
-      `<button class="hoq-out-item${(cur === id) ? ' sel' : ''}" data-id="${id.replace(/"/g, '&quot;')}">${TICK}<span class="lbl">${hoqEsc(label)}</span></button>`;
-    html += row('', 'System default');
-    named.forEach((d) => { if (d.deviceId !== 'default') html += row(d.deviceId, d.label); });
+    // "default" / "communications" are Windows aliases of real devices: show the
+    // default's name under "System default" and drop the duplicates.
+    const defDev = named.find((d) => d.deviceId === 'default');
+    const defLbl = defDev ? splitLabel(defDev.label.replace(/^Default\s*-\s*/i, '')) : null;
+    const real = named.filter((d) => d.deviceId !== 'default' && d.deviceId !== 'communications');
+
+    const row = (id, kind, name, sub) =>
+      `<button class="hoq-out-item${(cur === id) ? ' sel' : ''}" data-id="${id.replace(/"/g, '&quot;')}" title="${hoqEsc(sub ? name + ' (' + sub + ')' : name)}">` +
+      `<span class="hoq-out-ic">${IC[kind]}</span><span class="hoq-out-txt"><b>${hoqEsc(name)}</b>${sub ? '<small>' + hoqEsc(sub) + '</small>' : ''}</span>${TICK}</button>`;
+    let html = '<div class="hoq-out-head">Play SoundCloud out of</div>';
+    html += row('', 'system', 'System default', defLbl ? 'Now: ' + defLbl.name + (defLbl.sub ? ' · ' + defLbl.sub : '') : 'Follows Windows');
+    const devRows = real.filter((d) => kindOf(d.label) !== 'virtual');
+    const virt = real.filter((d) => kindOf(d.label) === 'virtual');
+    if (devRows.length) html += '<div class="hoq-out-sep"></div>';
+    devRows.forEach((d) => { const l = splitLabel(d.label); html += row(d.deviceId, kindOf(d.label), l.name, l.sub); });
+    if (virt.length) {
+      html += '<div class="hoq-out-group">Virtual</div>';
+      virt.forEach((d) => { const l = splitLabel(d.label); html += row(d.deviceId, 'virtual', l.name, l.sub); });
+    }
     if (locked) {
       html += '<div class="hoq-out-locked">' +
         '<button class="hoq-out-enable" type="button">Show my devices</button></div>' +
-        '<div class="hoq-out-note">Chrome only reveals device names after a one-time audio permission. Nothing is recorded — the mic is opened to unlock the list, then closed instantly.</div>';
+        '<div class="hoq-out-note">Windows only shares device names after a one-time audio permission. Nothing is recorded: the mic opens to unlock the list and closes straight away.</div>';
     }
     menu.innerHTML = html;
     menu.querySelectorAll('.hoq-out-item').forEach((el) => {
-      el.addEventListener('click', () => select(el.getAttribute('data-id'), el.querySelector('.lbl').textContent));
+      el.addEventListener('click', () => select(el.getAttribute('data-id'), el.querySelector('.hoq-out-txt b').textContent));
     });
     const en = menu.querySelector('.hoq-out-enable');
     if (en) en.addEventListener('click', unlock);
@@ -6824,7 +6866,8 @@ function setupOutputPicker() {
     window.__hoqOutBound = true;
     document.addEventListener('click', (e) => {
       const b = document.getElementById('hoq-out-btn');
-      if (isOpen() && !menu.contains(e.target) && (!b || !b.contains(e.target))) close();
+      const p = e.composedPath ? e.composedPath() : [e.target];   // the menu re-renders on pick: target may be detached
+      if (isOpen() && !p.includes(menu) && (!b || !p.includes(b))) close();
     });
     window.addEventListener('keydown', (e) => { if (isOpen() && e.key === 'Escape') close(); });
     window.addEventListener('resize', () => { if (isOpen()) place(); });
