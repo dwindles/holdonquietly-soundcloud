@@ -4345,6 +4345,8 @@ function ensureDiscordPanel() {
          behind the card, darkened on the text side so it always reads. */
       #hoq-discord .hoq-hoq-banner { position: absolute; inset: 0; z-index: 0; opacity: 0; transition: opacity .4s ease;
         background-size: cover; background-position: center; }
+      /* no banner: their picture, blurred big behind the card */
+      #hoq-discord .hoq-hoq-banner.is-blur { inset: -40px; filter: blur(28px) saturate(1.5) brightness(0.9); transform: scale(1.15); }
       #hoq-discord .hoq-hoq-banner::after { content: ''; position: absolute; inset: 0;
         background: linear-gradient(90deg, rgba(10,10,12,0.88) 0%, rgba(10,10,12,0.66) 50%, rgba(10,10,12,0.4) 100%); }
       #hoq-discord .hoq-hoq-bar.has-card { padding: 18px 20px; align-items: center; }
@@ -5334,7 +5336,13 @@ function setupHoqAccount(sec) {
     const c = on ? card : null;
     bar.classList.toggle('has-card', !!c);
     // banner: their profile banner, else a wash of their profile colours
-    if (c && hoqSafeUrl(c.banner)) banner.style.backgroundImage = 'url("' + hoqSafeUrl(c.banner) + '")';
+    // banner: their profile banner; else their picture, blown up and blurred;
+    // else their profile colours; else nothing (the accent wash shows)
+    const pic2 = c && (hoqSafeUrl(c.avatar) || hoqSafeUrl((st.user || {}).picture));
+    const art = c && (hoqSafeUrl(c.banner) || hoqSafeUrl(c.background));   // banner, else their page background pic
+    banner.classList.toggle('is-blur', !!(c && !art && pic2));
+    if (art) banner.style.backgroundImage = 'url("' + art + '")';
+    else if (pic2) banner.style.backgroundImage = 'url("' + pic2 + '")';
     else if (c && c.colors && /^#[0-9a-f]{6}$/i.test(c.colors.bar || '') && /^#[0-9a-f]{6}$/i.test(c.colors.box || '')) banner.style.backgroundImage = 'linear-gradient(120deg,' + c.colors.bar + ',' + c.colors.box + ')';
     else banner.style.backgroundImage = '';
     badges.innerHTML = c && Array.isArray(c.badges) ? c.badges.slice(0, 6).map((x) => '<span class="hoq-hoq-badge">' + hoqEsc(x && x.label) + '</span>').join('') : '';
