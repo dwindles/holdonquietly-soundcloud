@@ -492,6 +492,11 @@ const BASE_CSS = `
      cover, so a second blur adds nothing you can see, and on some GPUs WebView2
      draws it in tiles with a hard line across the panel. Bars and pop-ups that
      float over moving content (header, player, menus) keep their blur. */
+  /* Everything inside the page area, so it covers panels SoundCloud adds later
+     too (library tabs, search filters, profile sidebars...). Exceptions float
+     over moving content and keep their blur: the sticky profile bar, play
+     buttons on artwork, menus and dialogs. */
+  html.sc-coverbg #content :not(.dropbar):not(.dropbar__content):not(.playButton):not([role="dialog"]):not([role="menu"]):not(.dropdownMenu):not([class*="odal"]):not([class*="opover"]):not(.conversation__stickyHeader),
   html.sc-coverbg .l-nav .collectionNav.g-tabs,
   html.sc-coverbg #hoq-discord .hoq-dc-card *:not([id$="-modal"]):not(.hoq-pop) {
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
@@ -1443,6 +1448,21 @@ const BASE_CSS = `
      with Social/Settings open it showed through on top of that page. Promotions
      go everywhere; any other banner just steps aside while the tab is open. */
   .l-product-banners .banner.m-promotion { display: none !important; }
+  /* Messages: the conversation's sticky top bar (name, Block, Report) shipped a
+     solid #121212 slab; messages scroll under it, so it keeps a real blur. */
+  html.sc-coverbg .conversation__stickyHeader {
+    background: rgba(12,12,14,0.5) !important;
+    backdrop-filter: blur(24px) saturate(1.4) !important; -webkit-backdrop-filter: blur(24px) saturate(1.4) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important; }
+  html.sc-coverbg .conversation__stickyHeader .conversation__actions { background: transparent !important; }
+  .conversationActions .sc-button { background: rgba(255,255,255,0.06) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important; color: #e4e4e8 !important; }
+  .conversationActions .sc-button:hover { background: rgba(255,255,255,0.12) !important; }
+  /* A full-screen page from the new SoundCloud app is open (see themeFrames):
+     the classic page's header and player sit behind its see-through backdrop. */
+  html.hoq-webi-full #app { opacity: 0 !important; pointer-events: none !important; }
+  /* "Amplify track" = SoundCloud's paid promotion upsell on your latest upload */
+  .latestUploadContainer__soundDetails__amplifyButton { display: none !important; }
   html.hoq-tab .l-product-banners { display: none !important; }
 
   /* ===== Library: convert horizontal tabs into a vertical SIDE TAB ===== */
@@ -2460,6 +2480,17 @@ const MUI_CSS = `
     border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
     border-radius: 14px !important;
   }
+  /* Full-page pop-ups from the new SoundCloud app (Upload, ...): see-through
+     backdrop so the blurred cover shows, frosted cards, and the header kept
+     clear of the app's window buttons in the top-right corner.
+     .hoq-fullpage / .hoq-surf are tagged by tagFullPage(). */
+  html.hoq-webi.sc-coverbg .MuiModal-root.hoq-fullpage { background: rgba(10,10,12,0.42) !important; }
+  html.hoq-webi.sc-coverbg .hoq-clear { background: transparent !important; }
+  html.hoq-webi .MuiModal-root.hoq-fullpage header { background: transparent !important; padding-right: 150px !important; }
+  html.hoq-webi.sc-coverbg .MuiModal-root.hoq-fullpage .hoq-surf {
+    background: rgba(12,12,14,0.55) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 16%, rgba(255,255,255,0.08)) !important;
+  }
   /* Inner wrappers ship their own solid fills that would sit on top of the blur. */
   html.hoq-webi section[aria-label="Track header"] > .MuiStack-root,
   html.hoq-webi section[aria-label="Track header"] .MuiStack-root > .MuiStack-root {
@@ -2731,6 +2762,7 @@ function themeFrames() {
   if (window.top !== window) return;
   const cs = getComputedStyle(document.documentElement);
   const vars = ['--sc-accent', '--sc-accent-bg', '--sc-accent-ch', '--wave-color'];
+  let fullPage = false;   // a full-screen page from the new app is open (Upload...)
   document.querySelectorAll('iframe').forEach((f) => {
     let d = null;
     try { d = f.contentDocument; } catch (e) { return; } // cross-origin: not ours
@@ -2762,8 +2794,13 @@ function themeFrames() {
       attachCoverTilt(d);
       addQueueButtons(d);
       attachFrameContextMenu(d, f);
+      // only while that frame is actually on screen (it stays loaded, hidden, on other pages)
+      const fr = f.getBoundingClientRect();
+      if (tagFullPage(d) && fr.width > 0 && fr.height > 0 && getComputedStyle(f).visibility !== 'hidden' && getComputedStyle(f).opacity !== '0') fullPage = true;
     } catch (e) {}
   });
+  // Its see-through backdrop would show our header and player as ghosts behind it.
+  document.documentElement.classList.toggle('hoq-webi-full', fullPage);
 }
 
 // ---------------------------------------------------------------------------
@@ -7221,6 +7258,31 @@ function buildContextMenu() {
     e.preventDefault();
     window.__hoqOpenCtx(e.target, e.clientX, e.clientY, document);
   });
+}
+
+// Full-screen pop-ups in the new SoundCloud app (the Upload page is one) come
+// with hashed class names, so they're recognised by shape: a MUI modal that
+// fills the window with a solid fill. Its #212121 cards get the frosted look.
+function tagFullPage(d) {
+  const w = d.defaultView;
+  // Page-sized boxes painted SoundCloud's flat #121212 hide the blurred cover.
+  d.querySelectorAll('.MuiBox-root:not(.hoq-clear)').forEach((e) => {
+    const r = e.getBoundingClientRect();
+    if (r.width < w.innerWidth * 0.9 || r.height < w.innerHeight * 0.6) return;
+    if (w.getComputedStyle(e).backgroundColor === 'rgb(18, 18, 18)') e.classList.add('hoq-clear');
+  });
+  d.querySelectorAll('.MuiModal-root').forEach((m) => {
+    if (!m.classList.contains('hoq-fullpage')) {
+      const r = m.getBoundingClientRect();
+      if (r.width < w.innerWidth - 4 || r.height < w.innerHeight - 4) return;
+      if (w.getComputedStyle(m).backgroundColor === 'rgba(0, 0, 0, 0)') return;
+      m.classList.add('hoq-fullpage');
+    }
+    m.querySelectorAll('div:not(.hoq-surf), section:not(.hoq-surf)').forEach((e) => {
+      if (w.getComputedStyle(e).backgroundColor === 'rgb(33, 33, 33)') e.classList.add('hoq-surf');
+    });
+  });
+  return !!d.querySelector('.MuiModal-root.hoq-fullpage');
 }
 
 // Right-click inside the webi iframe: reuse the top frame's menu, shifting the
