@@ -2897,6 +2897,8 @@ const BASE_CSS = `
     box-shadow: 0 0 0 1px rgba(255,255,255,0.16) !important; filter: none !important; }
   .header .header__userNavUsernameButtonIcon { margin: 0 !important; color: #8e8e99 !important; display: flex !important; }
   .header .header__userNavUsernameButtonIcon svg { width: 12px !important; height: 12px !important; }
+  .header .header__userNavUsernameButtonIcon, .header .header__userNavUsernameButtonIcon > div { display: flex !important; align-items: center !important; height: 34px !important; margin: 0 !important; padding: 0 !important; }
+  .header .header__userNavUsernameButtonIcon svg { display: block !important; }
   /* ===== SoundCloud's little notices ("… was saved to your Library") =====
      Same card as the app's own toasts: bottom-right above the player, cover,
      title, a muted line; the × shows on hover. */
@@ -4154,32 +4156,40 @@ function buildTitlebar() {
         filter: drop-shadow(0 0 5px rgba(90,160,255,0.4));
       }
       #sc-titlebar .sc-tb-spacer { flex: 1; }
+      /* same tile as the header's icon buttons (34px, grey, soft hover tile) */
       #sc-titlebar .sc-tb-btn {
-        width: 40px; height: 48px; padding: 0;
+        width: 34px; height: 34px; padding: 0; margin: 0 2px; border-radius: 10px;
         display: flex; align-items: center; justify-content: center;
-        background: transparent; border: 0; color: #9a9a9c; cursor: pointer;
+        background: transparent; border: 0; color: #a6a6b0; cursor: pointer;
         transition: background .12s ease, color .12s ease;
       }
-      #sc-titlebar .sc-tb-btn svg { width: 15px; height: 15px; display: block; }
-      #sc-titlebar .sc-tb-btn:hover { background: rgba(255,255,255,0.09); color: #fff; }
+      #sc-titlebar .sc-tb-btn svg { width: 16px; height: 16px; display: block; }
+      #sc-titlebar .sc-tb-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
       #sc-titlebar .sc-tb-skipad:hover { color: var(--sc-accent, #ff5500); }
       #sc-titlebar .sc-tb-accentdot { fill: var(--sc-accent, #ff5500); }
-      /* macOS traffic-light window controls */
-      #sc-titlebar .sc-tb-lights { display: flex; align-items: center; gap: 8px; padding: 0 14px 0 8px; }
+      /* macOS-style window controls, calm like the rest of the header: soft grey
+         dots at rest (like an inactive Mac window); hovering the group brings
+         back red / yellow / green with their glyphs. A hairline sets them apart
+         from the header's icon groups. */
+      #sc-titlebar .sc-tb-lights { position: relative; display: flex; align-items: center; gap: 8px; height: 34px;
+        margin-left: 10px; padding: 0 14px 0 12px; }
+      #sc-titlebar .sc-tb-lights::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: rgba(255,255,255,0.12); }
       #sc-titlebar .sc-light {
-        width: 13px; height: 13px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+        width: 12px; height: 12px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
         display: flex; align-items: center; justify-content: center; position: relative;
-        box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.15);
+        background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08);
+        transition: background .14s ease, box-shadow .14s ease, transform .12s ease;
       }
-      #sc-titlebar .sc-tb-close.sc-light { background: #ff5f57; }
-      #sc-titlebar .sc-tb-min.sc-light { background: #febc2e; }
-      #sc-titlebar .sc-tb-max.sc-light { background: #28c840; }
+      #sc-titlebar .sc-tb-lights:hover .sc-tb-close.sc-light { background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+      #sc-titlebar .sc-tb-lights:hover .sc-tb-min.sc-light { background: #febc2e; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+      #sc-titlebar .sc-tb-lights:hover .sc-tb-max.sc-light { background: #28c840; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+      #sc-titlebar .sc-light:active { transform: scale(.9); }
       #sc-titlebar .sc-light span {
         font-size: 9px; line-height: 0; font-weight: 800; color: rgba(0,0,0,0.6);
         display: flex; align-items: center; justify-content: center;
         opacity: 0; transition: opacity .1s ease;
       }
-      #sc-titlebar .sc-light span svg { width: 9px; height: 9px; display: block; }
+      #sc-titlebar .sc-light span svg { width: 8px; height: 8px; display: block; }
       #sc-titlebar .sc-tb-lights:hover .sc-light span { opacity: 1; }
 
       #sc-palette {
