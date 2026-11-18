@@ -699,10 +699,19 @@ const BASE_CSS = `
     background: rgba(12,12,14,0.32) !important;
     backdrop-filter: blur(20px) saturate(1.3) !important;
   }
+  /* The bar's blur lives on a layer BEHIND its contents, not on the bar itself:
+     a backdrop-filter on the bar makes it a "backdrop root", so nothing inside
+     it (the Next up panel) could blur the page; the queue just showed through. */
   html.sc-coverbg .playControls {
-    background: rgba(12,12,14,0.5) !important;
-    backdrop-filter: blur(24px) saturate(1.4) !important;
+    background: transparent !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
     border-top: 1px solid rgba(255,255,255,0.06) !important;
+  }
+  html.sc-coverbg .playControls::after {
+    content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    visibility: visible;   /* the bar itself is visibility:hidden (only its inner shows) */
+    background: rgba(12,12,14,0.5);
+    backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4);
   }
   html.sc-coverbg .playControls::before,
   html.sc-coverbg .playControls__inner,
@@ -1027,6 +1036,11 @@ const BASE_CSS = `
     transition: box-shadow .18s ease, filter .18s ease !important;
   }
   a.uploadButton:hover { box-shadow: 0 0 18px var(--sc-accent, #ff5500) !important; }
+  /* Signed out, SoundCloud wraps Upload in a plain block (.header__upload) so it
+     sat at the top of the row, and its label is "secondary" grey text on the
+     accent. Center the wrapper; label solid white. */
+  .header__upload { display: flex !important; align-items: center !important; align-self: stretch !important; }
+  a.uploadButton .uploadButton__title { color: #fff !important; -webkit-text-fill-color: #fff !important; background: none !important; }
 
   /* Header avatar + icon buttons: subtle accent glow so they don't look plain */
   .header__userNav img, .userNavButton__avatar, .userBadge__image .sc-artwork {
@@ -1190,12 +1204,15 @@ const BASE_CSS = `
   html:has(.queue.m-visible) .l-sidebar-right { pointer-events: none !important; }
   /* match the app's own dark-frosted panels (header / dropdowns): a translucent
      dark ground with the same backdrop blur — no shimmer, no glass. */
+  /* acrylic: a dark tint over a heavy, saturated blur. The old 50% tint let a
+     light page wash it out to flat grey; this keeps it dark but picks up the
+     page's colour. */
   .playControls__queue {
-    background: rgba(12,12,16,0.5) !important;
-    border-left: 1px solid rgba(255,255,255,0.08) !important;
-    box-shadow: -18px 0 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(24px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important; }
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 140px), rgba(14,14,19,0.74) !important;
+    border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 14px 14px 0 0 !important; overflow: hidden !important;
+    box-shadow: 0 -12px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+    backdrop-filter: blur(34px) saturate(1.8) brightness(0.85) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(1.8) brightness(0.85) !important; }
   /* theme the panel chrome to the accent so it matches the rest of the app */
   .playControls__queue .queue__title { color: #fff !important; }
   .playControls__queue .queueItemView.m-playing .queueItemView__title a,
@@ -1207,7 +1224,84 @@ const BASE_CSS = `
   .playControls__queue .queue__scrollableInner,
   .playControls__queue .queue__itemsHeight,
   .playControls__queue .queueFallback { background: transparent !important; }
-  .playControls__queue .queueItemView { border-radius: 10px !important; }
+  /* --- Next up, redone: compact header, clean rows (title over artist, the
+     "From related tracks…" line dropped), actions on hover in place of the
+     duration, played rows faded, the playing row tinted. Rows must stay 56px:
+     SoundCloud positions them in 56px steps. --- */
+  .playControls__queue .queue__panel { display: flex !important; align-items: center !important; gap: 6px !important;
+    padding: 14px 12px 10px 18px !important; border: 0 !important; }
+  .playControls__queue .queue__title { flex: 1 1 auto !important; margin: 0 !important; padding: 0 !important; float: none !important;
+    font: 600 15px/1.2 Inter,-apple-system,Arial,sans-serif !important; letter-spacing: 0 !important; }
+  .playControls__queue .queue__clear, .playControls__queue .queue__hide { float: none !important; margin: 0 !important; box-shadow: none !important;
+    border: 0 !important; background: transparent !important; color: #a6a6b0 !important; -webkit-text-fill-color: currentColor !important;
+    transition: background .12s ease, color .12s ease !important; }
+  .playControls__queue .queue__clear { height: 28px !important; padding: 0 10px !important; border-radius: 8px !important;
+    font: 600 12.5px/28px Inter,-apple-system,Arial,sans-serif !important; }
+  .playControls__queue .queue__hide { width: 28px !important; height: 28px !important; padding: 0 !important; border-radius: 50% !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queue__hide svg { width: 13px !important; height: 13px !important; }
+  .playControls__queue .queue__clear:hover, .playControls__queue .queue__hide:hover { background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+  .playControls__queue .queue__itemsHeight { padding: 0 8px !important; background-image: none !important; }
+  /* every row sits in a wrapper SoundCloud paints solid (#fff / grey in the dark
+     theme): that was the flat grey behind the rows */
+  .playControls__queue .queue__itemWrapper { background: transparent !important; background-color: transparent !important; }
+  .playControls__queue .queueItemView { height: 56px !important; box-sizing: border-box !important; display: flex !important; align-items: center !important;
+    gap: 10px !important; margin: 0 !important; padding: 0 8px 0 4px !important; border: 0 !important; border-radius: 10px !important;
+    background: transparent !important; transition: background .12s ease, opacity .12s ease !important; }
+  .playControls__queue .queueItemView:hover { background: rgba(255,255,255,0.06) !important; }
+  .playControls__queue .queueItemView.m-dimmed { opacity: .45 !important; }
+  .playControls__queue .queueItemView.m-dimmed:hover { opacity: 1 !important; }
+  .playControls__queue .queueItemView.m-active, .playControls__queue .queueItemView.m-playing {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 26%, transparent) !important; opacity: 1 !important; }
+  .playControls__queue .queueItemView__dragHandle { flex: 0 0 14px !important; width: 14px !important; margin: 0 !important; color: #8e8e99 !important;
+    opacity: 0 !important; cursor: grab !important; transition: opacity .12s ease !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__dragHandle { opacity: .7 !important; }
+  .playControls__queue .queueItemView__dragHandle svg { width: 14px !important; height: 14px !important; display: block !important; }
+  .playControls__queue .queueItemView__artwork { flex: 0 0 40px !important; position: relative !important; width: 40px !important; height: 40px !important; }
+  .playControls__queue .queueItemView__artworkImage { width: 40px !important; height: 40px !important; margin: 0 !important; border-radius: 6px !important; overflow: hidden !important; }
+  .playControls__queue .queueItemView__artworkImage::after { display: none !important; }
+  .playControls__queue .queueItemView__artworkImage .sc-artwork { width: 40px !important; height: 40px !important; border-radius: 6px !important; }
+  .playControls__queue .queueItemView__playButton { position: absolute !important; inset: 0 !important; display: flex !important; align-items: center !important;
+    justify-content: center !important; border-radius: 6px !important; background: rgba(0,0,0,0.5) !important; opacity: 0 !important; transition: opacity .12s ease !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__playButton { opacity: 1 !important; }
+  .playControls__queue .queueItemView__playButton .sc-button { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; background: none !important; box-shadow: none !important; color: #fff !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queueItemView__playButton .sc-button > div { width: 100% !important; height: 100% !important; margin: 0 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queueItemView__playButton svg { display: block !important; width: 16px !important; height: 16px !important; margin: 0 !important; }
+  .playControls__queue .queueItemView__details { flex: 1 1 auto !important; min-width: 0 !important; display: flex !important; flex-direction: column-reverse !important;
+    justify-content: center !important; gap: 2px !important; margin: 0 !important; }
+  .playControls__queue .queueItemView__title, .playControls__queue .queueItemView__meta { min-width: 0 !important; margin: 0 !important; line-height: 1.25 !important; }
+  .playControls__queue .queueItemView__title a { font: 600 13px/1.25 Inter,-apple-system,Arial,sans-serif !important; color: #ececf1 !important;
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; -webkit-text-fill-color: currentColor !important; }
+  .playControls__queue .queueItemView.m-active .queueItemView__title a, .playControls__queue .queueItemView.m-playing .queueItemView__title a {
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; }
+  .playControls__queue .queueItemView__meta { display: flex !important; overflow: hidden !important; }
+  .playControls__queue .queueItemView__username { font: 500 11.5px/1.25 Inter,-apple-system,Arial,sans-serif !important; color: #8e8e99 !important;
+    -webkit-text-fill-color: currentColor !important; background: none !important; max-width: 100% !important; }
+  .playControls__queue .queueItemView__username:hover { color: #fff !important; }
+  .playControls__queue .queueItemView__context { display: none !important; }
+  .playControls__queue .queueItemView__duration { flex: none !important; min-width: 30px !important; margin: 0 !important; text-align: right !important;
+    font: 500 11px Inter,-apple-system,Arial,sans-serif !important; color: #7d7d88 !important; font-variant-numeric: tabular-nums !important; }
+  .playControls__queue .queueItemView__actions { display: none !important; flex: none !important; align-items: center !important; gap: 0 !important; margin: 0 !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__actions { display: flex !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__duration { display: none !important; }
+  .playControls__queue .queueItemView__actions .sc-button { width: 28px !important; height: 28px !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; border-radius: 50% !important; background: transparent !important; box-shadow: none !important; color: #a6a6b0 !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queueItemView__actions .sc-button:hover { background: rgba(255,255,255,0.09) !important; color: #fff !important; }
+  .playControls__queue .queueItemView__actions .sc-button svg { width: 14px !important; height: 14px !important; }
+  .playControls__queue .queueItemView__like.sc-button-selected { color: var(--sc-accent, #ff5500) !important; }
+  /* autoplay station card + scrollbar */
+  .playControls__queue .queueFallback { margin: 6px 8px !important; padding: 12px 12px 12px 14px !important; box-sizing: border-box !important;
+    border-radius: 12px !important; border: 1px solid rgba(255,255,255,0.07) !important; background: rgba(255,255,255,0.035) !important; }
+  .playControls__queue .queueFallback__stationMode { display: flex !important; align-items: center !important; gap: 12px !important; padding: 0 !important; }
+  .playControls__queue .queueFallback__text { flex: 1 1 auto !important; min-width: 0 !important; }
+  .playControls__queue .queueFallback__heading { margin: 0 0 2px !important; font: 600 13px/1.3 Inter,-apple-system,Arial,sans-serif !important; color: #ececf1 !important; }
+  .playControls__queue .queueFallback__subheading { font: 400 11.5px/1.35 Inter,-apple-system,Arial,sans-serif !important; color: #8e8e99 !important; }
+  .playControls__queue .queueFallback .sc-toggle.sc-toggle-on { background-color: var(--sc-accent, #ff5500) !important; border-color: transparent !important; }
+  .playControls__queue .g-scrollbar { width: 4px !important; right: 3px !important; border-radius: 99px !important; background: rgba(255,255,255,0.22) !important; }
   html.hoq-no-frost .playControls__queue {
     background: rgba(14,14,18,0.97) !important;
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
@@ -2801,24 +2895,33 @@ const MUI_CSS = `
 
   /* --- per-row "Play in Discord" (addQueueButtons) --------------------------
      Lives in both documents, so it is defined outside the .hoq-webi scope. */
-  .hoq-q {
-    position: absolute; top: 6px; right: 6px; z-index: 20;
-    width: 26px; height: 26px; padding: 0; border-radius: 999px;
-    display: flex; align-items: center; justify-content: center;
-    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent);
-    background: rgba(16,16,20,0.72);
-    backdrop-filter: blur(10px) saturate(150%); -webkit-backdrop-filter: blur(10px) saturate(150%);
-    color: var(--sc-accent, #ff5500); cursor: pointer;
-    opacity: 0; transform: translateY(-3px);
-    transition: opacity .15s ease, transform .15s ease, background .15s ease;
+  .hoq-q:not(.hoq-q-in) {
+    position: absolute; top: 8px; right: 8px; z-index: 20;
+    height: 26px; min-width: 26px; padding: 0 6px; box-sizing: border-box; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255,255,255,0.12) !important; background: rgba(14,14,18,0.86) !important;
+    color: #c9c9d2 !important; -webkit-text-fill-color: currentColor !important; cursor: pointer;
+    font: 600 11.5px/1 Inter,-apple-system,Arial,sans-serif; white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    opacity: 0; transform: translateY(-2px);
+    transition: opacity .15s ease, transform .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
   }
-  *:hover > .hoq-q, .hoq-q:focus-visible { opacity: 1; transform: none; }
-  .hoq-q:hover { background: rgba(28,28,34,0.9); }
-  .hoq-q svg { width: 13px; height: 13px; }
-  .hoq-q.done {
-    background: var(--sc-accent, #ff5500); color: #fff; opacity: 1;
-    transform: none; border-color: transparent; cursor: default;
+  *:hover > .hoq-q:not(.hoq-q-in), .hoq-q:not(.hoq-q-in):focus-visible { opacity: 1; transform: none; }
+  .hoq-q:not(.hoq-q-in) svg { width: 13px; height: 13px; flex: none; fill: currentColor; }
+  .hoq-q:not(.hoq-q-in) span { max-width: 0; overflow: hidden; transition: max-width .2s ease, margin .2s ease; }
+  .hoq-q:not(.hoq-q-in):hover { background: #5865f2 !important; border-color: transparent !important; color: #fff !important; }
+  .hoq-q:not(.hoq-q-in):hover span, .hoq-q:not(.hoq-q-in).done span { max-width: 110px; margin-left: 6px; }
+  .hoq-q:not(.hoq-q-in).done {
+    background: var(--sc-accent, #ff5500) !important; color: #fff !important; opacity: 1;
+    transform: none; border-color: transparent !important; cursor: default;
   }
+  .hoq-q:not(.hoq-q-in).done svg { fill: none; }
+  /* in the tile's action row: one more of SoundCloud's icon buttons */
+  .hoq-q.hoq-q-in svg { width: 16px; height: 16px; fill: currentColor; }
+  .hoq-q.hoq-q-in span { display: none !important; }
+  .hoq-q.hoq-q-in:hover { color: #7d86ff !important; -webkit-text-fill-color: currentColor !important; }
+  .hoq-q.hoq-q-in.done { color: var(--sc-accent, #ff5500) !important; cursor: default; }
+  .hoq-q.hoq-q-in.done svg { fill: none; }
 
   /* --- webi V2 frame only --------------------------------------------------
      themeFrames() tags the iframe's document with .hoq-webi so these can't leak
@@ -3233,7 +3336,7 @@ function recolorOrange() {
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton')) {
+    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you')) {
       continue;
     }
     _seenOrange.add(el);
@@ -3335,9 +3438,20 @@ function buildCustomWave() {
   if (wf.getBoundingClientRect().width < 300) return;
   const canvas = wf.querySelector('canvas');
   if (!canvas || !canvas.width) return;
-
-  const key = (currentCoverUrl() || location.pathname) + ':' + canvas.width;
   const existing = wf.querySelector(':scope > .hoq-wave');
+
+  // While a new song loads, SoundCloud first paints a PLACEHOLDER (a flat line
+  // with a bump in the middle) and only adds .loaded once the real waveform is
+  // drawn. Copying the placeholder left a flat waveform that never updated, so
+  // until then drop our copy and let SoundCloud's own loading state show.
+  if (!wf.classList.contains('loaded')) {
+    if (existing) existing.remove();
+    wf.classList.remove('hoq-cw');
+    return;
+  }
+  // canvas identity in the key: a re-rendered waveform gets a new canvas
+  if (!canvas.__hoqId) canvas.__hoqId = Math.random().toString(36).slice(2, 8);
+  const key = (currentCoverUrl() || location.pathname) + ':' + canvas.width + ':' + canvas.__hoqId;
   if (existing && existing.dataset.key === key) { updateWaveProgress(); return; }
 
   let heights;
@@ -3355,6 +3469,10 @@ function buildCustomWave() {
       heights.push(Math.max(0.08, (half - top) / half));
     }
   } catch (e) { return; } // canvas not ready / unreadable → leave SC's waveform visible
+  // a blank or not-yet-painted canvas reads as all-flat: try again next tick
+  // instead of locking in a flat line
+  const tall = heights.filter((a) => a > 0.2).length;
+  if (tall < heights.length * 0.15) return;
 
   const barsHtml = heights.map((a) => '<i style="height:' + (a * 100).toFixed(1) + '%"></i>').join('');
   if (existing) existing.remove();
@@ -5430,6 +5548,12 @@ function hoqStatsTick() {
     s.plays++;
     s.tracks[np.title] = (s.tracks[np.title] || 0) + 1;
     if (np.artist) s.artists[np.artist] = (s.artists[np.artist] || 0) + 1;
+    // first / last time each artist was played (for the "You & <artist>" card)
+    if (np.artist) {
+      const ak = np.artist.toLowerCase(), af = s.af || (s.af = {});
+      // 0 = played before this was tracked, so the first date is unknown
+      af[ak] = [af[ak] ? af[ak][0] : (s.artists[np.artist] > 1 ? 0 : now), now];
+    }
     day.plays++;
     day.tracks[np.title] = (day.tracks[np.title] || 0) + 1;
     if (np.artist) day.artists[np.artist] = (day.artists[np.artist] || 0) + 1;
@@ -6320,9 +6444,11 @@ window.__hoqPlayResult = function (ok, reason) {
 // Queue ANY track, not just the one playing. The bot resolves from the URL, so
 // title/artist/cover here only decide what the embed shows.
 // ---------------------------------------------------------------------------
-const HOQ_Q_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+// Discord mark + a label that slides out on hover, so it can't be mistaken for
+// SoundCloud's own play button.
+const HOQ_Q_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg><span>Play in Discord</span>';
 const HOQ_Q_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
-  'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Queued</span>';
 
 // A track permalink is exactly /<user>/<track> — two segments, no reserved first
 // segment, and not a /sets/ playlist.
@@ -6410,7 +6536,7 @@ function addQueueButtons(d) {
   let rows;
   try { rows = d.querySelectorAll(ROWS); } catch (e) { return; }
   rows.forEach((row) => {
-    if (row.querySelector(':scope > .hoq-q')) return;
+    if (row.querySelector('.hoq-q')) return;
     let info = null;
     for (const a of row.querySelectorAll('a[href]')) {
       info = trackLinkInfo(a);
@@ -6418,10 +6544,23 @@ function addQueueButtons(d) {
     }
     if (!info) return;
     const b = d.createElement('button');
-    b.className = 'hoq-q';
+    // In the tile's own action row (like / repost / share / … ) as one more of
+    // SoundCloud's icon buttons, so it never sits over the title or date. Rows
+    // without that toolbar get the small floating version.
+    const group = row.querySelector('.soundActions .sc-button-group');
+    b.className = group ? 'hoq-q hoq-q-in sc-button sc-button-secondary sc-button-small sc-button-icon sc-button-responsive' : 'hoq-q';
     b.type = 'button';
     b.title = 'Play in Discord';
     b.innerHTML = HOQ_Q_PLAY;
+    if (group) {
+      b.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (b.classList.contains('done')) return;
+        if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued in Discord'; _hoqLastRowBtn = b; }
+      });
+      group.insertBefore(b, group.querySelector('.sc-button-more') || null);
+      return;
+    }
     b.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();   // don't let the row navigate / start playback
@@ -6647,6 +6786,7 @@ function removeClutter() {
   try { setupOutputPicker(); } catch (e) {}
   try { setupEqPicker(); } catch (e) {}
   try { setupMiniMode(); } catch (e) {}
+  try { setupProfileExtras(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
   document.documentElement.classList.toggle('hoq-feed', /\/feed/i.test(location.pathname));
@@ -7614,6 +7754,278 @@ function setupMiniMode() {
   }
   window.__hoqExitMini = exitMini;   // let the host force-exit if needed
   btn.addEventListener('click', () => { miniOn() ? exitMini() : enterMini(); });
+}
+
+// ---- Profile extras -------------------------------------------------------
+// On any artist profile: Play all / Shuffle, a "Find a track" box that searches
+// their whole catalogue, a "You & <artist>" card from the local listening stats,
+// and "New" tags on tracks posted since you last opened their page. The track
+// list comes from SoundCloud's own API (same client_id the page itself uses),
+// fetched once per profile per session.
+const __hoqPf = { cache: {}, prev: {}, slug: '', cid: '' };
+function hoqPfClientId() {
+  if (__hoqPf.cid) return __hoqPf.cid;
+  const n = performance.getEntriesByType('resource').map((e) => e.name).reverse().find((x) => /[?&]client_id=/.test(x));
+  __hoqPf.cid = n ? ((n.match(/client_id=([^&]+)/) || [])[1] || '') : '';
+  return __hoqPf.cid;
+}
+function hoqPfData(slug) {
+  if (__hoqPf.cache[slug]) return __hoqPf.cache[slug];
+  const p = (async () => {
+    const cid = hoqPfClientId();
+    if (!cid) throw new Error('no client id yet');
+    const api = 'https://api-v2.soundcloud.com';
+    const u = await fetch(api + '/resolve?url=' + encodeURIComponent('https://soundcloud.com/' + slug) + '&client_id=' + cid).then((r) => r.json());
+    if (!u || u.kind !== 'user') throw new Error('not a user');
+    const tracks = [];
+    let next = api + '/users/' + u.id + '/tracks?limit=200&linked_partitioning=1&client_id=' + cid;
+    for (let i = 0; next && i < 8; i++) {
+      const j = await fetch(next).then((r) => r.json());
+      (j.collection || []).forEach((t) => {
+        if (!t || t.kind !== 'track') return;
+        tracks.push({
+          title: t.title || '', path: (t.permalink_url || '').replace(/^https?:\/\/[^/]+/, ''),
+          date: Date.parse(t.display_date || t.created_at || '') || 0, dur: t.duration || 0, plays: t.playback_count || 0,
+          art: (t.artwork_url || (u.avatar_url || '')).replace('-large.', '-t50x50.'),
+        });
+      });
+      next = j.next_href ? j.next_href + (/[?&]client_id=/.test(j.next_href) ? '' : '&client_id=' + cid) : '';
+    }
+    return { user: u, tracks };
+  })();
+  __hoqPf.cache[slug] = p;
+  p.catch(() => { delete __hoqPf.cache[slug]; });
+  return p;
+}
+const hoqPfDate = (t) => {
+  if (!t) return '';
+  const d = new Date(t), now = new Date();
+  return d.toLocaleDateString(undefined, d.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+};
+const hoqPfDur = (ms) => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const hoqPfSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Open a track page through SoundCloud's own router (the player keeps going),
+// then press its play button once it shows up.
+function hoqPfOpenAndPlay(path) {
+  try { sessionStorage.setItem('hoqPfAuto', JSON.stringify({ path, t: Date.now() })); } catch (e) {}
+  const a = document.createElement('a');
+  a.href = path; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function hoqPfAutoPlay() {
+  let job = null; try { job = JSON.parse(sessionStorage.getItem('hoqPfAuto')); } catch (e) {}
+  if (!job) return;
+  if (Date.now() - job.t > 15000) { sessionStorage.removeItem('hoqPfAuto'); return; }
+  if (decodeURIComponent(location.pathname).toLowerCase() !== decodeURIComponent(job.path).toLowerCase()) return;
+  const b = document.querySelector('.fullHero__title .soundTitle__playButton .sc-button-play, .fullListenHero .sc-button-play');
+  if (!b) return;
+  sessionStorage.removeItem('hoqPfAuto');
+  if (!b.classList.contains('sc-button-pause')) b.click();
+}
+
+// Play the artist's Tracks tab from the top, or a random track with shuffle on.
+async function hoqPfPlayAll(slug, shuffle) {
+  const onTracks = () => new RegExp('^/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/tracks/?$', 'i').test(location.pathname);
+  if (!onTracks()) {
+    const a = document.querySelector('.userInfoBar__tabs a[href$="/tracks"]');
+    if (a) a.click(); else return;
+  }
+  let btns = [];
+  for (let i = 0; i < 50; i++) {
+    btns = onTracks() ? [...document.querySelectorAll('.soundList__item .soundTitle__playButton .sc-button-play')] : [];
+    if (btns.length) break;
+    await hoqPfSleep(150);
+  }
+  if (!btns.length) return;
+  const sh = document.querySelector('.playControls .shuffleControl');
+  const shOn = () => !!(sh && /m-shuffling|sc-button-selected/.test(sh.className));
+  if (!shuffle && shOn()) sh.click();
+  const b = shuffle ? btns[Math.floor(Math.random() * btns.length)] : btns[0];
+  if (!b.classList.contains('sc-button-pause')) b.click();
+  if (shuffle) { await hoqPfSleep(400); if (sh && !shOn()) sh.click(); }
+}
+
+function setupProfileExtras() {
+  hoqPfAutoPlay();
+  const bar = document.querySelector('.l-user-hero') && document.querySelector('.userInfoBar__buttons');
+  if (!bar) return;
+  const slug = (location.pathname.split('/')[1] || '').toLowerCase();
+  if (!slug || /^(you|discover|search|stream|feed|charts|upload|settings|messages|notifications|pages|terms-of-use|people)$/.test(slug)) return;
+
+  // When did you last open this profile? Kept per profile; this visit's "since"
+  // stays fixed until the app restarts, so the New tags don't vanish on a re-render.
+  if (!(slug in __hoqPf.prev)) {
+    let seen = {}; try { seen = JSON.parse(localStorage.getItem('hoqProfSeen')) || {}; } catch (e) {}
+    __hoqPf.prev[slug] = seen[slug] || 0;
+    seen[slug] = Date.now();
+    const keys = Object.keys(seen);
+    if (keys.length > 600) keys.sort((a, b) => seen[a] - seen[b]).slice(0, keys.length - 600).forEach((k) => delete seen[k]);
+    try { localStorage.setItem('hoqProfSeen', JSON.stringify(seen)); } catch (e) {}
+  }
+  const prev = __hoqPf.prev[slug];
+
+  if (!document.getElementById('hoq-pf-css')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-pf-css';
+    st.textContent = `
+      .userInfoBar__buttons { display:flex !important; align-items:center !important; gap:8px !important; }
+      #hoq-pf-tools { display:flex; align-items:center; gap:8px; }
+      #hoq-pf-tools .hoq-pf-btn { display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 13px; border-radius:10px;
+        border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.04); color:#e8e8ee; font:600 13px/1 Inter,-apple-system,Arial,sans-serif;
+        cursor:pointer; transition:background .12s ease, border-color .12s ease; white-space:nowrap; }
+      #hoq-pf-tools .hoq-pf-btn:hover { background:rgba(255,255,255,.09); border-color:rgba(255,255,255,.22); color:#fff; }
+      #hoq-pf-tools .hoq-pf-btn svg { width:14px; height:14px; flex:none; }
+      #hoq-pf-tools .hoq-pf-play { background:color-mix(in srgb, var(--sc-accent,#ff5500) 22%, transparent); border-color:color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
+      #hoq-pf-tools .hoq-pf-play:hover { background:color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent); }
+      #hoq-pf-tools .hoq-pf-shuf { width:34px; padding:0; justify-content:center; }
+      .hoq-pf-find { position:relative; display:flex; align-items:center; height:34px; width:190px; padding:0 10px; box-sizing:border-box;
+        border-radius:10px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); color:#8e8e99; transition:border-color .12s ease, width .18s ease; }
+      .hoq-pf-find:focus-within { border-color:color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent); width:240px; }
+      .hoq-pf-find svg { width:14px; height:14px; flex:none; }
+      .hoq-pf-find input { flex:1; min-width:0; height:100%; margin:0 0 0 7px; padding:0; border:0 !important; outline:0 !important; background:none !important;
+        box-shadow:none !important; color:#ececf1; font:500 13px Inter,-apple-system,Arial,sans-serif; }
+      .hoq-pf-find input::placeholder { color:#7d7d88; }
+      .hoq-pf-res { position:absolute; top:calc(100% + 6px); right:0; z-index:1000; width:380px; max-height:420px; overflow-y:auto; padding:6px;
+        box-sizing:border-box; border-radius:14px; border:1px solid rgba(255,255,255,.09) !important; background:#141418 !important; opacity:1 !important; backdrop-filter:none !important;
+        box-shadow:0 18px 52px rgba(0,0,0,.55); display:none; scrollbar-width:none; }
+      .hoq-pf-res.show { display:block; }
+      .hoq-pf-r { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:9px; color:#ececf1 !important; text-decoration:none !important; cursor:pointer; }
+      .hoq-pf-r:hover, .hoq-pf-r.sel { background:rgba(255,255,255,.07); }
+      .hoq-pf-r i { flex:none; width:36px; height:36px; border-radius:6px; background:#1c1c22 center/cover no-repeat; }
+      .hoq-pf-r div { flex:1; min-width:0; }
+      .hoq-pf-r b { display:block; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#ececf1; }
+      .hoq-pf-r b mark { background:none; color:color-mix(in srgb, var(--sc-accent,#ff5500) 60%, #fff); }
+      .hoq-pf-r span { display:block; margin-top:2px; font-size:11.5px; color:#8e8e99; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .hoq-pf-msg { padding:14px 10px; font-size:12.5px; color:#8e8e99; text-align:center; }
+      /* You & <artist> */
+      #hoq-pf-you { margin:0 0 18px; padding:14px; border-radius:14px; border:1px solid rgba(255,255,255,.07); background:rgba(255,255,255,.035);
+        font-family:Inter,-apple-system,Arial,sans-serif; color:#ececf1; }
+      #hoq-pf-you .hd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; font-size:13px; font-weight:600; }
+      #hoq-pf-you .hd span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #hoq-pf-you .new { flex:none; font-style:normal; padding:3px 9px; border-radius:99px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;
+        background:color-mix(in srgb, var(--sc-accent,#ff5500) 22%, transparent); color:color-mix(in srgb, var(--sc-accent,#ff5500) 55%, #fff); }
+      #hoq-pf-you .nums { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+      #hoq-pf-you .nums div { padding:9px 10px; border-radius:10px; background:rgba(255,255,255,.04); min-width:0; }
+      #hoq-pf-you .nums b { display:block; font-size:17px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #hoq-pf-you .nums span { display:block; margin-top:2px; font-size:10.5px; color:#8e8e99; }
+      #hoq-pf-you .lbl { margin:14px 0 6px; font-size:11px; font-weight:600; color:#8e8e99; }
+      #hoq-pf-you ol { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+      #hoq-pf-you ol .hoq-pf-r { padding:5px 6px; }
+      #hoq-pf-you ol .hoq-pf-r i { width:30px; height:30px; border-radius:5px; }
+      #hoq-pf-you .foot, #hoq-pf-you .empty { margin-top:12px; font-size:11.5px; color:#7d7d88; }
+      #hoq-pf-you .empty { margin-top:0; font-size:12.5px; color:#a6a6b0; }
+      /* New since your last visit */
+      .soundList__item .hoq-pf-newtag { display:inline-flex !important; align-items:center; height:18px; padding:0 7px !important; margin-left:8px; border-radius:99px; vertical-align:middle;
+        background:var(--sc-accent,#ff5500) !important; color:#fff !important; -webkit-text-fill-color:#fff !important; font:700 10.5px/1 Inter,-apple-system,Arial,sans-serif !important; letter-spacing:.02em; text-shadow:none !important; }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  // --- toolbar: Find a track · Play all · Shuffle ---
+  let tools = document.getElementById('hoq-pf-tools');
+  if (tools && tools.dataset.slug !== slug) { tools.remove(); tools = null; }
+  if (!tools) {
+    tools = document.createElement('div');
+    tools.id = 'hoq-pf-tools';
+    tools.dataset.slug = slug;
+    tools.innerHTML =
+      '<label class="hoq-pf-find"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>' +
+      '<input type="text" placeholder="Find a track" spellcheck="false" autocomplete="off"><div class="hoq-pf-res"></div></label>' +
+      '<button type="button" class="hoq-pf-btn hoq-pf-play" title="Play their tracks from the newest"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.3-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5z"/></svg>Play all</button>' +
+      '<button type="button" class="hoq-pf-btn hoq-pf-shuf" title="Shuffle their tracks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4M4 20L20 4M20 16v4h-4M15 15l5 5M4 4l5 5"/></svg></button>';
+    const grp = bar.querySelector('.sc-button-group');
+    bar.insertBefore(tools, grp || bar.firstChild);
+    tools.querySelector('.hoq-pf-play').addEventListener('click', () => hoqPfPlayAll(slug, false));
+    tools.querySelector('.hoq-pf-shuf').addEventListener('click', () => hoqPfPlayAll(slug, true));
+
+    const inp = tools.querySelector('input'), res = tools.querySelector('.hoq-pf-res');
+    let sel = 0, hits = [];
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const mark = (t, q) => { const i = t.toLowerCase().indexOf(q); return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length)); };
+    const render = async () => {
+      const q = inp.value.trim().toLowerCase();
+      res.classList.add('show');
+      let data;
+      try { data = await hoqPfData(slug); } catch (e) { res.innerHTML = '<div class="hoq-pf-msg">Couldn’t load their tracks. Try again in a moment.</div>'; return; }
+      if (inp.value.trim().toLowerCase() !== q) return;   // typed on meanwhile
+      hits = (q ? data.tracks.filter((t) => t.title.toLowerCase().includes(q)) : data.tracks).slice(0, 40);
+      sel = 0;
+      if (!hits.length) { res.innerHTML = '<div class="hoq-pf-msg">' + (q ? 'No track called “' + esc(inp.value.trim()) + '”' : 'No tracks yet') + '</div>'; return; }
+      res.innerHTML = hits.map((t, i) => '<a class="hoq-pf-r' + (i === 0 ? ' sel' : '') + '" data-i="' + i + '"><i style="background-image:url(' + esc(JSON.stringify(t.art)) + ')"></i><div><b>' + mark(t.title, q) + '</b><span>' +
+        [hoqPfDate(t.date), hoqPfDur(t.dur), t.plays ? t.plays.toLocaleString() + ' plays' : ''].filter(Boolean).join(' · ') + '</span></div></a>').join('') +
+        (q ? '' : '<div class="hoq-pf-msg">' + data.tracks.length + ' tracks · type to search them all</div>');
+    };
+    const pick = (i) => { const t = hits[i]; if (!t) return; res.classList.remove('show'); inp.value = ''; inp.blur(); hoqPfOpenAndPlay(t.path); };
+    let deb = 0;
+    inp.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(render, 90); });
+    inp.addEventListener('focus', render);
+    inp.addEventListener('keydown', (e) => {
+      const rows = res.querySelectorAll('.hoq-pf-r');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); if (!rows.length) return;
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+        rows.forEach((r, i) => r.classList.toggle('sel', i === sel)); rows[sel].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') { e.preventDefault(); pick(sel); }
+      else if (e.key === 'Escape') { res.classList.remove('show'); inp.blur(); }
+    });
+    res.addEventListener('mousedown', (e) => { const r = e.target.closest('.hoq-pf-r'); if (r) { e.preventDefault(); pick(+r.dataset.i); } });
+    inp.addEventListener('blur', () => setTimeout(() => res.classList.remove('show'), 120));
+  }
+
+  // --- "You & <artist>" card at the top of the sidebar ---
+  const side = document.querySelector('.userSidebar');
+  let card = document.getElementById('hoq-pf-you');
+  if (card && card.dataset.slug !== slug) { card.remove(); card = null; }
+  if (side && !card) {
+    card = document.createElement('section');
+    card.id = 'hoq-pf-you';
+    card.dataset.slug = slug;
+    side.insertBefore(card, side.querySelector('.infoStats') || side.firstChild);
+    hoqPfData(slug).then((data) => {
+      if (!card.isConnected) return;
+      const name = data.user.username || slug, nl = name.toLowerCase();
+      const s = hoqStatsShown(), local = hoqStatsRead();
+      const cnt = (o) => { let n = 0; for (const k in (o || {})) if (k.toLowerCase() === nl) n += +o[k] || 0; return n; };
+      const plays = cnt(s.artists);
+      const ym = hoqDayKey(Date.now()).slice(0, 7);
+      let month = 0, lastDay = '';
+      for (const k in (s.days || {})) { const n = cnt(s.days[k].artists); if (!n) continue; if (k.slice(0, 7) === ym) month += n; if (k > lastDay) lastDay = k; }
+      const af = (local.af || {})[nl];
+      const last = af ? af[1] : (lastDay ? new Date(+lastDay.slice(0, 4), +lastDay.slice(5, 7) - 1, +lastDay.slice(8, 10)).getTime() : 0);
+      const first = af && af[0] ? af[0] : 0;
+      // your most-played tracks of theirs: your per-title counts matched to their catalogue
+      const byTitle = {};
+      for (const k in (s.tracks || {})) byTitle[k.toLowerCase()] = (byTitle[k.toLowerCase()] || 0) + (+s.tracks[k] || 0);
+      const top = data.tracks.map((t) => ({ t, n: byTitle[t.title.toLowerCase()] || 0 })).filter((x) => x.n).sort((a, b) => b.n - a.n).slice(0, 3);
+      const fresh = prev ? data.tracks.filter((t) => t.date > prev).length : 0;
+      const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      card.innerHTML = '<div class="hd"><span>You &amp; ' + esc(name) + '</span>' +
+        (fresh ? '<em class="new" title="Posted since you last opened this page (' + esc(hoqPfDate(prev)) + ')">' + fresh + ' new</em>' : '') + '</div>' +
+        (plays ? '<div class="nums"><div><b>' + plays.toLocaleString() + '</b><span>plays</span></div><div><b>' + month + '</b><span>this month</span></div>' +
+          '<div><b>' + (last ? esc(hoqPfDate(last)) : '—') + '</b><span>last played</span></div></div>' +
+          (top.length ? '<div class="lbl">Your most played</div><ol>' + top.map(({ t, n }) => '<li class="hoq-pf-r" data-path="' + esc(t.path) + '"><i style="background-image:url(' + esc(JSON.stringify(t.art)) + ')"></i><div><b>' + esc(t.title) + '</b><span>' + n + (n === 1 ? ' play' : ' plays') + '</span></div></li>').join('') + '</ol>' : '') +
+          (first ? '<div class="foot">First played ' + esc(hoqPfDate(first)) + '</div>' : '')
+          : '<div class="empty">You haven’t played ' + esc(name) + ' in the app yet.</div>');
+      card.querySelectorAll('li.hoq-pf-r').forEach((li) => li.addEventListener('click', () => hoqPfOpenAndPlay(li.dataset.path)));
+      const nw = card.querySelector('.new');
+      if (nw) nw.addEventListener('click', () => { const a = document.querySelector('.userInfoBar__tabs a[href$="/tracks"]'); if (a) a.click(); });
+    }).catch(() => { if (card.isConnected) card.remove(); });
+  }
+
+  // --- "New" tag on their tracks posted since your last visit ---
+  if (prev) {
+    document.querySelectorAll('.soundList__item').forEach((it) => {
+      if (it.dataset.hoqNv === slug) return;
+      it.dataset.hoqNv = slug;
+      const by = it.querySelector('.soundTitle__username');
+      if (!by || (by.getAttribute('href') || '').toLowerCase() !== '/' + slug) return;
+      const tm = it.querySelector('time[datetime]');
+      if (!tm || Date.parse(tm.getAttribute('datetime')) <= prev) return;
+      const title = it.querySelector('.soundTitle__title');
+      if (title && !it.querySelector('.hoq-pf-newtag')) title.insertAdjacentHTML('afterend', '<span class="hoq-pf-newtag" title="Posted since you last opened this page">New</span>');
+    });
+  }
 }
 
 // The profile-tab bar and the library/collection nav lean toward the cursor
