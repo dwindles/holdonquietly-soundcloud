@@ -2275,7 +2275,12 @@ const BASE_CSS = `
     -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10.268 21a2 2 0 0 0 3.464 0'/><path d='M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326'/></svg>") !important;
     mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10.268 21a2 2 0 0 0 3.464 0'/><path d='M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326'/></svg>") !important;
   }
+  /* plain bubble; the notched one (dot drawn in the notch) only when unread */
   .notificationIcon.messages > div {
+    -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'/></svg>") !important;
+    mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'/></svg>") !important;
+  }
+  .notificationIcon.messages[class*='newItems__'] > div {
     -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12.7 3H4a2 2 0 0 0-2 2v16.286a.71.71 0 0 0 1.212.502l2.202-2.202A2 2 0 0 1 6.828 19H20a2 2 0 0 0 2-2v-4.7'/><circle cx='19' cy='6' r='3'/></svg>") !important;
     mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12.7 3H4a2 2 0 0 0-2 2v16.286a.71.71 0 0 0 1.212.502l2.202-2.202A2 2 0 0 1 6.828 19H20a2 2 0 0 0 2-2v-4.7'/><circle cx='19' cy='6' r='3'/></svg>") !important;
   }
@@ -2798,10 +2803,15 @@ const BASE_CSS = `
   .header #hoq-out-btn.on::after, .header .hoq-hdr-icon.on::after { content: ''; position: absolute; top: 6px; right: 6px; width: 6px; height: 6px;
     border-radius: 50%; background: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff); box-shadow: 0 0 0 2px rgba(10,10,14,0.55); }
   /* unread badge: the same small dot, in the same spot */
-  .header .notificationIcon__badge { position: absolute !important; top: -2px !important; right: -3px !important; left: auto !important; margin: 0 !important; }
+  /* the glyph box is exactly 22x22, so the dot can sit on a known spot: in the
+     message bubble's notch (circle at 19,6 of 24), on the bell's top-right */
+  .header .notificationIcon { width: 22px !important; height: 22px !important; }
+  .header .notificationIcon__badge { position: absolute !important; margin: 0 !important; padding: 0 !important; line-height: 0 !important; right: auto !important; bottom: auto !important; }
+  .header .notificationIcon.messages .notificationIcon__badge { left: 13.4px !important; top: 1.5px !important; }
+  .header .notificationIcon.activities .notificationIcon__badge { left: 13px !important; top: 0 !important; }
   .header .notificationIcon__badge .newItemBadge { display: none !important; }
   .header .notificationIcon[class*='newItems__'] .newItemBadge, .header .newItemBadge[class*='newItems__'] {
-    display: block !important; width: 8px !important; height: 8px !important; min-width: 0 !important; padding: 0 !important;
+    display: block !important; position: static !important; margin: 0 !important; width: 8px !important; height: 8px !important; min-width: 0 !important; padding: 0 !important;
     border-radius: 50% !important; background: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff) !important;
     box-shadow: 0 0 0 2px rgba(10,10,14,0.55) !important; font-size: 0 !important; }
   /* group dividers */
