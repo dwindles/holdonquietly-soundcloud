@@ -1,56 +1,44 @@
 <h1><img src=".github/icons/star.svg" width="26" align="absmiddle" alt=""> holdonquietly</h1>
 
-A SoundCloud desktop client for Windows. Frameless, fully themed, and it plays the
-major-label tracks other wrappers choke on.
+a soundcloud app for windows. no window frame, the colours follow the song ur playing, n it plays the major label tracks other soundcloud apps cant
 
-It runs on WebView2 — Edge's engine ships a provisioned Widevine/PlayReady stack,
-which is the only reason DRM'd tracks decode here at all. Stock Electron can't.
+it runs on webview2, which is edge inside an app. edge comes w the drm parts (widevine n playready) those tracks need, thats why they play here n not in a normal electron app
 
----
+## install
 
-## <img src=".github/icons/planet.svg" width="18" align="absmiddle" alt=""> Install
+grab **`holdonquietly.exe`** from [releases](../../releases/latest) n run it. its one file, no installer, n .net is built in. it updates itself after that
 
-Download **`holdonquietly.exe`** from [Releases](../../releases/latest) and run it.
-One file. No installer, no dependencies — the .NET runtime is baked in. It updates
-itself from then on.
+it needs the [webview2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/), which windows 11 n most windows 10 pcs already have
 
-Requires the [Evergreen WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-(already present on Windows 11 and most Windows 10).
+> its not signed, so smartscreen flags it the first time. click **more info**, then **run anyway**, or right click the exe, go to properties n tick unblock
 
-> <img src=".github/icons/caution.svg" width="15" align="absmiddle" alt=""> Unsigned indie build — SmartScreen will flag it on first run. **More info → Run anyway**, or right-click the exe → Properties → Unblock.
+## what it does
 
-## <img src=".github/icons/biohazard.svg" width="18" align="absmiddle" alt=""> What it does
+- **colours from the cover:** the whole app recolours to the 2 main colours of the cover art, or u pick ur own accent
+- **visualizer:** the seek bar turns into a waveform that moves w the real audio (web audio, mse sources only), n custom bar waveforms draw over the track
+- **drm tracks:** monetized n major label songs actually play
+- **discord rich presence:** whats playing shows on ur profile w the progress n cover art
+- **friends feed:** see what other holdonquietly users are listening to, live
+- **last.fm scrobbling:** done by the app itself, so ur login never touches the page
+- **more than 1 account:** save soundcloud logins n swap between them without logging out
+- **share to discord:** send the current song to a webhook, once per song
+- **updates itself:** checks releases when it opens n swaps itself on restart
+- **ad block:** optional n local, see below
 
-- **Cover-matched theming** — the whole UI recolors to the two dominant colours of the
-  current artwork, or pin your own accent from the palette.
-- **Live visualizer** — the seek bar becomes a waveform driven by the real audio signal
-  (Web Audio, MSE sources only); custom bar-waveforms render over the track.
-- **DRM playback** — monetized / major-label tracks actually decode.
-- **Discord Rich Presence** — now-playing on your profile, real progress, cover art.
-- **Friends feed** — what other holdonquietly users are playing, live.
-- **Last.fm scrobbling** — done host-side; credentials never touch the page.
-- **Multi-account** — save and hot-swap SoundCloud sessions without logging out.
-- **Share to Discord** — push the current track to a webhook, once per track.
-- **Silent auto-update** — checks Releases on launch, swaps itself on restart.
-- **Ad-block** — optional, local (see below).
+## how its built
 
-## <img src=".github/icons/helix.svg" width="18" align="absmiddle" alt=""> How it's built
+nearly the whole app is 2 files
 
-Two files carry effectively the whole app.
-
-| file | role |
+| file | what it does |
 |---|---|
-| `Program.cs` | C# host. Frameless WPF window around WebView2, window controls, network ad-host blocking, cover colour extraction, Discord IPC, the friends/Last.fm bridges, webhook posting. |
-| `preload.js` | Everything page-side. Injected before SoundCloud's own scripts; builds the entire custom UI — themes, visualizer, waveforms, titlebar, panels. |
+| `Program.cs` | the c# side: the frameless wpf window around webview2, the window buttons, blocking ad hosts, pulling colours from the cover, discord ipc, the friends n last.fm bridges n webhook posts |
+| `preload.js` | everything on the page. it loads before soundclouds own scripts n builds the custom ui: themes, visualizer, waveforms, title bar n panels |
 
-Plus `Updater.cs` (GitHub-Releases self-update), `LastFm.cs` (host-side scrobbler),
-`ShortcutHelper.cs` (Windows media identity).
+plus `Updater.cs` (updates from github releases), `LastFm.cs` (scrobbling) n `ShortcutHelper.cs` (so windows media controls know its holdonquietly)
 
-`preload.js` never mutates SoundCloud's React DOM — doing so tears the tree apart on
-the next reconcile. Icons are swapped with CSS `mask-image`; only our own injected
-elements get touched.
+`preload.js` never edits soundclouds react dom, cuz that breaks the page the next time react redraws. icons get swapped w css `mask-image`, n only the elements the app adds itself get touched
 
-### Build
+### build
 
 ```powershell
 git clone https://github.com/dwindles/holdonquietly-soundcloud.git
@@ -59,23 +47,19 @@ dotnet build -c Release
 bin\Release\net9.0-windows\holdonquietly.exe
 ```
 
-Distributable single file:
+one file to hand out:
 
 ```powershell
 dotnet publish SoundCloudWV2.csproj -c Release -r win-x64 --self-contained true `
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist
 ```
 
-## Ad-block
+## ad block
 
-The app loads an unpacked Chromium ad-blocker from `extensions/` beside the exe.
-It isn't vendored here — drop an [uBlock Origin](https://github.com/gorhill/uBlock)
-build into `extensions/holdonquietly-blocker/`. Without it everything still runs;
-SoundCloud's own audio ads are muted separately.
+the app loads an unpacked chromium ad blocker from `extensions/` next to the exe. its not in this repo, so drop a [ublock origin](https://github.com/gorhill/uBlock) build into `extensions/holdonquietly-blocker/`. without it everything still works, n soundclouds own audio ads get muted separately
 
-## Notes
+## notes
 
-Not affiliated with, endorsed by, or sponsored by SoundCloud. "SoundCloud" is a
-trademark of SoundCloud Ltd. This is an independent client that renders soundcloud.com.
+Not affiliated with, endorsed by, or sponsored by SoundCloud. "SoundCloud" is a trademark of SoundCloud Ltd. This is an independent app that shows soundcloud.com.
 
-Made by **[dwindles](https://github.com/dwindles)**.
+made by **[dwindles](https://github.com/dwindles)**
