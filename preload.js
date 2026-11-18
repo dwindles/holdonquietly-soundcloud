@@ -4941,7 +4941,7 @@ function ensureDiscordPanel() {
           <div><div class="hoq-dc-label">Top artists</div><ol class="hoq-top hoq-top-artists"></ol></div>
           <div><div class="hoq-dc-label">Top tracks</div><ol class="hoq-top hoq-top-tracks"></ol></div>
         </div>
-        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. Log in to holdonquietly.com and your stats stay linked to your account, so they come back even if they're ever lost here. <button class="hoq-stat-reset">Reset</button></div>
+        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. An account is optional, not needed. If you log in to holdonquietly.com, your stats stay linked to it, so they come back even if they're ever lost here. <button class="hoq-stat-reset">Reset</button></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Friends listening</div>
