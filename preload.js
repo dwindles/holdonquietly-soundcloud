@@ -7560,10 +7560,10 @@ function setupConsoleView() {
       html.hoq-console-on .badgeList { margin-left:0 !important; margin-right:0 !important; }
       html.hoq-console-on .badgeList > .lazyLoadingList__list {
         display:grid !important; grid-auto-flow:column !important; grid-template-rows:repeat(var(--hoq-rows,2), auto) !important;
-        grid-auto-columns:var(--hoq-tile,220px) !important; column-gap:30px !important; row-gap:26px !important;
+        grid-auto-columns:var(--hoq-tile,220px) !important; column-gap:22px !important; row-gap:18px !important;
         overflow-x:auto !important; overflow-y:hidden !important; overscroll-behavior-x:contain;
         scroll-snap-type:x proximity; scroll-padding-left:36px;
-        padding:14px 36px 22px !important; margin:0 -28px !important;
+        padding:10px 36px 18px !important; margin:0 -28px !important;
         -webkit-mask-image:linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 60px), transparent 100%);
                 mask-image:linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 60px), transparent 100%); }
       html.hoq-console-on .badgeList > .lazyLoadingList__list::after { display:none !important; }
@@ -7581,8 +7581,12 @@ function setupConsoleView() {
       html.hoq-console-on .badgeList__item.hoq-cfocus .image, html.hoq-console-on .badgeList__item:hover .image {
         box-shadow:0 0 0 3px var(--sc-accent,#ff5500), 0 14px 34px rgba(0,0,0,.5) !important; }
       html.hoq-console-on .badgeList__item [class*="__heading"], html.hoq-console-on .badgeList__item [class*="__title"] a,
-      html.hoq-console-on .badgeList__item [class*="mainHeading"] { font-size:14px !important; }
-      html.hoq-console-on .badgeList__item [class*="__username"], html.hoq-console-on .badgeList__item [class*="subtitle"] { font-size:12.5px !important; }
+      html.hoq-console-on .badgeList__item [class*="mainHeading"] { font-size:12.5px !important; line-height:1.3 !important; }
+      html.hoq-console-on .badgeList__item [class*="__username"], html.hoq-console-on .badgeList__item [class*="subtitle"] { font-size:11.5px !important; line-height:1.3 !important; }
+      html.hoq-console-on .badgeList__item .playableTile__description { margin-top:6px !important; }
+      /* the shelf is the only scroller: no page scroll, no overlay scrollbar */
+      html.hoq-console-on, html.hoq-console-on body { overflow:hidden !important; }
+      html.hoq-console-on #hoq-scroll { display:none !important; }
       /* SoundCloud gives every tile a 48px bottom margin: dead space on a shelf */
       html.hoq-console-on .badgeList__item .audibleTile, html.hoq-console-on .badgeList__item .playableTile { margin:0 !important; }
       /* third View button (grid / list / console) */
@@ -7639,36 +7643,45 @@ function setupConsoleView() {
   }
   if (!(onLib && on)) return;
 
-  // tile size from the window: two rows on the big lists, one on Overview shelves
+  // Size the shelf to the window: pick the row count that keeps tiles near
+  // ~170px (3 rows on a normal window, more on a tall one), measuring the text
+  // under each picture instead of guessing it.
+  const GAP = 18;
   const lists = [...document.querySelectorAll('.badgeList > .lazyLoadingList__list')];
   lists.forEach((ul) => {
-    const many = ul.children.length > 10;
-    const rows = many ? 2 : 1;
-    // fit the rows between the shelf's top and the player bar: measure the text
-    // under each picture (title/stats) instead of guessing it
     const prev = parseFloat(ul.style.getPropertyValue('--hoq-tile')) || 0;
     const first = ul.children[0];
-    const extra = prev && first ? Math.max(30, first.getBoundingClientRect().height - prev) : 80;
+    const extra = prev && first ? Math.max(24, first.getBoundingClientRect().height - prev) : 44;
     const top = ul.getBoundingClientRect().top + window.scrollY;
-    const room = window.innerHeight - Math.max(110, Math.min(top, 320)) - 64 /* player */ - 36 /* shelf padding */ - (rows - 1) * 26;
-    const tile = Math.round(Math.max(140, Math.min(320, room / rows - extra)));
+    const room = window.innerHeight - Math.max(100, Math.min(top, 300)) - 64 /* player */ - 28 /* shelf padding */;
+    const rows = ul.children.length < 8 ? 1 : Math.max(2, Math.min(6, Math.round((room + GAP) / (170 + extra + GAP))));
+    const tile = Math.round(Math.max(110, Math.min(320, (room - (rows - 1) * GAP) / rows - extra)));
     ul.style.setProperty('--hoq-rows', rows);
     if (Math.abs(tile - prev) >= 3) ul.style.setProperty('--hoq-tile', tile + 'px');   // settle, don't jitter
     if (ul.__hoqConsole) return;
     ul.__hoqConsole = true;
-    // vertical wheel moves along the shelf; near the end, poke SoundCloud's
-    // lazy loader (it listens for window scroll) so more tiles come in
-    ul.addEventListener('wheel', (e) => {
-      if (ul.scrollWidth <= ul.clientWidth + 4 || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      e.preventDefault();
-      ul.scrollBy({ left: e.deltaY * 1.6, behavior: 'auto' });
-    }, { passive: false });
+    // near the end, poke SoundCloud's lazy loader (it listens for window
+    // scroll) so more tiles come in
     ul.addEventListener('scroll', () => {
-      if (ul.scrollLeft + ul.clientWidth > ul.scrollWidth - ul.clientWidth * 0.8) {
+      if (ul.scrollLeft + ul.clientWidth > ul.scrollWidth - ul.clientWidth * 1.5) {
         try { window.dispatchEvent(new Event('scroll')); document.dispatchEvent(new Event('scroll')); } catch (e) {}
       }
     }, { passive: true });
   });
+  if (!window.__hoqConsoleWheel) {
+    window.__hoqConsoleWheel = true;
+    // the wheel ANYWHERE on the page moves along the shelf (fast), except in
+    // menus / popovers / text fields that scroll themselves
+    window.addEventListener('wheel', (e) => {
+      if (!root.classList.contains('hoq-console-on') || e.ctrlKey) return;
+      if (e.target.closest && e.target.closest('.dropdownMenu, [role="menu"], [role="dialog"], .modal, input, textarea, [id^="hoq-"]:not(html)')) return;
+      const ul = document.querySelector('.badgeList > .lazyLoadingList__list'); if (!ul) return;
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const px = e.deltaMode === 1 ? d * 40 : d;   // line-mode wheels
+      e.preventDefault();
+      ul.scrollBy({ left: px * 3.2, behavior: 'auto' });
+    }, { passive: false, capture: true });
+  }
   if (!window.__hoqConsoleKeys) {
     window.__hoqConsoleKeys = true;
     // arrow keys walk the tiles like a controller; Enter plays the focused one
