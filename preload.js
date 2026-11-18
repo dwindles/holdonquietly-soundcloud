@@ -2487,6 +2487,15 @@ const BASE_CSS = `
     border-radius: 14px !important; box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
   }
   .dropdownContent__container { padding: 6px !important; }
+  /* SoundCloud sizes its scroll wrapper wider than the box to tuck a scrollbar
+     away; scrollbars are hidden here, so that extra width just pushed the right
+     edge (the Follow back pill) out of the frame. Pin everything to the box. */
+  .dropdownMenu:has(.dropdownContent) .g-scrollable, .dropdownMenu:has(.dropdownContent) .g-scrollable-inner,
+  .dropdownMenu:has(.dropdownContent) [class*="__scrollable"] {
+    width: auto !important; max-width: 100% !important; margin-right: 0 !important; padding-right: 0 !important;
+    box-sizing: border-box !important; overflow-x: hidden !important; }
+  .dropdownMenu .dropdownContent, .dropdownMenu .dropdownContent__container, .dropdownMenu .dropdownContent__list,
+  .dropdownMenu .dropdownContent__listItem { max-width: 100% !important; box-sizing: border-box !important; }
   .dropdownContent__header { display: flex !important; align-items: center !important; justify-content: space-between !important;
     padding: 6px 8px 10px !important; border: 0 !important; }
   .dropdownContent__header h2 { font-size: 13px !important; font-weight: 600 !important; color: #ececf1 !important; letter-spacing: 0 !important; margin: 0 !important; }
@@ -2497,13 +2506,22 @@ const BASE_CSS = `
   .dropdownContent__listItem + .dropdownContent__listItem { margin-top: 2px !important; }
   .notificationBadge__linkContainer { position: relative !important; border-radius: 10px !important; transition: background .12s ease !important; }
   .notificationBadge__linkContainer:hover { background: rgba(255,255,255,0.06) !important; }
-  .notificationBadge, .notificationBadge.m-small { background: transparent !important; border: 0 !important; padding: 8px !important; margin: 0 !important; }
-  .notificationBadge__row { display: flex !important; align-items: center !important; gap: 11px !important; }
-  .notificationBadge__side { flex: none !important; position: relative !important; z-index: 2 !important; }
+  .notificationBadge, .notificationBadge.m-small { background: transparent !important; border: 0 !important; padding: 8px !important; margin: 0 !important;
+    width: auto !important; max-width: 100% !important; box-sizing: border-box !important; }
+  .notificationBadge__linkContainer, .notificationBadge__row { max-width: 100% !important; box-sizing: border-box !important; }
+  .notificationBadge__row { display: flex !important; align-items: center !important; gap: 11px !important; width: 100% !important; }
+  .notificationBadge__side { flex: none !important; position: relative !important; z-index: 2 !important; margin: 0 !important; padding: 0 !important; }
+  .notificationBadge__side:last-child { margin-left: auto !important; }
   .notificationBadge__main { flex: 1 1 auto !important; min-width: 0 !important; display: flex !important; flex-direction: column !important; gap: 2px !important;
     font-size: 12.5px !important; line-height: 1.35 !important; color: #a6a6b0 !important; }
   .notificationBadge__main .sc-text-secondary { color: #a6a6b0 !important; }
   .notificationBadge__username { font-size: 12.5px !important; font-weight: 600 !important; color: #f0f0f4 !important; margin: 0 4px 0 0 !important; }
+  /* the global gradient-text link rule (.sc-text-primary / .sc-link-primary) turns
+     names into a muddy cover gradient here: plain solid text in these popovers */
+  .dropdownMenu .sc-text-primary, .dropdownMenu .sc-link-primary, .dropdownMenu .notificationBadge__username {
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; }
+  .dropdownMenu .notificationBadge__username { color: #f0f0f4 !important; }
   .notificationBadge__main .sc-text-h5 { font-size: inherit !important; }
   .notificationBadge .userAvatarBadge__imageContainer, .notificationBadge .userAvatarBadge__image {
     width: 36px !important; height: 36px !important; border-radius: 50% !important; }
@@ -2515,7 +2533,7 @@ const BASE_CSS = `
   /* follow pill: "Follow back" = accent tint, "Following" = quiet */
   .notificationBadge .sc-button-follow { height: 26px !important; min-width: 0 !important; padding: 0 11px !important; border-radius: 99px !important;
     font-size: 11.5px !important; font-weight: 600 !important; box-shadow: none !important; border: 0 !important;
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
     color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; }
   .notificationBadge .sc-button-follow:hover { background: color-mix(in srgb, var(--sc-accent, #ff5500) 32%, transparent) !important; }
   .notificationBadge .sc-button-follow.sc-button-selected { background: rgba(255,255,255,0.07) !important; color: #a6a6b0 !important; }
@@ -4923,7 +4941,7 @@ function ensureDiscordPanel() {
           <div><div class="hoq-dc-label">Top artists</div><ol class="hoq-top hoq-top-artists"></ol></div>
           <div><div class="hoq-dc-label">Top tracks</div><ol class="hoq-top hoq-top-tracks"></ol></div>
         </div>
-        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. Sign in to your holdonquietly account (Settings) to keep them on your account. <button class="hoq-stat-reset">Reset</button></div>
+        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. Log in to holdonquietly.com and your stats stay linked to your account, so they come back even if they're ever lost here. <button class="hoq-stat-reset">Reset</button></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Friends listening</div>
