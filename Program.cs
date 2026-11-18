@@ -139,6 +139,7 @@ class Program
         wv = new WebView2();
         win.Content = wv;
         win.Loaded += async (s, e) => await Init();
+        win.SizeChanged += (s, e) => FitZoom();
 
         // Tray icon: closing the window hides to tray instead of quitting.
         SetupTray();
@@ -222,6 +223,7 @@ class Program
         // msOverlayScrollbarWinStyle drew the ugly up/down arrow buttons.
         env = await CoreWebView2Environment.CreateAsync(null, userData, opts);
         await wv.EnsureCoreWebView2Async(env);
+        FitZoom();
         var core = wv.CoreWebView2;
 
         core.Settings.UserAgent = CHROME_UA;
@@ -1354,6 +1356,23 @@ class Program
         return IntPtr.Zero;
     }
 
+    // SoundCloud's desktop layout needs ~1280px; narrower, it falls apart (nav
+    // wraps under the logo, buttons stack, the sidebar is cut off). Below that,
+    // zoom the page out to fit instead, like browser zoom: same layout, smaller,
+    // clicks still line up. The mini player is its own layout, so it stays at 100%.
+    const double FitWidth = 1280;
+    static void FitZoom()
+    {
+        try
+        {
+            if (wv == null) return;
+            double w = win.ActualWidth;
+            double z = (miniOn || w <= 0 || w >= FitWidth) ? 1.0 : Math.Max(0.55, w / FitWidth);
+            if (Math.Abs(wv.ZoomFactor - z) > 0.005) wv.ZoomFactor = z;
+        }
+        catch { }
+    }
+
     // Compact / mini player: shrink to a small always-on-top widget, and back.
     static bool miniOn = false;
     static Rect miniRestore;
@@ -1365,6 +1384,7 @@ class Program
         {
             if (maxed) { miniWasMax = true; ToggleMaximize(); } else miniWasMax = false;
             miniRestore = new Rect(win.Left, win.Top, win.Width, win.Height);
+            miniOn = true; FitZoom();   // mini layout always at 100%
             win.MinWidth = 0; win.MinHeight = 0;
             // top-right corner of the monitor the window is on (in device pixels)
             var wa = WorkAreaPx(); double k = DpiScale();
@@ -1385,7 +1405,7 @@ class Program
             win.Width = miniRestore.Width; win.Height = miniRestore.Height;
             win.Left = miniRestore.X; win.Top = miniRestore.Y;
             if (miniWasMax) ToggleMaximize();
-            miniOn = false;
+            miniOn = false; FitZoom();
         }
         catch { }
     }

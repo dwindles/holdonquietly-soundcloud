@@ -7869,8 +7869,17 @@ function setupProfileExtras() {
     const st = document.createElement('style');
     st.id = 'hoq-pf-css';
     st.textContent = `
-      .userInfoBar__buttons { display:flex !important; align-items:center !important; gap:8px !important; }
-      #hoq-pf-tools { display:flex; align-items:center; gap:8px; }
+      /* on the banner's bottom-right (empty space), not in the tab bar: there it
+         pushed the tabs and SoundCloud's own buttons onto a second line */
+      .profileHeader { position:relative !important; }
+      #hoq-pf-tools { position:absolute; right:20px; bottom:20px; z-index:5; display:flex; align-items:center; gap:8px;
+        padding:6px; border-radius:14px; background:rgba(12,12,16,.55); border:1px solid rgba(255,255,255,.1);
+        box-shadow:0 8px 28px rgba(0,0,0,.35); backdrop-filter:blur(18px) saturate(1.4); -webkit-backdrop-filter:blur(18px) saturate(1.4); }
+      #hoq-pf-tools .hoq-pf-btn, #hoq-pf-tools .hoq-pf-find { height:32px; }
+      /* tabs stay on one line (scroll sideways if they ever run out of room) */
+      .userInfoBar__tabs { min-width:0 !important; overflow-x:auto !important; scrollbar-width:none !important; }
+      .userInfoBar__tabs .g-tabs { flex-wrap:nowrap !important; white-space:nowrap !important; }
+      .userInfoBar__buttons .sc-button-group { flex-wrap:nowrap !important; }
       #hoq-pf-tools .hoq-pf-btn { display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 13px; border-radius:10px;
         border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.04); color:#e8e8ee; font:600 13px/1 Inter,-apple-system,Arial,sans-serif;
         cursor:pointer; transition:background .12s ease, border-color .12s ease; white-space:nowrap; }
@@ -7886,7 +7895,7 @@ function setupProfileExtras() {
       .hoq-pf-find input { flex:1; min-width:0; height:100%; margin:0 0 0 7px; padding:0; border:0 !important; outline:0 !important; background:none !important;
         box-shadow:none !important; color:#ececf1; font:500 13px Inter,-apple-system,Arial,sans-serif; }
       .hoq-pf-find input::placeholder { color:#7d7d88; }
-      .hoq-pf-res { position:absolute; top:calc(100% + 6px); right:0; z-index:1000; width:380px; max-height:420px; overflow-y:auto; padding:6px;
+      .hoq-pf-res { position:fixed; top:0; left:0; z-index:2147483000; width:380px; max-height:420px; overflow-y:auto; padding:6px;
         box-sizing:border-box; border-radius:14px; border:1px solid rgba(255,255,255,.09) !important; background:#141418 !important; opacity:1 !important; backdrop-filter:none !important;
         box-shadow:0 18px 52px rgba(0,0,0,.55); display:none; scrollbar-width:none; }
       .hoq-pf-res.show { display:block; }
@@ -7931,21 +7940,26 @@ function setupProfileExtras() {
     tools.dataset.slug = slug;
     tools.innerHTML =
       '<label class="hoq-pf-find"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>' +
-      '<input type="text" placeholder="Find a track" spellcheck="false" autocomplete="off"><div class="hoq-pf-res"></div></label>' +
+      '<input type="text" placeholder="Find a track" spellcheck="false" autocomplete="off"></label>' +
       '<button type="button" class="hoq-pf-btn hoq-pf-play" title="Play their tracks from the newest"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.3-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5z"/></svg>Play all</button>' +
       '<button type="button" class="hoq-pf-btn hoq-pf-shuf" title="Shuffle their tracks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4M4 20L20 4M20 16v4h-4M15 15l5 5M4 4l5 5"/></svg></button>';
-    const grp = bar.querySelector('.sc-button-group');
-    bar.insertBefore(tools, grp || bar.firstChild);
+    (document.querySelector('.l-user-hero .profileHeader') || bar).appendChild(tools);
     tools.querySelector('.hoq-pf-play').addEventListener('click', () => hoqPfPlayAll(slug, false));
     tools.querySelector('.hoq-pf-shuf').addEventListener('click', () => hoqPfPlayAll(slug, true));
 
-    const inp = tools.querySelector('input'), res = tools.querySelector('.hoq-pf-res');
+    const inp = tools.querySelector('input');
+    // results live on <body>: the banner clips its children, and the tools' blur
+    // would trap a fixed-position child inside it
+    const old = document.getElementById('hoq-pf-res'); if (old) old.remove();   // one per toolbar (fresh handlers)
+    const res = document.createElement('div'); res.id = 'hoq-pf-res'; res.className = 'hoq-pf-res'; document.body.appendChild(res);
+    const place = () => { const r = inp.closest('.hoq-pf-find').getBoundingClientRect(); res.style.top = (r.bottom + 8) + 'px'; res.style.left = Math.max(8, Math.min(r.right - 380, window.innerWidth - 388)) + 'px'; };
+    window.addEventListener('scroll', () => { if (res.isConnected && res.classList.contains('show')) place(); }, { passive: true });
     let sel = 0, hits = [];
     const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const mark = (t, q) => { const i = t.toLowerCase().indexOf(q); return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length)); };
     const render = async () => {
       const q = inp.value.trim().toLowerCase();
-      res.classList.add('show');
+      place(); res.classList.add('show');
       let data;
       try { data = await hoqPfData(slug); } catch (e) { res.innerHTML = '<div class="hoq-pf-msg">Couldn’t load their tracks. Try again in a moment.</div>'; return; }
       if (inp.value.trim().toLowerCase() !== q) return;   // typed on meanwhile
