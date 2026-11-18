@@ -383,9 +383,12 @@ class Program
         catch { }
 
         core.Navigate("https://soundcloud.com/discover");
-        _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
+        // A test copy (HOQ_DATADIR) stays silent: no Discord status, no friends-list
+        // entry, no phone relay. It showed up as a second "you" and could overwrite
+        // the real app's Discord status.
+        if (!IsTestCopy) _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
         _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
-        _ = PhoneNowPlayingLoop();  // the phone's listening, onto the same presence
+        if (!IsTestCopy) _ = PhoneNowPlayingLoop();  // the phone's listening, onto the same presence
         _ = PhoneStatsLoop();       // the phone's play counts, onto the hoq account
         _ = FriendsLoop();          // poll the shared friends backend
         _ = ReadWebhook();          // warm the cache, so a later failed read still has a URL
@@ -456,10 +459,12 @@ class Program
     // POST our now-playing to the shared friends backend (from the host = no CORS/mixed-content).
     // url/pos/dur/paused/rate let friends "listen along" (the server keeps them
     // from the friends-server version that knows them; older ones just ignore them).
+    static bool IsTestCopy => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HOQ_DATADIR"));
+
     static async Task PostPresence(string id, string name, string sc, string title, string artist, string cover,
         string url = "", int pos = 0, int dur = 0, bool paused = false, double rate = 1)
     {
-        if (string.IsNullOrEmpty(id)) return;
+        if (string.IsNullOrEmpty(id) || IsTestCopy) return;
         try
         {
             string payload = JsonSerializer.Serialize(new { id, name, sc, title, artist, cover, url, pos, dur, paused, rate });
@@ -1223,7 +1228,8 @@ class Program
                     rpPauseHide = PropBool(rp, "pauseHide", true);
                     rpStatus = Prop(rp, "status") is var s && s.Length > 0 ? s : "artist";
                 }
-                if (string.IsNullOrEmpty(title) || !rpOn) DiscordRpc.Clear(!rpOn);
+                if (IsTestCopy) { }
+                else if (string.IsNullOrEmpty(title) || !rpOn) DiscordRpc.Clear(!rpOn);
                 else DiscordRpc.Update(new DiscordRpc.Track
                 {
                     Title = title, Artist = artist, Cover = cover,
@@ -1242,7 +1248,7 @@ class Program
                 bool toastOn = r.TryGetProperty("rp", out var rp2) && rp2.ValueKind == JsonValueKind.Object && PropBool(rp2, "toast", false);
                 SongToast.MaybeShow(title, artist, cover, toastOn, PropB(r, "paused"));
                 ThumbBar.SetPlaying(!string.IsNullOrEmpty(title) && !PropB(r, "paused"));
-                LastFm.Track(title, artist, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
+                if (!IsTestCopy) LastFm.Track(title, artist, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
             }
             catch { }
             return;

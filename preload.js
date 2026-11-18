@@ -492,6 +492,29 @@ window.__hoqFX = {
   },
   active() { const s = hoqFxState(); return s.boost > 0 || s.level || !!s.space || s.speed !== 1 || s.xfade > 0; },
 };
+// Seek the way a person does: press on SoundCloud's own progress bar at the spot.
+// Setting the audio element's currentTime directly bypasses SoundCloud's HLS
+// loader (it fetches the chunks itself), so playback sat 'buffering' forever.
+function hoqSeek(sec) {
+  try {
+    const w = document.querySelector('.playControls .playbackTimeline__progressWrapper');
+    if (!w) return false;
+    const dur = +w.getAttribute('aria-valuemax') || ((window.__hoqMediaEl || {}).duration);
+    if (!(dur > 0) || !(sec >= 0)) return false;
+    const r = w.getBoundingClientRect();
+    if (!r.width) return false;
+    const x = r.left + r.width * Math.min(0.995, sec / dur), y = r.top + r.height / 2;
+    const o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1 };
+    w.dispatchEvent(new MouseEvent('mousedown', o));
+    w.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, o, { buttons: 0 })));
+    document.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, o, { buttons: 0 })));
+    w.dispatchEvent(new MouseEvent('click', Object.assign({}, o, { buttons: 0 })));
+    return true;
+  } catch (e) { return false; }
+}
+
+window.__hoqSeek = hoqSeek;
+
 // --- Playback ticker: speed/pitch, crossfade, resume --------------------------
 // Speed: playbackRate with preservesPitch OFF, so speed and pitch move together
 // like a record (slowed / nightcore) — a straight resample, no time-stretch warble.
@@ -522,7 +545,7 @@ window.__hoqFX = {
       const r = resumeSaved();
       const fresh = r && r.pos > 10 && Date.now() - (r.at || 0) < 30 * 86400000;
       if (fresh && r.title === title && pos < 3 && isFinite(dur) && r.pos < dur - 15) {
-        try { el.currentTime = r.pos; } catch (e) {}
+        hoqSeek(r.pos);
       } else if (fresh && r.title !== title && r.path && pos < 3 && performance.now() < 15 * 60000) {
         // SoundCloud restored the last track you PICKED, not the one autoplay had
         // moved on to: switch to where you actually were
@@ -7072,7 +7095,7 @@ function hoqFollowTick(list) {
   // same song: pull our position back in line if it drifted
   const el = window.__hoqMediaEl, want = hoqFriendPos(f);
   if (el && !el.paused && typeof f.pos === 'number' && Math.abs(el.currentTime - want) > 6 && isFinite(el.duration) && want < el.duration - 3) {
-    try { el.currentTime = want; } catch (e) {}
+    hoqSeek(want);
   }
 }
 
@@ -8055,7 +8078,7 @@ function setupMiniMode() {
     document.documentElement.addEventListener('mouseenter', () => { if (miniOn()) scPost('mini:alpha:100'); });
     const prog = widget.querySelector('.mn-prog');
     prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * el.duration); });
-    prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) { try { el.currentTime = prog.value / 1000 * el.duration; } catch (e) {} } scrubbing = false; });
+    prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) hoqSeek(prog.value / 1000 * el.duration); scrubbing = false; });
     const vol = widget.querySelector('.mn-volrange');
     const setVol = () => { fillR(vol); const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } };
     vol.addEventListener('input', () => { adjustingVol = true; setVol(); });
@@ -8220,7 +8243,7 @@ function hoqPfAutoPlay() {
       const el = window.__hoqMediaEl;
       if (Date.now() - t0 > 12000) { clearInterval(iv); return; }
       if (el && !el.paused && el.currentTime > 0.2 && isFinite(el.duration) && want < el.duration - 3) {
-        clearInterval(iv); try { el.currentTime = want + (Date.now() - t0) / 1000; } catch (e) {}
+        clearInterval(iv); hoqSeek(want + (Date.now() - t0) / 1000);
       }
     }, 250);
   }
