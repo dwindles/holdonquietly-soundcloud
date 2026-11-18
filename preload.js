@@ -2628,6 +2628,31 @@ const BASE_CSS = `
     box-shadow: 0 0 15px color-mix(in srgb, var(--sc-accent, #ff5500) 32%, transparent) !important;
   }
   .commentsList__sortSelect .select__dropdownButton svg { fill: currentColor !important; }
+  /* Profile header: SoundCloud prints the name / city on hard black boxes over
+     the banner. Drop the boxes; a soft shadow keeps them readable on any banner. */
+  .profileHeaderInfo [class*="g-type-shrinkwrap"] {
+    background: none !important; background-color: transparent !important; padding-left: 0 !important; padding-right: 0 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 2px 14px rgba(0,0,0,.55) !important; }
+  .profileHeaderInfo__userName { color: #fff !important; -webkit-text-fill-color: #fff !important; }
+  .profileHeaderInfo__additional[class*="g-type-shrinkwrap"] { color: rgba(255,255,255,.82) !important; -webkit-text-fill-color: currentColor !important; }
+  .profileHeaderInfo__content br { display: none; }
+  .profileHeaderInfo__content > h3 { display: block !important; margin-top: 4px !important; }
+  /* Notifications page filter ("All notifications ▾"): a quiet pill, same
+     family as the menus it opens */
+  .activitiesFilterSelect__button.sc-button {
+    display: inline-flex !important; align-items: center !important; gap: 6px !important;
+    height: 32px !important; padding: 0 10px 0 13px !important; margin-right: 8px !important;
+    background: rgba(255,255,255,0.05) !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 99px !important; box-shadow: none !important; text-shadow: none !important;
+    color: #e4e4ea !important; font-size: 13px !important; font-weight: 600 !important; line-height: 1 !important; letter-spacing: 0 !important;
+    -webkit-text-fill-color: currentColor !important; transition: background .12s ease, border-color .12s ease !important;
+  }
+  .activitiesFilterSelect__button.sc-button:hover, .activitiesFilterSelect__button.sc-button[aria-expanded="true"] {
+    background: rgba(255,255,255,0.09) !important; border-color: rgba(255,255,255,0.16) !important; color: #fff !important; }
+  .activitiesFilterSelect__button svg { width: 14px !important; height: 14px !important; padding: 0 !important; margin: 0 !important;
+    opacity: .65; transition: transform .15s ease, opacity .12s ease; }
+  .activitiesFilterSelect__button:hover svg { opacity: 1; }
+  .activitiesFilterSelect__button[aria-expanded="true"] svg { transform: rotate(180deg); }
 
   /* ===== Modals incl. the Share popup — acrylic glass ===== */
   .modal__modal, .g-modal, .shareSheet, .sharePanel, .share__inner,
@@ -6653,9 +6678,20 @@ function removeClutter() {
     '.l-listen-wrapper, .l-about, .l-user, .userInfoBar, ' +
     '.l-user-hero, .profileHeader, .profileHeaderBackground, .profileHeaderInfo';
   const isStruct = (el) => !!(el && el.matches && el.matches(STRUCT_SEL));
+  // A user's own "Artist Pro" / "Next Pro" BADGE is not an upsell. The text
+  // match below used to hit it and climb up to the profile header's name block
+  // (name, city, badge all gone). Never hide anything that is, sits inside, or
+  // holds a profile header / creator badge / user card.
+  const PROTECT_IN = '.l-user-hero, .profileHeader, .creatorBadge, .sc-status-label, .userBadge, .userBadgeListItem, .soundTitle, .userInfoBar';
+  const PROTECT_HAS = '.creatorBadge, .sc-status-label, .profileHeaderInfo__userName, .userBadge__usernameLink';
+  const isProtected = (el) => !!(el.closest(PROTECT_IN) || el.querySelector(PROTECT_HAS));
+  // undo earlier hides that hit protected things
+  document.querySelectorAll('[data-schid]').forEach((el) => {
+    if (isProtected(el)) { el.style.display = ''; el.removeAttribute('data-schid'); }
+  });
   // Hide + tag so diagnostics can tell OUR hides from SoundCloud's own.
   const kill = (el) => {
-    if (!el || isStruct(el)) return;
+    if (!el || isStruct(el) || isProtected(el)) return;
     el.style.display = 'none';
     el.setAttribute('data-schid', '1');
   };
