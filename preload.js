@@ -2897,6 +2897,43 @@ const BASE_CSS = `
     box-shadow: 0 0 0 1px rgba(255,255,255,0.16) !important; filter: none !important; }
   .header .header__userNavUsernameButtonIcon { margin: 0 !important; color: #8e8e99 !important; display: flex !important; }
   .header .header__userNavUsernameButtonIcon svg { width: 12px !important; height: 12px !important; }
+  /* ===== SoundCloud's little notices ("… was saved to your Library") =====
+     Same card as the app's own toasts: bottom-right above the player, cover,
+     title, a muted line; the × shows on hover. */
+  #gritter-notice-wrapper { position: fixed !important; top: auto !important; left: auto !important;
+    right: 18px !important; bottom: 96px !important; width: 330px !important; z-index: 2147483500 !important; }
+  .gritter-item-wrapper { position: relative !important; margin: 8px 0 0 !important; background: none !important;
+    display: block !important; width: auto !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; border-radius: 0 !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    animation: hoqGritIn .32s cubic-bezier(.2,.9,.3,1) both; }
+  @keyframes hoqGritIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  .gritter-top, .gritter-bottom { display: none !important; }
+  .gritter-item { display: flex !important; align-items: center !important; gap: 12px !important; margin: 0 !important;
+    padding: 10px 34px 10px 10px !important; border-radius: 14px !important; min-height: 0 !important;
+    background: rgba(20,20,24,0.78) !important; border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5) !important; color: #fff !important;
+    backdrop-filter: blur(22px) saturate(1.6) !important; -webkit-backdrop-filter: blur(22px) saturate(1.6) !important;
+    font: 500 13px/1.35 Inter,-apple-system,Arial,sans-serif !important; }
+  .gritter-item > div[style*="clear"] { display: none !important; }
+  .gritter-image { float: none !important; flex: none !important; width: 40px !important; height: 40px !important; margin: 0 !important;
+    border-radius: 8px !important; object-fit: cover !important; box-shadow: 0 2px 8px rgba(0,0,0,0.35) !important; }
+  .gritter-with-image, .gritter-without-image { float: none !important; flex: 1 1 auto !important; min-width: 0 !important; width: auto !important;
+    display: flex !important; flex-direction: column !important; gap: 1px !important; padding: 0 !important; margin: 0 !important; }
+  .gritter-item p { margin: 0 !important; padding: 0 !important; }
+  .gritter-item p:empty { display: none !important; }
+  .gritter-title { display: block !important; margin: 0 !important; padding: 0 !important; color: #fff !important; text-shadow: none !important;
+    font: 600 13px/1.3 Inter,-apple-system,Arial,sans-serif !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+  .gritter-item .sc-text-secondary { color: #a6a6b0 !important; font-size: 12px !important; }
+  .gritter-item a.sc-link-primary { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; font-weight: 600 !important; }
+  .gritter-item a.sc-link-primary:hover { text-decoration: underline !important; }
+  .gritter-close { display: flex !important; align-items: center !important; justify-content: center !important;
+    position: absolute !important; top: 50% !important; right: 8px !important; left: auto !important; width: 22px !important; height: 22px !important;
+    margin: -11px 0 0 !important; border-radius: 50% !important; background: transparent !important; color: #8e8e99 !important;
+    opacity: 0 !important; transition: opacity .12s ease, background .12s ease !important; text-indent: 0 !important; }
+  .gritter-item-wrapper:hover .gritter-close { opacity: 1 !important; }
+  .gritter-close:hover { background: rgba(255,255,255,0.1) !important; color: #fff !important; }
+  .gritter-close svg { width: 11px !important; height: 11px !important; }
   /* Upload: calm pill, no glow */
   .header a.uploadButton { height: 30px !important; padding: 0 14px !important; border-radius: 9px !important; margin: 0 !important;
     box-shadow: none !important; font-weight: 600 !important; transition: filter .12s ease !important; }
