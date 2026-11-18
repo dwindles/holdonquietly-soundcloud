@@ -2464,21 +2464,21 @@ const BASE_CSS = `
   /* Style ONLY the action-menu rows (Repost / Share / Add to Playlist…). Those
      dropdowns have no .dropdownContent, unlike Notifications/DMs — so this leaves
      the notification + message layouts completely alone. */
-  .dropdownMenu:not(:has(.dropdownContent)) .sc-button,
-  .dropdownMenu:not(:has(.dropdownContent)) button,
-  .dropdownMenu:not(:has(.dropdownContent)) a[role="menuitem"] {
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) .sc-button,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) button,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) a[role="menuitem"] {
     display: flex !important; align-items: center !important; gap: 10px !important;
     width: 100% !important; justify-content: flex-start !important; text-align: left !important;
     background: transparent !important; border: 0 !important; box-shadow: none !important;
     border-radius: 8px !important; color: #d4d4d7 !important; font-weight: 600 !important;
     padding: 8px 11px !important; transition: background .12s ease, color .12s ease !important;
   }
-  .dropdownMenu:not(:has(.dropdownContent)) .sc-button:hover,
-  .dropdownMenu:not(:has(.dropdownContent)) button:hover,
-  .dropdownMenu:not(:has(.dropdownContent)) a[role="menuitem"]:hover {
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) .sc-button:hover,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) button:hover,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) a[role="menuitem"]:hover {
     background: var(--sc-accent, #ff5500) !important; color: #fff !important;
   }
-  .dropdownMenu:not(:has(.dropdownContent)) .sc-button:hover * { color: #fff !important; }
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) .sc-button:hover * { color: #fff !important; }
 
   /* ===== Notifications / Messages popovers: same family as the other menus =====
      avatar | who + what + when | action (follow pill or the track's artwork) */
@@ -2490,8 +2490,8 @@ const BASE_CSS = `
   /* SoundCloud sizes its scroll wrapper wider than the box to tuck a scrollbar
      away; scrollbars are hidden here, so that extra width just pushed the right
      edge (the Follow back pill) out of the frame. Pin everything to the box. */
-  .dropdownMenu:has(.dropdownContent) .g-scrollable, .dropdownMenu:has(.dropdownContent) .g-scrollable-inner,
-  .dropdownMenu:has(.dropdownContent) [class*="__scrollable"] {
+  .dropdownMenu:has(.dropdownContent__container) .g-scrollable, .dropdownMenu:has(.dropdownContent__container) .g-scrollable-inner,
+  .dropdownMenu:has(.dropdownContent__container) [class*="__scrollable"] {
     width: auto !important; max-width: 100% !important; margin-right: 0 !important; padding-right: 0 !important;
     box-sizing: border-box !important; overflow-x: hidden !important; }
   .dropdownMenu .dropdownContent, .dropdownMenu .dropdownContent__container, .dropdownMenu .dropdownContent__list,
