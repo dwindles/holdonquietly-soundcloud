@@ -2763,6 +2763,66 @@ const BASE_CSS = `
     background: rgba(0,0,0,0.5) !important;
     backdrop-filter: blur(5px) !important; -webkit-backdrop-filter: blur(5px) !important;
   }
+
+  /* ===== Header, right side: one tidy grouped row =====
+     Upload | output · EQ · mini | notifications · messages · more | avatar.
+     .header__userNav becomes display:contents so its buttons line up (and
+     reorder) with ours in the one flex row; the avatar goes last. */
+  .header__right { display: flex !important; align-items: center !important; gap: 2px !important; }
+  .header__userNav { display: contents !important; }
+  .header__soundInput, .header__upload { order: 1; margin-right: 10px !important; }
+  #hoq-out-btn { order: 2; } #hoq-eq-btn { order: 3; } #hoq-mini-btn { order: 4; }
+  .header__loginMenu { order: 5; margin-left: 8px !important; }
+  .header__userNavActivitiesButton { order: 6; } .header__userNavMessagesButton { order: 7; }
+  .header__right > .header__navMenu { order: 8; margin: 0 !important; }
+  .header__userNavUsernameButton { order: 9; }
+  .header__right > .header__navMenu li { display: flex !important; }
+  /* every icon button: same size, same grey, soft hover tile, no glow */
+  .header #hoq-out-btn, .header .hoq-hdr-icon, .header .header__userNavActivitiesButton,
+  .header .header__userNavMessagesButton, .header .header__moreButton {
+    position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    width: 34px !important; height: 34px !important; margin: 0 !important; padding: 0 !important; border: 0 !important;
+    border-radius: 10px !important; background: transparent !important; box-shadow: none !important; filter: none !important;
+    color: #a6a6b0 !important; transition: background .12s ease, color .12s ease !important; }
+  .header #hoq-out-btn:hover, .header .hoq-hdr-icon:hover, .header .header__userNavActivitiesButton:hover,
+  .header .header__userNavMessagesButton:hover, .header .header__moreButton:hover {
+    background: rgba(255,255,255,0.08) !important; color: #fff !important; filter: none !important; }
+  .header #hoq-out-btn svg, .header .hoq-hdr-icon svg { width: 19px !important; height: 19px !important; }
+  .header .header__userNavActivitiesButton svg, .header .header__userNavMessagesButton svg { width: 21px !important; height: 21px !important; }
+  .header .header__moreButton svg { width: 17px !important; height: 17px !important; }
+  .header .header__userNavActivitiesButton *, .header .header__userNavMessagesButton *, .header .header__moreButton * { color: inherit !important; }
+  .header .notificationIcon, .header .header__moreButtonIcon { display: flex !important; align-items: center !important; justify-content: center !important; position: relative !important; }
+  /* "on" (output pinned / effects active): a small accent dot, not a whole orange icon */
+  .header #hoq-out-btn.on, .header .hoq-hdr-icon.on { color: #a6a6b0 !important; }
+  .header #hoq-out-btn.on:hover, .header .hoq-hdr-icon.on:hover { color: #fff !important; }
+  .header #hoq-out-btn.on::after, .header .hoq-hdr-icon.on::after { content: ''; position: absolute; top: 6px; right: 6px; width: 6px; height: 6px;
+    border-radius: 50%; background: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff); box-shadow: 0 0 0 2px rgba(10,10,14,0.55); }
+  /* unread badge: the same small dot, in the same spot */
+  .header .notificationIcon__badge { position: absolute !important; top: -2px !important; right: -3px !important; left: auto !important; margin: 0 !important; }
+  .header .notificationIcon__badge .newItemBadge { display: none !important; }
+  .header .notificationIcon[class*='newItems__'] .newItemBadge, .header .newItemBadge[class*='newItems__'] {
+    display: block !important; width: 8px !important; height: 8px !important; min-width: 0 !important; padding: 0 !important;
+    border-radius: 50% !important; background: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff) !important;
+    box-shadow: 0 0 0 2px rgba(10,10,14,0.55) !important; font-size: 0 !important; }
+  /* group dividers */
+  .header #hoq-out-btn { margin-left: 2px !important; }
+  .header .header__userNavActivitiesButton { margin-left: 13px !important; }
+  .header .header__userNavActivitiesButton::before, .header .header__userNavUsernameButton::before {
+    content: ''; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 1px; background: rgba(255,255,255,0.12); }
+  /* avatar last: small pill with a quiet chevron */
+  .header .header__userNavUsernameButton { position: relative !important; display: inline-flex !important; align-items: center !important; gap: 3px !important;
+    height: 34px !important; margin: 0 0 0 13px !important; padding: 0 6px 0 4px !important; border-radius: 99px !important;
+    background: transparent !important; transition: background .12s ease !important; }
+  .header .header__userNavUsernameButton:hover { background: rgba(255,255,255,0.08) !important; }
+  .header .header__userNavAvatar, .header .header__userNavAvatar .sc-artwork {
+    width: 26px !important; height: 26px !important; border-radius: 50% !important;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.16) !important; filter: none !important; }
+  .header .header__userNavUsernameButtonIcon { margin: 0 !important; color: #8e8e99 !important; display: flex !important; }
+  .header .header__userNavUsernameButtonIcon svg { width: 12px !important; height: 12px !important; }
+  /* Upload: calm pill, no glow */
+  .header a.uploadButton { height: 30px !important; padding: 0 14px !important; border-radius: 9px !important; margin: 0 !important;
+    box-shadow: none !important; font-weight: 600 !important; transition: filter .12s ease !important; }
+  .header a.uploadButton:hover { box-shadow: none !important; filter: brightness(1.12) !important; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -3336,7 +3396,7 @@ function recolorOrange() {
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you')) {
+    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you, #hoq-out-btn, .hoq-hdr-icon, .notificationIcon__badge')) {
       continue;
     }
     _seenOrange.add(el);
