@@ -2455,6 +2455,51 @@ const BASE_CSS = `
   }
   .dropdownMenu:not(:has(.dropdownContent)) .sc-button:hover * { color: #fff !important; }
 
+  /* ===== Notifications / Messages popovers: same family as the other menus =====
+     avatar | who + what + when | action (follow pill or the track's artwork) */
+  .dropdownMenu:has(.dropdownContent__container) {
+    background: rgba(12,12,16,0.82) !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 14px !important; box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
+  }
+  .dropdownContent__container { padding: 6px !important; }
+  .dropdownContent__header { display: flex !important; align-items: center !important; justify-content: space-between !important;
+    padding: 6px 8px 10px !important; border: 0 !important; }
+  .dropdownContent__header h2 { font-size: 13px !important; font-weight: 600 !important; color: #ececf1 !important; letter-spacing: 0 !important; margin: 0 !important; }
+  .dropdownContent__headerButton { font-size: 12px !important; font-weight: 500 !important; color: #8e8e99 !important; text-decoration: none !important; }
+  .dropdownContent__headerButton:hover { color: #fff !important; }
+  .dropdownContent__list { margin: 0 !important; padding: 0 !important; }
+  .dropdownContent__listItem { margin: 0 !important; padding: 0 !important; border: 0 !important; background: transparent !important; }
+  .dropdownContent__listItem + .dropdownContent__listItem { margin-top: 2px !important; }
+  .notificationBadge__linkContainer { position: relative !important; border-radius: 10px !important; transition: background .12s ease !important; }
+  .notificationBadge__linkContainer:hover { background: rgba(255,255,255,0.06) !important; }
+  .notificationBadge, .notificationBadge.m-small { background: transparent !important; border: 0 !important; padding: 8px !important; margin: 0 !important; }
+  .notificationBadge__row { display: flex !important; align-items: center !important; gap: 11px !important; }
+  .notificationBadge__side { flex: none !important; position: relative !important; z-index: 2 !important; }
+  .notificationBadge__main { flex: 1 1 auto !important; min-width: 0 !important; display: flex !important; flex-direction: column !important; gap: 2px !important;
+    font-size: 12.5px !important; line-height: 1.35 !important; color: #a6a6b0 !important; }
+  .notificationBadge__main .sc-text-secondary { color: #a6a6b0 !important; }
+  .notificationBadge__username { font-size: 12.5px !important; font-weight: 600 !important; color: #f0f0f4 !important; margin: 0 4px 0 0 !important; }
+  .notificationBadge__main .sc-text-h5 { font-size: inherit !important; }
+  .notificationBadge .userAvatarBadge__imageContainer, .notificationBadge .userAvatarBadge__image {
+    width: 36px !important; height: 36px !important; border-radius: 50% !important; }
+  .notificationBadge .activityBadge__artwork { display: block !important; width: 36px !important; height: 36px !important;
+    border-radius: 7px !important; background-size: cover !important; }
+  .activityBadge__timeIndicator { display: inline-flex !important; align-items: center !important; gap: 4px !important;
+    font-size: 11px !important; color: #7d7d88 !important; padding: 0 !important; }
+  .activityBadge__icon { width: 11px !important; height: 11px !important; opacity: .8 !important; }
+  /* follow pill: "Follow back" = accent tint, "Following" = quiet */
+  .notificationBadge .sc-button-follow { height: 26px !important; min-width: 0 !important; padding: 0 11px !important; border-radius: 99px !important;
+    font-size: 11.5px !important; font-weight: 600 !important; box-shadow: none !important; border: 0 !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; }
+  .notificationBadge .sc-button-follow:hover { background: color-mix(in srgb, var(--sc-accent, #ff5500) 32%, transparent) !important; }
+  .notificationBadge .sc-button-follow.sc-button-selected { background: rgba(255,255,255,0.07) !important; color: #a6a6b0 !important; }
+  .notificationBadge .sc-button-follow.sc-button-selected:hover { background: rgba(255,90,70,0.12) !important; color: #ff8a7a !important; }
+  .dropdownContent__footerLink { display: block !important; margin: 6px 0 0 !important; padding: 10px 8px 6px !important; text-align: center !important;
+    border-top: 1px solid rgba(255,255,255,0.07) !important; font-size: 12px !important; font-weight: 500 !important;
+    color: #a6a6b0 !important; text-decoration: none !important; }
+  .dropdownContent__footerLink:hover { color: #fff !important; }
+
   /* ===== Header "..." menu (.moreMenu): same look as the EQ / output menus ===== */
   .dropdownMenu:has(.moreMenu) {
     background: rgba(12,12,16,0.78) !important; border: 1px solid rgba(255,255,255,0.09) !important;
@@ -5242,7 +5287,7 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
   'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt',
-  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade'];
+  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade', 'hoqConsole'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -6534,6 +6579,7 @@ function removeClutter() {
   try { setupOutputPicker(); } catch (e) {}
   try { setupEqPicker(); } catch (e) {}
   try { setupMiniMode(); } catch (e) {}
+  try { setupConsoleView(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
   document.documentElement.classList.toggle('hoq-feed', /\/feed/i.test(location.pathname));
@@ -7490,6 +7536,159 @@ function setupMiniMode() {
   }
   window.__hoqExitMini = exitMini;   // let the host force-exit if needed
   btn.addEventListener('click', () => { miniOn() ? exitMini() : enterMini(); });
+}
+
+// Likes "Console view": the Likes tile grid becomes a big side-scrolling shelf
+// that uses the whole window, like the old YouTube TV / console app. Mouse wheel
+// and arrow keys move along it (Enter plays); SoundCloud's own lazy loading keeps
+// feeding it as you reach the end. The switch sits at the bottom of the Library
+// menu, only on the Likes page.
+function setupConsoleView() {
+  const root = document.documentElement;
+  const onLib = /^\/you\/likes\/?$/.test(location.pathname);   // Likes only
+  let on = false; try { on = localStorage.getItem('hoqConsole') === '1'; } catch (e) {}
+  root.classList.toggle('hoq-console-on', onLib && on);
+
+  if (!document.getElementById('hoq-console-css')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-console-css';
+    st.textContent = `
+      html.hoq-console-on .l-container, html.hoq-console-on .l-collection, html.hoq-console-on .l-main,
+      html.hoq-console-on .collectionSection, html.hoq-console-on .badgeList {
+        max-width:none !important; width:auto !important; }
+      html.hoq-console-on .l-container { padding-left:28px !important; padding-right:28px !important; }
+      html.hoq-console-on .badgeList { margin-left:0 !important; margin-right:0 !important; }
+      html.hoq-console-on .badgeList > .lazyLoadingList__list {
+        display:grid !important; grid-auto-flow:column !important; grid-template-rows:repeat(var(--hoq-rows,2), auto) !important;
+        grid-auto-columns:var(--hoq-tile,220px) !important; column-gap:30px !important; row-gap:26px !important;
+        overflow-x:auto !important; overflow-y:hidden !important; overscroll-behavior-x:contain;
+        scroll-snap-type:x proximity; scroll-padding-left:36px;
+        padding:14px 36px 22px !important; margin:0 -28px !important;
+        -webkit-mask-image:linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 60px), transparent 100%);
+                mask-image:linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 60px), transparent 100%); }
+      html.hoq-console-on .badgeList > .lazyLoadingList__list::after { display:none !important; }
+      html.hoq-console-on .badgeList__item { float:none !important; width:auto !important; height:auto !important; margin:0 !important;
+        padding:0 !important; scroll-snap-align:start; transition:transform .18s cubic-bezier(.2,.8,.2,1) !important; }
+      html.hoq-console-on .badgeList__item > *, html.hoq-console-on .badgeList__item .audibleTile,
+      html.hoq-console-on .badgeList__item .playableTile, html.hoq-console-on .userBadgeListItem { width:100% !important; max-width:none !important; }
+      html.hoq-console-on .badgeList__item .audibleTile__artwork, html.hoq-console-on .badgeList__item .playableTile__artwork,
+      html.hoq-console-on .badgeList__item .userBadgeListItem__artwork, html.hoq-console-on .badgeList__item .userBadgeListItem__image {
+        display:block !important; width:100% !important; height:auto !important; aspect-ratio:1 / 1; flex:none !important; padding:0 !important; }
+      html.hoq-console-on .badgeList__item .audibleTile__image, html.hoq-console-on .badgeList__item .playableTile__image,
+      html.hoq-console-on .badgeList__item .image { width:100% !important; height:100% !important; }
+      /* focus lift, console style: the tile under the mouse/keyboard grows */
+      html.hoq-console-on .badgeList__item:hover, html.hoq-console-on .badgeList__item.hoq-cfocus { transform:scale(1.06); z-index:2; position:relative; }
+      html.hoq-console-on .badgeList__item.hoq-cfocus .image, html.hoq-console-on .badgeList__item:hover .image {
+        box-shadow:0 0 0 3px var(--sc-accent,#ff5500), 0 14px 34px rgba(0,0,0,.5) !important; }
+      html.hoq-console-on .badgeList__item [class*="__heading"], html.hoq-console-on .badgeList__item [class*="__title"] a,
+      html.hoq-console-on .badgeList__item [class*="mainHeading"] { font-size:14px !important; }
+      html.hoq-console-on .badgeList__item [class*="__username"], html.hoq-console-on .badgeList__item [class*="subtitle"] { font-size:12.5px !important; }
+      /* SoundCloud gives every tile a 48px bottom margin: dead space on a shelf */
+      html.hoq-console-on .badgeList__item .audibleTile, html.hoq-console-on .badgeList__item .playableTile { margin:0 !important; }
+      /* third View button (grid / list / console) */
+      .listDisplayToggle .hoq-console-li .hoq-console-btn svg { width:16px; height:16px; }
+    `;
+    (document.head || root).appendChild(st);
+  }
+
+  // The switch is a third button beside SoundCloud's own View buttons
+  // (grid / list / console), only on Likes. Picking grid or list turns it off.
+  const opts = document.querySelector('.listDisplayToggle__options');
+  if (opts && !onLib) { const x = opts.querySelector('.hoq-console-li'); if (x) x.remove(); }
+  if (opts && onLib) {
+    let li = opts.querySelector('.hoq-console-li');
+    if (!li) {
+      li = document.createElement('li');
+      li.className = 'sc-mr-1x hoq-console-li';
+      li.innerHTML = '<button type="button" class="hoq-console-btn sc-button sc-button-secondary sc-button-medium sc-button-icon" title="Console view: big side-scrolling tiles">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="12.5" rx="2"/><rect x="6" y="8.5" width="5" height="5.5" rx="1"/><rect x="13" y="8.5" width="5" height="5.5" rx="1"/><path d="M9 21h6"/></svg></button>';
+      opts.appendChild(li);
+      li.querySelector('button').addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        // console view is built on the grid: switch SoundCloud to grid first
+        if (!document.querySelector('.badgeList')) { const g = opts.querySelector('.listDisplayToggle__badgeToggle'); if (g) g.click(); }
+        try { localStorage.setItem('hoqConsole', '1'); } catch (er) {}
+        setupConsoleView();
+      });
+      // SoundCloud's grid / list buttons switch the console view off
+      opts.addEventListener('click', (e) => {
+        if (e.target.closest('.hoq-console-li')) return;
+        if (e.target.closest('button')) { try { localStorage.setItem('hoqConsole', '0'); } catch (er) {} setTimeout(setupConsoleView, 0); }
+      }, true);
+    }
+    // only one of the three looks picked: hide the grid button's "selected"
+    // paint while console is on (its accent is inline, so lift it off and put
+    // it back afterwards)
+    const cb = li.querySelector('button');
+    cb.classList.toggle('sc-button-selected', on);
+    cb.style.setProperty('color', on ? 'var(--sc-accent, #ff5500)' : '', on ? 'important' : '');
+    const gb = opts.querySelector('.listDisplayToggle__badgeToggle');
+    if (gb) {
+      const painted = [gb, ...gb.querySelectorAll('[style]')];
+      if (on && !gb.dataset.hoqHeld) {
+        gb.dataset.hoqHeld = '1';
+        painted.forEach((el) => { el.dataset.hoqStyle = el.getAttribute('style') || ''; el.removeAttribute('style'); });
+        gb.classList.remove('sc-button-selected'); gb.dataset.hoqSel = '1';
+      } else if (!on && gb.dataset.hoqHeld) {
+        delete gb.dataset.hoqHeld;
+        [gb, ...gb.querySelectorAll('[data-hoq-style]')].forEach((el) => { if (el.dataset.hoqStyle) el.setAttribute('style', el.dataset.hoqStyle); delete el.dataset.hoqStyle; });
+        if (gb.dataset.hoqSel && document.querySelector('.badgeList')) gb.classList.add('sc-button-selected');
+        delete gb.dataset.hoqSel;
+      }
+    }
+  }
+  if (!(onLib && on)) return;
+
+  // tile size from the window: two rows on the big lists, one on Overview shelves
+  const lists = [...document.querySelectorAll('.badgeList > .lazyLoadingList__list')];
+  lists.forEach((ul) => {
+    const many = ul.children.length > 10;
+    const rows = many ? 2 : 1;
+    // fit the rows between the shelf's top and the player bar: measure the text
+    // under each picture (title/stats) instead of guessing it
+    const prev = parseFloat(ul.style.getPropertyValue('--hoq-tile')) || 0;
+    const first = ul.children[0];
+    const extra = prev && first ? Math.max(30, first.getBoundingClientRect().height - prev) : 80;
+    const top = ul.getBoundingClientRect().top + window.scrollY;
+    const room = window.innerHeight - Math.max(110, Math.min(top, 320)) - 64 /* player */ - 36 /* shelf padding */ - (rows - 1) * 26;
+    const tile = Math.round(Math.max(140, Math.min(320, room / rows - extra)));
+    ul.style.setProperty('--hoq-rows', rows);
+    if (Math.abs(tile - prev) >= 3) ul.style.setProperty('--hoq-tile', tile + 'px');   // settle, don't jitter
+    if (ul.__hoqConsole) return;
+    ul.__hoqConsole = true;
+    // vertical wheel moves along the shelf; near the end, poke SoundCloud's
+    // lazy loader (it listens for window scroll) so more tiles come in
+    ul.addEventListener('wheel', (e) => {
+      if (ul.scrollWidth <= ul.clientWidth + 4 || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      ul.scrollBy({ left: e.deltaY * 1.6, behavior: 'auto' });
+    }, { passive: false });
+    ul.addEventListener('scroll', () => {
+      if (ul.scrollLeft + ul.clientWidth > ul.scrollWidth - ul.clientWidth * 0.8) {
+        try { window.dispatchEvent(new Event('scroll')); document.dispatchEvent(new Event('scroll')); } catch (e) {}
+      }
+    }, { passive: true });
+  });
+  if (!window.__hoqConsoleKeys) {
+    window.__hoqConsoleKeys = true;
+    // arrow keys walk the tiles like a controller; Enter plays the focused one
+    window.addEventListener('keydown', (e) => {
+      if (!root.classList.contains('hoq-console-on')) return;
+      if (e.target.closest && e.target.closest('input, textarea, [contenteditable="true"]')) return;
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter'].includes(e.key)) return;
+      const ul = document.querySelector('.badgeList > .lazyLoadingList__list'); if (!ul) return;
+      const items = [...ul.children];
+      let i = items.findIndex((x) => x.classList.contains('hoq-cfocus'));
+      if (e.key === 'Enter') { if (i >= 0) { const pb = items[i].querySelector('.sc-button-play, .playButton'); (pb || items[i].querySelector('a')).click(); e.preventDefault(); } return; }
+      const rows = +getComputedStyle(ul).getPropertyValue('--hoq-rows') || 1;
+      const step = { ArrowLeft: -rows, ArrowRight: rows, ArrowUp: -1, ArrowDown: 1 }[e.key];
+      i = Math.max(0, Math.min(items.length - 1, (i < 0 ? 0 : i + step)));
+      items.forEach((x) => x.classList.remove('hoq-cfocus'));
+      items[i].classList.add('hoq-cfocus');
+      items[i].scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+      e.preventDefault();
+    });
+  }
 }
 
 // The profile-tab bar and the library/collection nav lean toward the cursor
