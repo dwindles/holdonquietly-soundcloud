@@ -540,7 +540,10 @@ window.__hoqSeek = hoqSeek;
     const rate = el.playbackRate || 1;
 
     // resume: once per session, on the first real playback of the restored track
-    if (!resumeDone && !el.paused && title) {
+    // Auto-resume is OFF: seeking the moment a song starts stalled SoundCloud's
+    // stream loader on signed-in accounts (stuck buffering). Position is still
+    // saved; the jump back stays disabled until it can be done safely.
+    if (false && !resumeDone && !el.paused && title) {
       resumeDone = true;
       const r = resumeSaved();
       const fresh = r && r.pos > 10 && Date.now() - (r.at || 0) < 30 * 86400000;
@@ -8241,8 +8244,8 @@ function hoqPfAutoPlay() {
     const want = job.seek + 1, t0 = Date.now();
     const iv = setInterval(() => {
       const el = window.__hoqMediaEl;
-      if (Date.now() - t0 > 12000) { clearInterval(iv); return; }
-      if (el && !el.paused && el.currentTime > 0.2 && isFinite(el.duration) && want < el.duration - 3) {
+      if (Date.now() - t0 > 20000) { clearInterval(iv); return; }
+      if (el && !el.paused && el.currentTime > 4 && el.readyState >= 3 && isFinite(el.duration) && want < el.duration - 3) {
         clearInterval(iv); hoqSeek(want + (Date.now() - t0) / 1000);
       }
     }, 250);
