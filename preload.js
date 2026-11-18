@@ -2953,6 +2953,47 @@ const BASE_CSS = `
     background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
     border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important; color: #fff !important; }
   .selectionModulePlaylistLink .sc-button:hover::after { transform: translateX(2px); opacity: 1; }
+  /* ===== Player bar: cleaned up =====
+     Times, volume and the song text are quiet (no orange paint); the play
+     button carries the accent on its own; the right-side actions are even
+     tiles with a hover, like the header. */
+  .playControls .playbackTimeline__timePassed, .playControls .playbackTimeline__duration,
+  .playControls .playbackTimeline__timePassed *, .playControls .playbackTimeline__duration * {
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; color: #8e8e99 !important; border-color: transparent !important;
+    font-family: Inter,-apple-system,Arial,sans-serif !important; font-size: 11.5px !important; font-weight: 500 !important; font-variant-numeric: tabular-nums !important; }
+  .playControls .playbackTimeline__timePassed span[aria-hidden], .playControls .playbackTimeline__timePassed > span:last-child { color: #c9c9d2 !important; }
+  .playControls .volume__button, .playControls .volume__button * { color: #a6a6b0 !important; fill: currentColor !important; background: transparent !important; border-color: transparent !important; }
+  .playControls .volume__button:hover, .playControls .volume__button:hover * { color: #fff !important; }
+  .playControls .hoq-vol-pct { color: #8e8e99 !important; font: 500 11px Inter,-apple-system,Arial,sans-serif !important; font-variant-numeric: tabular-nums !important; }
+  .playControls .playControls__play { border-radius: 10px !important; box-shadow: none !important; color: #fff !important;
+    background-color: var(--sc-accent, #ff5500) !important; transition: filter .12s ease, transform .1s ease !important; }
+  .playControls .playControls__play:hover { filter: brightness(1.1) !important; }
+  .playControls .playControls__play:active { transform: scale(.95) !important; }
+  .playControls .playControls__play svg { color: #fff !important; fill: #fff !important; }
+  .playbackSoundBadge .playbackSoundBadge__titleLink, .playbackSoundBadge .playbackSoundBadge__titleLink span {
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; color: #ececf1 !important; font-weight: 600 !important; text-shadow: none !important; }
+  .playbackSoundBadge .playbackSoundBadge__lightLink { color: #8e8e99 !important; -webkit-text-fill-color: currentColor !important; background: none !important; }
+  .playbackSoundBadge .playbackSoundBadge__titleLink:hover, .playbackSoundBadge .playbackSoundBadge__lightLink:hover { color: #fff !important; }
+  .playbackSoundBadge__actions { display: flex !important; align-items: center !important; gap: 2px !important; }
+  .playbackSoundBadge__actions > .sc-button, .playbackSoundBadge__actions > #hoq-ambient-btn,
+  .playbackSoundBadge__actions > #hoq-playbtn, .playbackSoundBadge__actions > #hoq-share {
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    width: 32px !important; height: 32px !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; border-radius: 9px !important; background: transparent !important; box-shadow: none !important;
+    color: #a6a6b0 !important; filter: none !important; transition: background .12s ease, color .12s ease !important; }
+  .playbackSoundBadge__actions > .sc-button:hover, .playbackSoundBadge__actions > #hoq-ambient-btn:hover,
+  .playbackSoundBadge__actions > #hoq-playbtn:hover, .playbackSoundBadge__actions > #hoq-share:hover {
+    background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+  .playbackSoundBadge__actions > .sc-button svg, .playbackSoundBadge__actions > button svg { width: 16px !important; height: 16px !important; }
+  .playbackSoundBadge__actions > .sc-button-like.sc-button-selected,
+  .playbackSoundBadge__actions > .sc-button-follow.sc-button-selected { color: var(--sc-accent, #ff5500) !important; }
+  .playbackSoundBadge__actions > #hoq-playbtn:hover { color: #7d86ff !important; }
+  .playbackSoundBadge__actions > #hoq-playbtn.done { color: var(--sc-accent, #ff5500) !important; }
+  /* hairline between SoundCloud's actions and ours (Discord) */
+  .playbackSoundBadge__actions > #hoq-playbtn { position: relative !important; margin-left: 13px !important; }
+  .playbackSoundBadge__actions > #hoq-playbtn::before { content: ''; position: absolute; left: -7px; top: 8px; bottom: 8px; width: 1px; background: rgba(255,255,255,0.12); }
   /* Upload: calm pill, no glow */
   .header a.uploadButton { height: 30px !important; padding: 0 14px !important; border-radius: 9px !important; margin: 0 !important;
     box-shadow: none !important; font-weight: 600 !important; transition: filter .12s ease !important; }
@@ -3530,7 +3571,7 @@ function recolorOrange() {
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you, #hoq-out-btn, .hoq-hdr-icon, .notificationIcon__badge')) {
+    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you, #hoq-out-btn, .hoq-hdr-icon, .notificationIcon__badge, .playbackTimeline__timePassed, .playbackTimeline__duration, .volume__button, .playControls__play, .playbackSoundBadge, .hoq-vol-pop')) {
       continue;
     }
     _seenOrange.add(el);
@@ -6876,7 +6917,8 @@ function startPlayButton() {
     document.head.appendChild(st);
   }
 
-  const PLAY  = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  // the Discord mark (same as the track rows), so it never reads as a second play button
+  const PLAY  = HOQ_Q_PLAY.slice(0, HOQ_Q_PLAY.indexOf('<span>'));
   const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 
   const btn = document.createElement('button');
