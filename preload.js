@@ -7558,6 +7558,10 @@ function setupConsoleView() {
         max-width:none !important; width:auto !important; }
       html.hoq-console-on .l-container { padding-left:28px !important; padding-right:28px !important; }
       html.hoq-console-on .badgeList { margin-left:0 !important; margin-right:0 !important; }
+      /* keep the list's bottom below the fold (page doesn't scroll in this view)
+         so SoundCloud's auto-loader doesn't fetch every like at once */
+      html.hoq-console-on .badgeList { min-height:300vh !important; }
+      html.hoq-console-on .badgeList.hoq-feed { min-height:0 !important; }
       html.hoq-console-on .badgeList > .lazyLoadingList__list {
         display:grid !important; grid-auto-flow:column !important; grid-template-rows:repeat(var(--hoq-rows,2), auto) !important;
         grid-auto-columns:var(--hoq-tile,220px) !important; column-gap:22px !important; row-gap:18px !important;
@@ -7649,23 +7653,36 @@ function setupConsoleView() {
   const GAP = 18;
   const lists = [...document.querySelectorAll('.badgeList > .lazyLoadingList__list')];
   lists.forEach((ul) => {
-    const prev = parseFloat(ul.style.getPropertyValue('--hoq-tile')) || 0;
-    const first = ul.children[0];
-    const extra = prev && first ? Math.max(24, first.getBoundingClientRect().height - prev) : 44;
-    const top = ul.getBoundingClientRect().top + window.scrollY;
-    const room = window.innerHeight - Math.max(100, Math.min(top, 300)) - 64 /* player */ - 28 /* shelf padding */;
-    const rows = ul.children.length < 8 ? 1 : Math.max(2, Math.min(6, Math.round((room + GAP) / (170 + extra + GAP))));
-    const tile = Math.round(Math.max(110, Math.min(320, (room - (rows - 1) * GAP) / rows - extra)));
-    ul.style.setProperty('--hoq-rows', rows);
-    if (Math.abs(tile - prev) >= 3) ul.style.setProperty('--hoq-tile', tile + 'px');   // settle, don't jitter
+    // re-measure only when the window size changes or the list is new (reading
+    // layout on a huge grid on every page change is what makes things crawl)
+    const key = window.innerWidth + 'x' + window.innerHeight + ':' + (ul.children.length >= 8);
+    if (ul.__hoqSized !== key || !ul.__hoqExtraOk) {
+      const prev = parseFloat(ul.style.getPropertyValue('--hoq-tile')) || 0;
+      const first = ul.children[0];
+      const extra = prev && first ? Math.max(24, first.getBoundingClientRect().height - prev) : 44;
+      const top = ul.getBoundingClientRect().top + window.scrollY;
+      const room = window.innerHeight - Math.max(100, Math.min(top, 300)) - 64 /* player */ - 28 /* shelf padding */;
+      const rows = ul.children.length < 8 ? 1 : Math.max(2, Math.min(6, Math.round((room + GAP) / (170 + extra + GAP))));
+      const tile = Math.round(Math.max(110, Math.min(320, (room - (rows - 1) * GAP) / rows - extra)));
+      if (String(rows) !== ul.style.getPropertyValue('--hoq-rows')) ul.style.setProperty('--hoq-rows', rows);
+      if (Math.abs(tile - prev) >= 3) ul.style.setProperty('--hoq-tile', tile + 'px');
+      ul.__hoqExtraOk = !!prev;          // second pass has a real measurement
+      ul.__hoqSized = key;
+    }
     if (ul.__hoqConsole) return;
     ul.__hoqConsole = true;
-    // near the end, poke SoundCloud's lazy loader (it listens for window
-    // scroll) so more tiles come in
+    // SoundCloud loads more whenever the list's bottom is on screen. A shelf's
+    // bottom is ALWAYS on screen, so it would fetch every like you have (and
+    // freeze). .badgeList is made tall (CSS, below the fold) so that stops;
+    // near the end of the shelf we drop that for a moment and ask for ONE page.
+    const box = ul.closest('.badgeList');
+    let lastPoke = 0;
     ul.addEventListener('scroll', () => {
-      if (ul.scrollLeft + ul.clientWidth > ul.scrollWidth - ul.clientWidth * 1.5) {
-        try { window.dispatchEvent(new Event('scroll')); document.dispatchEvent(new Event('scroll')); } catch (e) {}
-      }
+      if (ul.scrollLeft + ul.clientWidth < ul.scrollWidth - ul.clientWidth * 1.5) return;
+      const now = Date.now(); if (now - lastPoke < 1500) return; lastPoke = now;
+      box.classList.add('hoq-feed');
+      try { window.dispatchEvent(new Event('scroll')); } catch (e) {}
+      setTimeout(() => box.classList.remove('hoq-feed'), 350);
     }, { passive: true });
   });
   if (!window.__hoqConsoleWheel) {
