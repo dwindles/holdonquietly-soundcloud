@@ -1926,11 +1926,10 @@ const BASE_CSS = `
     padding: 0 !important; height: auto !important; max-height: none !important; overflow: visible !important;
   }
   .l-fixed-left .searchOptions__navigation {
-    background: rgba(12,12,16,0.42) !important;
-    border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 14px !important;
-    box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
-    padding: 8px !important;
+    display: flex !important; flex-direction: column !important; gap: 2px !important; margin: 0 !important;
+    background: rgba(255,255,255,0.035) !important; border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 14px !important; padding: 6px !important; box-shadow: none !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
   }
   /* "Search results for …" title bar — was a solid black block; make it see-through. */
   .l-search .l-fixed-top, .l-search .searchTitle, .l-search .searchTitle__text {
@@ -1940,15 +1939,41 @@ const BASE_CSS = `
   }
   .l-search .searchTitle__text { text-shadow: 0 1px 8px rgba(0,0,0,0.55) !important; }
 
-  .searchOptions__navigationItem { border-radius: 9px !important; transition: background .12s ease !important; }
-  .searchOptions__navigationItem .searchOptions__navigationLink { color: #b7b7ba !important; }
-  .searchOptions__navigationItem:hover { background: rgba(255,255,255,0.06) !important; }
-  .searchOptions__navigationItem:hover .searchOptions__navigationLink { color: #fff !important; }
-  .searchOptions__navigationItem.active {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
-    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important;
+  /* Search filters: same quiet icon list as the Library nav (v1.6.15).
+     "Everything" sits on its own above the type filters. */
+  .searchOptions__navigationItem { display: block !important; width: 100% !important; max-width: none !important;
+    margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: border-box !important;
+    border-radius: 9px !important; background: transparent !important; box-shadow: none !important; }
+  .searchOptions__navigationItem.g-nav-item-search { padding-bottom: 6px !important; margin-bottom: 4px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important; border-radius: 0 !important; }
+  .searchOptions__navigationItem .searchOptions__navigationLink {
+    display: flex !important; align-items: center !important; gap: 11px !important; height: 36px !important;
+    width: 100% !important; padding: 0 12px !important; border-radius: 9px !important; box-sizing: border-box !important;
+    background: transparent !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important;
+    color: #a6a6b0 !important; font-size: 13.5px !important; font-weight: 500 !important; line-height: 1 !important;
+    letter-spacing: 0 !important; text-decoration: none !important; white-space: nowrap !important;
+    transition: background .14s ease, color .14s ease !important;
   }
-  .searchOptions__navigationItem.active .searchOptions__navigationLink { color: var(--sc-accent, #ff5500) !important; }
+  .searchOptions__navigationLink::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px; background: currentColor; opacity: .75;
+    -webkit-mask: var(--hoq-ni) center / 18px 18px no-repeat; mask: var(--hoq-ni) center / 18px 18px no-repeat;
+    transition: opacity .14s ease, background .14s ease;
+  }
+  .searchOptions__navigationItem:hover .searchOptions__navigationLink { background: rgba(255,255,255,0.06) !important; color: #f2f2f5 !important; }
+  .searchOptions__navigationItem:hover .searchOptions__navigationLink::before { opacity: 1; }
+  .searchOptions__navigationItem.active .searchOptions__navigationLink {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 16%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #ffffff) !important; font-weight: 600 !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 30%, transparent) !important;
+  }
+  .searchOptions__navigationItem.active .searchOptions__navigationLink::before { background: var(--sc-accent, #ff5500); opacity: 1; }
+  .searchOptions__navigationItem.g-nav-item-search { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2711%27%20cy%3D%2711%27%20r%3D%276.5%27%2F%3E%3Cpath%20d%3D%27M20%2020l-4.2-4.2%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-high_tier { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%203.5l1.8%204.9%204.9%201.8-4.9%201.8L12%2016.9l-1.8-4.9-4.9-1.8%204.9-1.8z%27%2F%3E%3Cpath%20d%3D%27M18.5%2015.5l.7%201.8%201.8.7-1.8.7-.7%201.8-.7-1.8-1.8-.7%201.8-.7z%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-sounds { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%2010v4M8%207v10M12%204v16M16%208v8M20%2011v2%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-people { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%279%27%20cy%3D%278%27%20r%3D%273.5%27%2F%3E%3Cpath%20d%3D%27M2.5%2020a6.5%206.5%200%200%201%2013%200M16%204.6a3.5%203.5%200%200%201%200%206.8M18.2%2014.2A6.5%206.5%200%200%201%2021.5%2020%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-albums { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%278.5%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%272.5%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-playlists { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%206h11M4%2011h11M4%2016h7%27%2F%3E%3Ccircle%20cx%3D%2716.5%27%20cy%3D%2717%27%20r%3D%272.5%27%2F%3E%3Cpath%20d%3D%27M19%2017V8.5l2%20.8%27%2F%3E%3C%2Fsvg%3E"); }
 
   /* ===== Search suggestions dropdown → acrylic, see-through (was solid black) ===== */
   :has(> #searchMenuList), .headerSearch__autosuggests, .searchAutosuggests,
