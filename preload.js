@@ -2934,6 +2934,23 @@ const BASE_CSS = `
   .gritter-item-wrapper:hover .gritter-close { opacity: 1 !important; }
   .gritter-close:hover { background: rgba(255,255,255,0.1) !important; color: #fff !important; }
   .gritter-close svg { width: 11px !important; height: 11px !important; }
+  /* "Go to playlist" under the Discover / made-for-you rows: slim pill + arrow */
+  .selectionModulePlaylistLink .sc-button {
+    display: inline-flex !important; align-items: center !important; gap: 7px !important;
+    height: 30px !important; padding: 0 12px 0 14px !important; margin: 0 !important; border-radius: 99px !important;
+    border: 1px solid rgba(255,255,255,0.12) !important; background: rgba(255,255,255,0.05) !important;
+    color: #e4e4ea !important; -webkit-text-fill-color: currentColor !important; box-shadow: none !important; text-shadow: none !important;
+    font: 600 12.5px/1 Inter,-apple-system,Arial,sans-serif !important; letter-spacing: 0 !important; white-space: nowrap !important;
+    transition: background .14s ease, border-color .14s ease, color .14s ease !important; }
+  .selectionModulePlaylistLink .sc-button::after {
+    content: ''; width: 12px; height: 12px; flex: none; background: currentColor; opacity: .75;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+    transition: transform .16s ease, opacity .14s ease; }
+  .selectionModulePlaylistLink .sc-button:hover {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important; color: #fff !important; }
+  .selectionModulePlaylistLink .sc-button:hover::after { transform: translateX(2px); opacity: 1; }
   /* Upload: calm pill, no glow */
   .header a.uploadButton { height: 30px !important; padding: 0 14px !important; border-radius: 9px !important; margin: 0 !important;
     box-shadow: none !important; font-weight: 600 !important; transition: filter .12s ease !important; }
