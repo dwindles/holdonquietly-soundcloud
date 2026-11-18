@@ -69,6 +69,9 @@ class Program
     static Rect restoreBounds;
     static readonly string LogFile = Path.Combine(Path.GetTempPath(), "scwv2.log");
     internal static void Log(string s) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("HH:mm:ss ") + s + "\n"); } catch { } }
+    // for Desktop.cs (song pop-up, taskbar buttons)
+    internal static Window MainWin => win;
+    internal static void RunPageJs(string js) { try { _ = wv?.CoreWebView2?.ExecuteScriptAsync(js); } catch { } }
 
     [STAThread]
     static void Main()
@@ -140,6 +143,7 @@ class Program
         win.Content = wv;
         win.Loaded += async (s, e) => await Init();
         win.SizeChanged += (s, e) => FitZoom();
+        ThumbBar.Init(win);   // previous / play / next on the taskbar thumbnail
 
         // Tray icon: closing the window hides to tray instead of quitting.
         SetupTray();
@@ -450,12 +454,15 @@ class Program
         e.TryGetProperty(k, out var v) && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False) ? v.GetBoolean() : def;
 
     // POST our now-playing to the shared friends backend (from the host = no CORS/mixed-content).
-    static async Task PostPresence(string id, string name, string sc, string title, string artist, string cover)
+    // url/pos/dur/paused/rate let friends "listen along" (the server keeps them
+    // from the friends-server version that knows them; older ones just ignore them).
+    static async Task PostPresence(string id, string name, string sc, string title, string artist, string cover,
+        string url = "", int pos = 0, int dur = 0, bool paused = false, double rate = 1)
     {
         if (string.IsNullOrEmpty(id)) return;
         try
         {
-            string payload = JsonSerializer.Serialize(new { id, name, sc, title, artist, cover });
+            string payload = JsonSerializer.Serialize(new { id, name, sc, title, artist, cover, url, pos, dur, paused, rate });
             await http.PostAsync(BACKEND + "/presence", new StringContent(payload, Encoding.UTF8, "application/json"));
         }
         catch { }
@@ -1229,10 +1236,20 @@ class Program
                 string who = Prop(r, "name").Trim();
                 if (who.Length == 0) who = DiscordRpc.UserName;
                 if (string.IsNullOrEmpty(who)) who = Prop(r, "scName").Trim();
-                _ = PostPresence(Prop(r, "id"), who, Prop(r, "sc"), title, artist, cover);
+                double rate = r.TryGetProperty("rate", out var rv) && rv.ValueKind == JsonValueKind.Number ? rv.GetDouble() : 1;
+                _ = PostPresence(Prop(r, "id"), who, Prop(r, "sc"), title, artist, cover,
+                    Prop(r, "url"), PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"), rate);
+                bool toastOn = r.TryGetProperty("rp", out var rp2) && rp2.ValueKind == JsonValueKind.Object && PropBool(rp2, "toast", false);
+                SongToast.MaybeShow(title, artist, cover, toastOn, PropB(r, "paused"));
+                ThumbBar.SetPlaying(!string.IsNullOrEmpty(title) && !PropB(r, "paused"));
                 LastFm.Track(title, artist, PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"));
             }
             catch { }
+            return;
+        }
+        if (m != null && m.StartsWith("toast:test:"))
+        {
+            try { var t = JsonDocument.Parse(m.Substring(11)).RootElement; SongToast.ShowNow(Prop(t, "title"), Prop(t, "artist"), Prop(t, "cover")); } catch { }
             return;
         }
         if (m != null && m.StartsWith("feed:post:")) { _ = PostFeed(m.Substring(10), true); return; }
@@ -1271,7 +1288,7 @@ class Program
                         SetWindowPos(Hwnd, (IntPtr)(pinIt ? -1 : -2) /* TOPMOST / NOTOPMOST */, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
                     }
                     break;
-                case "alpha": if (miniOn && a.Length > 2 && int.TryParse(a[2], out int pct)) SetAlpha(pct); break;
+                case "alpha": if (!miniOn) ClearAlpha(); else if (a.Length > 2 && int.TryParse(a[2], out int pct)) SetAlpha(pct); break;
             }
             return;
         }
@@ -1365,6 +1382,7 @@ class Program
     {
         try
         {
+            if (!miniOn) ClearAlpha();
             if (wv == null) return;
             double w = win.ActualWidth;
             double z = (miniOn || w <= 0 || w >= FitWidth) ? 1.0 : Math.Max(0.55, w / FitWidth);
@@ -1401,7 +1419,7 @@ class Program
         try
         {
             win.Topmost = false;
-            SetAlpha(100);
+            ClearAlpha();
             win.Width = miniRestore.Width; win.Height = miniRestore.Height;
             win.Left = miniRestore.X; win.Top = miniRestore.Y;
             if (miniWasMax) ToggleMaximize();
@@ -1444,6 +1462,23 @@ class Program
         }
         return r;
     }
+    // Back to a normal, fully opaque window: drop the layered style altogether.
+    // Runs whenever the window isn't the mini player (every resize), so a fade can
+    // never outlive mini mode.
+    static void ClearAlpha()
+    {
+        try
+        {
+            if (!wantLayered) return;
+            wantLayered = false;
+            var h = Hwnd;
+            SetLayeredWindowAttributes(h, 0, 255, 0x2);
+            int ex = GetWindowLong(h, -20);
+            if ((ex & 0x80000) != 0) SetWindowLong(h, -20, ex & ~0x80000);
+        }
+        catch { }
+    }
+
     static void SetAlpha(int pct)
     {
         try

@@ -8,7 +8,11 @@ const fs = require('fs');
 const path = require('path');
 const PORT = 8790;
 const TTL = 5 * 60 * 1000; // a person drops off the feed after 5 min of silence
-const presences = new Map(); // id -> {name, sc, title, artist, cover, ts}
+const presences = new Map(); // id -> {name, sc, title, artist, cover, url, pos, dur, paused, rate, ts}
+// Track link + position let friends "listen along" (v1.6.25+). A soundcloud.com
+// track link only (the app already drops secret links before sending).
+const scUrl = (v) => { const t = url(v, 300); return /^https:\/\/(www\.|m\.)?soundcloud\.com\/[^/]+\/[^/?#]+/i.test(t) ? t : ''; };
+const num = (v, lo, hi, d) => { const n = +v; return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
 
 const FEED_FILE = path.join(__dirname, 'feed.json');
 const FEED_MAX = 100;
@@ -63,7 +67,9 @@ const server = http.createServer((req, res) => {
             presences.set(s(d.id, 64), {
               name: s(d.name, 60), sc: url(d.sc, 200),
               title: s(d.title, 200), artist: s(d.artist, 120),
-              cover: url(d.cover, 400), ts: Date.now(),
+              cover: url(d.cover, 400), url: scUrl(d.url),
+              pos: num(d.pos, 0, 86400, 0), dur: num(d.dur, 0, 86400, 0), paused: d.paused === true, rate: num(d.rate, 0.5, 1.5, 1),
+              ts: Date.now(),
             });
           } else {
             presences.delete(s(d.id, 64)); // stopped playing
@@ -80,7 +86,8 @@ const server = http.createServer((req, res) => {
     const list = [];
     for (const [id, p] of presences) {
       if (now - p.ts > TTL) { presences.delete(id); continue; }
-      list.push({ id, name: p.name, sc: p.sc, title: p.title, artist: p.artist, cover: p.cover });
+      list.push({ id, name: p.name, sc: p.sc, title: p.title, artist: p.artist, cover: p.cover,
+        url: p.url, pos: p.pos, dur: p.dur, paused: p.paused, rate: p.rate, age: now - p.ts });
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(list));

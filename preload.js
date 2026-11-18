@@ -335,7 +335,9 @@ function hoqFxState() {
   const boost = Math.max(0, Math.min(12, +g('hoqBoost', '0') || 0));
   const space = HOQ_SPACES[g('hoqSpace', '')] ? g('hoqSpace', '') : '';
   let amount = +g('hoqSpaceAmt', '100'); if (!(amount >= 0 && amount <= 100)) amount = 100;
-  return { boost, level: g('hoqLevel', '0') === '1', space, amount };
+  let speed = +g('hoqSpeed', '1'); if (!(speed >= 0.5 && speed <= 1.5)) speed = 1;
+  let xfade = +g('hoqXfade', '0'); if (!(xfade >= 0 && xfade <= 8)) xfade = 0;
+  return { boost, level: g('hoqLevel', '0') === '1', space, amount, speed, xfade };
 }
 function hoqMakeIR(ac, s) {
   const sr = ac.sampleRate, pre = Math.floor(sr * s.pre / 1000);
@@ -385,6 +387,7 @@ function hoqBuildFx(ac, rc) {
   n.osc = ac.createOscillator(); n.osc.frequency.value = 0.11;
   n.oscAmt = ac.createGain(); n.oscAmt.gain.value = 0;
   n.agc = ac.createGain();       // "even out volume": slow auto-gain toward one loudness
+  n.xf = ac.createGain();        // crossfade: song fades out into the next (driven by hoqPlaybackTick)
   n.meter = ac.createAnalyser(); n.meter.fftSize = 2048;
   n.boost = ac.createGain();
   n.lim = ac.createDynamicsCompressor();
@@ -393,7 +396,7 @@ function hoqBuildFx(ac, rc) {
   rc.call(n.pre, n.conv); rc.call(n.conv, n.wet); rc.call(n.wet, n.sum);
   rc.call(n.pre, n.delay); rc.call(n.delay, n.echoLp); rc.call(n.echoLp, n.fb); rc.call(n.fb, n.delay);
   rc.call(n.echoLp, n.echoOut); rc.call(n.echoOut, n.sum);
-  rc.call(n.sum, n.hp); rc.call(n.hp, n.lp); rc.call(n.lp, n.panTrim); rc.call(n.panTrim, n.pan); rc.call(n.pan, n.agc); rc.call(n.agc, n.boost); rc.call(n.pan, n.meter);
+  rc.call(n.sum, n.hp); rc.call(n.hp, n.lp); rc.call(n.lp, n.panTrim); rc.call(n.panTrim, n.pan); rc.call(n.pan, n.agc); rc.call(n.agc, n.xf); rc.call(n.xf, n.boost); rc.call(n.pan, n.meter);
   rc.call(n.boost, n.lim); rc.call(n.lim, n.clip); rc.call(n.clip, ac.destination);
   rc.call(n.osc, n.oscAmt); rc.call(n.oscAmt, n.pan.pan);
   try { n.osc.start(); } catch (e) {}
@@ -479,7 +482,7 @@ window.__hoqFX = {
   spaces: HOQ_SPACES,
   get: hoqFxState,
   set(patch) {
-    const map = { boost: 'hoqBoost', space: 'hoqSpace', amount: 'hoqSpaceAmt', level: 'hoqLevel' };
+    const map = { boost: 'hoqBoost', space: 'hoqSpace', amount: 'hoqSpaceAmt', level: 'hoqLevel', speed: 'hoqSpeed', xfade: 'hoqXfade' };
     Object.keys(patch || {}).forEach((k) => {
       if (!map[k]) return;
       let v = patch[k]; if (k === 'level') v = v ? '1' : '0';
@@ -487,8 +490,73 @@ window.__hoqFX = {
     });
     (window.__hoqFxCtxs || []).forEach((ac) => { try { hoqApplyFx(ac); } catch (e) {} });
   },
-  active() { const s = hoqFxState(); return s.boost > 0 || s.level || !!s.space; },
+  active() { const s = hoqFxState(); return s.boost > 0 || s.level || !!s.space || s.speed !== 1 || s.xfade > 0; },
 };
+// --- Playback ticker: speed/pitch, crossfade, resume --------------------------
+// Speed: playbackRate with preservesPitch OFF, so speed and pitch move together
+// like a record (slowed / nightcore) — a straight resample, no time-stretch warble.
+// Crossfade: SoundCloud only ever plays one track at a time, so two songs can't
+// overlap; instead the last N seconds fade out and the next song fades in over
+// N/2 (a gain stage after the leveller). Resume: the last track + position are
+// saved every few seconds; SoundCloud restores the track itself on launch (at
+// 0:00), so the first time it plays this session we jump back to where you were.
+(() => {
+  let xfOut = false, fadeIn = false, lastTitle = '', lastPos = 0, resumeDone = false, saveAt = 0;
+  const curTitle = () => { const a = document.querySelector('.playbackSoundBadge__titleLink'); return a ? (a.getAttribute('title') || a.textContent || '').trim() : ''; };
+  const resumeSaved = () => { try { return JSON.parse(localStorage.getItem('hoqResume')) || null; } catch (e) { return null; } };
+  setInterval(() => {
+    const el = window.__hoqMediaEl;
+    if (!el) return;
+    const st = hoqFxState();
+    // ads are muted / fast-forwarded by the ad skipper: leave their rate alone
+    if (!el.muted) {
+      if (el.preservesPitch !== (st.speed === 1)) { try { el.preservesPitch = st.speed === 1; } catch (e) {} }
+      if (Math.abs(el.playbackRate - st.speed) > 0.001) { try { el.playbackRate = st.speed; } catch (e) {} }
+    }
+    const title = curTitle(), pos = el.currentTime || 0, dur = el.duration;
+    const rate = el.playbackRate || 1;
+
+    // resume: once per session, on the first real playback of the restored track
+    if (!resumeDone && !el.paused && title) {
+      resumeDone = true;
+      const r = resumeSaved();
+      const fresh = r && r.pos > 10 && Date.now() - (r.at || 0) < 30 * 86400000;
+      if (fresh && r.title === title && pos < 3 && isFinite(dur) && r.pos < dur - 15) {
+        try { el.currentTime = r.pos; } catch (e) {}
+      } else if (fresh && r.title !== title && r.path && pos < 3 && performance.now() < 15 * 60000) {
+        // SoundCloud restored the last track you PICKED, not the one autoplay had
+        // moved on to: switch to where you actually were
+        try { el.pause(); } catch (e) {}
+        hoqPfOpenAndPlay(r.path, r.pos);
+      }
+    }
+    if (title && !el.paused && pos > 5 && Date.now() - saveAt > 4000) {
+      saveAt = Date.now();
+      let path = ''; try { const h = npPublicUrl('.playbackSoundBadge__titleLink'); path = h ? new URL(h).pathname : ''; } catch (e) {}
+      try { localStorage.setItem('hoqResume', JSON.stringify({ title, path, pos: Math.floor(pos), at: saveAt })); } catch (e) {}
+    }
+
+    // crossfade envelope
+    const n = window.__hoqSCAC && window.__hoqSCAC.__hoqFx;
+    if (!n) return;
+    const X = st.xfade;
+    if (title !== lastTitle) { if (xfOut && X) fadeIn = true; xfOut = false; lastTitle = title; }
+    else if (xfOut && pos < lastPos - 5) { fadeIn = !!X; xfOut = false; }   // repeat-one looped back
+    lastPos = pos;
+    let g = 1;
+    if (X > 0 && isFinite(dur) && dur > X * 2 + 10) {
+      const remain = (dur - pos) / rate;
+      if (remain < X) { xfOut = true; g = Math.max(0, remain / X); }
+      if (fadeIn) {
+        const inT = (X / 2), played = pos / rate;
+        if (played < inT) g = Math.min(g, Math.max(0.02, played / inT)); else fadeIn = false;
+      }
+    } else fadeIn = false;
+    if (el.paused) return;
+    try { n.xf.gain.setTargetAtTime(g, window.__hoqSCAC.currentTime, 0.06); } catch (e) { n.xf.gain.value = g; }
+  }, 100);
+})();
+
 function hoqApplyEqGains(ac) {
   const bands = ac && ac.__hoqEqBands; if (!bands) return;
   let on = false, gains = [0, 0, 0, 0, 0, 0];
@@ -4739,6 +4807,24 @@ function ensureDiscordPanel() {
         padding: 1px 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: .6px;
         color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); }
       #hoq-discord .hoq-dc-friend.is-me { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); }
+      #hoq-discord .hoq-dc-ftext { flex: 1 1 auto; }
+      #hoq-discord .hoq-dc-along { flex: none; height: 28px; padding: 0 12px; border-radius: 99px; cursor: pointer; white-space: nowrap;
+        border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); color: #e4e4ea;
+        font: 600 12px Inter,-apple-system,Arial,sans-serif; transition: background .12s ease, border-color .12s ease; }
+      #hoq-discord .hoq-dc-along:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.22); }
+      #hoq-discord .hoq-dc-along.on { background: color-mix(in srgb, var(--sc-accent,#ff5500) 24%, transparent);
+        border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); color: #fff; }
+      #hoq-discord .hoq-dc-follow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 12px;
+        border-radius: 10px; font-size: 12.5px; color: #d6d6dc;
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 14%, rgba(12,12,14,0.5));
+        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 30%, transparent); }
+      #hoq-discord .hoq-dc-follow b { color: #fff; }
+      #hoq-discord .hoq-dc-unfollow { height: 26px; padding: 0 11px; border: 0; border-radius: 99px; cursor: pointer;
+        background: rgba(255,255,255,0.1); color: #fff; font: 600 12px Inter,-apple-system,Arial,sans-serif; }
+      #hoq-discord .hoq-dc-unfollow:hover { background: rgba(255,255,255,0.18); }
+      #hoq-discord .hoq-toast-test { margin-left: 8px; height: 22px; padding: 0 9px; border: 0; border-radius: 99px; cursor: pointer; vertical-align: middle;
+        background: rgba(255,255,255,0.1); color: #e4e4ea; font: 600 11px Inter,-apple-system,Arial,sans-serif; }
+      #hoq-discord .hoq-toast-test:hover { background: rgba(255,255,255,0.18); color: #fff; }
       /* ===== Community feed ===== */
       #hoq-discord .hoq-feed-composer { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 14px; }
       #hoq-discord .hoq-feed-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none;
@@ -5096,6 +5182,15 @@ function ensureDiscordPanel() {
         </div>
         <div class="hoq-dc-hint">Discord never shows you your own buttons — friends see them. Private (secret-link) tracks never get a link.</div>
       </div>
+      <div class="hoq-dc-sec hoq-desk-sec">
+        <div class="hoq-dc-label">Desktop</div>
+        <div class="hoq-rp">
+          <label class="hoq-rp-row">
+            <span><b>Song pop-up <button type="button" class="hoq-toast-test">Preview</button></b><em>A small card with the cover and title in the corner of your screen when the song changes, while you're in another app or game.</em></span>
+            <input type="checkbox" class="hoq-rp-sw hoq-desk-sw" data-k="hoqToast">
+          </label>
+        </div>
+      </div>
       <div class="hoq-dc-sec hoq-hook-sec">
         <div class="hoq-dc-label">Discord webhook</div>
         <div class="hoq-rp">
@@ -5207,6 +5302,21 @@ function ensureDiscordPanel() {
       }
       setupRpSettings(rpSec);
     }
+  }
+  // Desktop-only switches (the host draws the pop-up), sent along with presence.
+  const deskSec = p.querySelector('.hoq-desk-sec');
+  if (deskSec) {
+    if (!hoqHasHost()) deskSec.remove();
+    else deskSec.querySelectorAll('.hoq-desk-sw').forEach((sw) => {
+      try { sw.checked = localStorage.getItem(sw.dataset.k) === '1'; } catch (e) {}
+      sw.addEventListener('change', () => { try { localStorage.setItem(sw.dataset.k, sw.checked ? '1' : '0'); } catch (e) {} _lastRpc = ''; try { rpcTick(); } catch (e) {} });
+    });
+    const tt = deskSec.querySelector('.hoq-toast-test');
+    if (tt) tt.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const np = currentNowPlaying();
+      scPost('toast:test:' + JSON.stringify({ title: np.title || 'Nothing playing yet', artist: np.artist || 'holdonquietly', cover: np.cover || '' }));
+    });
   }
   const hookSec = p.querySelector('.hoq-hook-sec');
   if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
@@ -5543,7 +5653,7 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
   'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt',
-  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade'];
+  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade', 'hoqSpeed', 'hoqXfade', 'hoqToast'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -5898,11 +6008,21 @@ function myId() {
 function hoqMe() {
   const av = (typeof findUserAvatar === 'function' ? findUserAvatar() : '') || '';
   let name = '';
-  const nb = document.querySelector('.userNav__usernameButton, .header__userNavButton, .profileMenu__username');
+  const nb = document.querySelector('.userNav__usernameButton, .header__userNavUsernameButton, .profileMenu__username');
   if (nb) name = (nb.getAttribute('title') || nb.textContent || '').trim();
+  // SoundCloud's newer header shows only the avatar (no username text): read the
+  // name off the avatar's label ("devuandoru’s avatar"), else the profile link.
+  if (!name) {
+    const lab = document.querySelector('.header__userNavAvatar [aria-label], .header__userNav [aria-label$="avatar"]');
+    const t = lab ? (lab.getAttribute('aria-label') || '') : '';
+    name = t.replace(/[’']s avatar$/i, '').trim();
+  }
+  const navProf = document.querySelector('a.header__userNavUsernameButton[href^="/"]');
+  if (!name && navProf) name = decodeURIComponent((navProf.getAttribute('href') || '').slice(1).split(/[/?#]/)[0]);
   if (!name) name = (localStorage.getItem('hoqDiscord') || '').trim();
   if (!name) name = 'Someone';
   let url = (localStorage.getItem('hoqSC') || '').trim();
+  if ((!url || /\/you$/.test(url)) && navProf) { const h = navProf.getAttribute('href'); if (h && h !== '/you') url = 'https://soundcloud.com' + h; }
   if (!url || /\/you$/.test(url)) {
     const prof = document.querySelector('.profileMenu a.headerMenu__link[href^="/"]:not([href="/you"])');
     const href = prof ? prof.getAttribute('href') : '';
@@ -5970,6 +6090,7 @@ function rpPrefs() {
     status: g('hoqRpStatus', 'artist'),
     buttons: g('hoqRpButtons', '1') === '1',
     pauseHide: g('hoqRpPauseHide', '1') === '1',
+    toast: g('hoqToast', '0') === '1',   // desktop song pop-up (off by default)
   };
 }
 
@@ -6309,7 +6430,7 @@ function rpcTick() {
   const rp = rpPrefs();
   const url = npPublicUrl('.playbackSoundBadge__titleLink');
   const key = [np.title, url, pr.paused, Math.round(pr.pos / 8),
-    rp.on, rp.status, rp.buttons, rp.pauseHide].join('|');
+    rp.on, rp.status, rp.buttons, rp.pauseHide, rp.toast].join('|');
   if (key === _lastRpc) return;
   _lastRpc = key;
   const me = hoqMe(); // SoundCloud name/profile: the fallback when Discord isn't running
@@ -6320,7 +6441,7 @@ function rpcTick() {
     sc: localStorage.getItem('hoqSC') || me.url || '',
     title: np.title, artist: np.artist, cover: np.cover,
     url, artistUrl: npPublicUrl('.playbackSoundBadge__lightLink'),
-    pos: pr.pos, dur: pr.dur, paused: pr.paused,
+    pos: pr.pos, dur: pr.dur, paused: pr.paused, rate: (() => { try { return hoqFxState().speed; } catch (e) { return 1; } })(),
     rp,
   }));
   hoqNowPush(np.title, np.artist, url, np.cover, pr.paused);
@@ -6775,15 +6896,79 @@ window.__hoqFriends = function (list) {
   }
   // Rebuilt from scratch every poll. This used to `+=` onto whatever was there,
   // so with anyone else listening the whole list stacked up again every 15 s.
-  el.innerHTML = (others.length ? '' : '<div class="hoq-dc-hint">Only you are on right now.</div>') + rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
+  hoqFollowTick(others);
+  const fol = window.__hoqFollow;
+  el.innerHTML = (mine.length && !mine[0].name ? '<div class="hoq-dc-hint">Your name isn’t reaching friends: log in to SoundCloud, open Discord, or set a name in Settings.</div>' : '') + (fol ? '<div class="hoq-dc-follow"><span>Listening along with <b>' + hoqEsc(fol.name) + '</b></span><button type="button" class="hoq-dc-unfollow">Stop</button></div>' : '') +
+    (others.length ? '' : '<div class="hoq-dc-hint">Only you are on right now.</div>') + rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
     '<img class="hoq-dc-fcover" src="' + (hoqEsc(hoqSafeUrl(f.cover)) || HOQ_LOGO) + '">' +
     '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') +
     (f.id === me ? '<em class="hoq-me">you</em>' : '') + '</b>' +
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +
     (f.sc ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(f.sc) + '">' + hoqEsc(f.sc.replace(/^https?:\/\//, '')) + '</a>' : '') +
-    '</div></div>').join('');
+    '</div>' +
+    // Listen along: needs their track link from the server (newer friends server)
+    (f.id !== me && hoqTrackPath(f.url) ? '<button type="button" class="hoq-dc-along' + (fol && fol.id === f.id ? ' on' : '') + '" data-id="' + hoqEsc(f.id) + '" data-name="' + hoqEsc(f.name || 'Someone') + '">' + (fol && fol.id === f.id ? 'Listening' : 'Listen along') + '</button>' : '') +
+    '</div>').join('');
   el.querySelectorAll('.hoq-dc-sclink').forEach((a) => a.addEventListener('click', () => scPost('open:' + a.dataset.url)));
+  el.querySelectorAll('.hoq-dc-along').forEach((b) => b.addEventListener('click', () => {
+    const f = others.find((x) => x.id === b.dataset.id);
+    if (!f) return;
+    if (window.__hoqFollow && window.__hoqFollow.id === f.id) hoqFollowStop(''); else hoqFollowStart(f);
+    window.__hoqFriends(window.__hoqFriendsLast || list);
+  }));
+  const un = el.querySelector('.hoq-dc-unfollow');
+  if (un) un.addEventListener('click', () => { hoqFollowStop(''); window.__hoqFriends(window.__hoqFriendsLast || list); });
+  window.__hoqFriendsLast = list;
 };
+
+// ---- Listen along ------------------------------------------------------------
+// Follow a friend: play what they're playing, where they are in it, and keep
+// following their next songs (checked each time the friends list refreshes, every
+// 15 s). Changing the track yourself, or them going quiet, stops it.
+function hoqTrackPath(u) {
+  const t = hoqSafeUrl(u);
+  if (!t) return '';
+  try { const x = new URL(t); return /(^|\.)soundcloud\.com$/i.test(x.hostname) && x.pathname.split('/').filter(Boolean).length >= 2 ? x.pathname : ''; } catch (e) { return ''; }
+}
+function hoqFriendPos(f) {
+  if (typeof f.pos !== 'number') return 0;
+  return f.pos + (f.paused ? 0 : Math.max(0, +f.age || 0) / 1000 * (+f.rate || 1));
+}
+function hoqFollowStart(f) {
+  window.__hoqFollow = { id: f.id, name: f.name || 'Someone', path: '' };
+  try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Listening along with ' + (f.name || 'Someone'), 'Their songs play here as they change. Change the track yourself to stop.'); } catch (e) {}
+  hoqFollowTick([f]);
+}
+function hoqFollowStop(why) {
+  const f = window.__hoqFollow; window.__hoqFollow = null;
+  if (f && why) { try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Stopped listening along', why); } catch (e) {} }
+}
+function hoqFollowTick(list) {
+  const fol = window.__hoqFollow;
+  if (!fol) return;
+  const f = (list || []).find((x) => x.id === fol.id);
+  if (!f) { if (list && list.length !== 1) hoqFollowStop(fol.name + ' stopped listening.'); return; }
+  const path = hoqTrackPath(f.url);
+  if (!path) return;
+  const mine = (() => { try { const h = npPublicUrl('.playbackSoundBadge__titleLink'); return h ? new URL(h).pathname : ''; } catch (e) { return ''; } })();
+  const same = (a, b) => decodeURIComponent(a || '').toLowerCase() === decodeURIComponent(b || '').toLowerCase();
+  // we'd already put their song on, and now something else is playing that they
+  // aren't on: you picked a different track yourself
+  if (fol.path && same(fol.path, path) && mine && !same(mine, path) && Date.now() - (fol.at || 0) > 20000) {
+    hoqFollowStop('You changed the track.'); return;
+  }
+  if (!same(mine, path)) {
+    fol.path = path; fol.at = Date.now();
+    hoqPfOpenAndPlay(path, hoqFriendPos(f));
+    return;
+  }
+  fol.path = path;
+  // same song: pull our position back in line if it drifted
+  const el = window.__hoqMediaEl, want = hoqFriendPos(f);
+  if (el && !el.paused && typeof f.pos === 'number' && Math.abs(el.currentTime - want) > 6 && isFinite(el.duration) && want < el.duration - 3) {
+    try { el.currentTime = want; } catch (e) {}
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Spotify-style horizontal volume slider (0-100), replacing SoundCloud's
@@ -7373,6 +7558,7 @@ function setupEqPicker() {
       /* chips: quiet by default, tinted (not solid) when picked */
       .hoq-eq-chips { display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; }
       .hoq-eq-chips.c3 { grid-template-columns:repeat(3, 1fr); }
+      .hoq-eq-chips.c2 { grid-template-columns:repeat(2, 1fr); }
       .hoq-eq-preset, .hoq-eq-space { height:28px; padding:0 4px; border:0; border-radius:7px; background:rgba(255,255,255,0.05);
         color:#b9b9c3; font-size:12px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         transition:background .12s ease, color .12s ease; }
@@ -7436,8 +7622,8 @@ function setupEqPicker() {
   function tabsHtml() {
     if (!FX) return '';
     const s = FX.get();
-    const dot = { eq: window.__hoqEQ.isOn(), vol: s.boost > 0 || s.level, space: !!s.space };
-    return '<div class="hoq-eq-tabs">' + [['eq', 'EQ'], ['vol', 'Volume'], ['space', 'Space']].map(([k, l]) =>
+    const dot = { eq: window.__hoqEQ.isOn(), vol: s.boost > 0 || s.level || s.xfade > 0, space: !!s.space, speed: s.speed !== 1 };
+    return '<div class="hoq-eq-tabs">' + [['eq', 'EQ'], ['vol', 'Volume'], ['space', 'Space'], ['speed', 'Speed']].map(([k, l]) =>
       '<button class="hoq-eq-tab' + (tab === k ? ' sel' : '') + '" data-t="' + k + '">' + l + (dot[k] ? '<i></i>' : '') + '</button>').join('') + '</div>';
   }
   function bindTabs() {
@@ -7459,7 +7645,11 @@ function setupEqPicker() {
     h += '<div class="hoq-eq-sec"><div class="hoq-eq-h"><div>Even out volume<small>Every song plays at the same loudness</small></div>' +
       '<div class="hoq-eq-sw hoq-lvl' + (s.level ? ' on' : '') + '" role="switch" aria-checked="' + s.level + '"></div></div></div>';
     h += '<div class="hoq-eq-sec hoq-eq-tip" style="border:0;margin:0;padding-top:0">For quiet tracks or weak speakers. A limiter keeps it from crackling.</div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h"><div>Crossfade<small>Each song fades out into the next</small></div><b class="hoq-xf-v">' + (s.xfade ? s.xfade + ' s' : 'Off') + '</b></div>' +
+      '<div class="hoq-eq-line"><input type="range" class="hoq-xf" min="0" max="8" step="1" value="' + s.xfade + '"></div></div>';
     menu.innerHTML = h; bindTabs();
+    const xr = menu.querySelector('.hoq-xf'), xv = menu.querySelector('.hoq-xf-v'); fill(xr);
+    xr.addEventListener('input', () => { fill(xr); FX.set({ xfade: +xr.value }); xv.textContent = +xr.value ? xr.value + ' s' : 'Off'; reflectBtn(); });
     const big = menu.querySelector('.hoq-eq-big');
     const r = menu.querySelector('.hoq-boost'); fill(r);
     r.addEventListener('input', () => {
@@ -7485,9 +7675,34 @@ function setupEqPicker() {
     r.addEventListener('input', () => { fill(r); FX.set({ amount: +r.value }); v.textContent = r.value + '%'; });
   }
 
+  // Speed: speed + pitch together (a resample, like a record), with the usual presets
+  const SPEEDS = [['Normal', 1, ''], ['Slowed', 0.85, ''], ['Slowed + reverb', 0.85, 'hall'], ['Daycore', 0.75, ''], ['Sped up', 1.15, ''], ['Nightcore', 1.25, '']];
+  function renderSpeed() {
+    const s = FX.get();
+    const semi = (r) => { const v = Math.round(12 * Math.log2(r) * 10) / 10; return (v > 0 ? '+' : '') + v; };
+    const pick = SPEEDS.find(([, r, sp]) => Math.abs(r - s.speed) < 0.001 && (sp ? s.space === sp : !(r === 0.85 && s.space === 'hall')));
+    let h = tabsHtml();
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Speed<b class="hoq-sp-v">' + s.speed.toFixed(2) + '×' + (s.speed !== 1 ? ' · ' + semi(s.speed) + ' st' : '') + '</b></div>';
+    h += '<div class="hoq-eq-chips c2">' + SPEEDS.map(([l], i) => '<button class="hoq-eq-preset' + (pick && pick[0] === l ? ' sel' : '') + '" data-sp="' + i + '">' + l + '</button>').join('') + '</div></div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-line"><input type="range" class="hoq-sp" min="0.5" max="1.5" step="0.01" value="' + s.speed + '"></div>' +
+      '<div class="hoq-eq-tip">Speed and pitch move together, like speeding up a record: no warble. Slowed + reverb also turns on Concert hall in Space.</div></div>';
+    menu.innerHTML = h; bindTabs();
+    const r = menu.querySelector('.hoq-sp'), v = menu.querySelector('.hoq-sp-v'); fill(r);
+    r.addEventListener('input', () => { fill(r); FX.set({ speed: +r.value }); v.textContent = (+r.value).toFixed(2) + '×' + (+r.value !== 1 ? ' · ' + semi(+r.value) + ' st' : ''); reflectBtn(); });
+    r.addEventListener('change', () => render());
+    menu.querySelectorAll('[data-sp]').forEach((el) => el.addEventListener('click', () => {
+      const [, rate, sp] = SPEEDS[+el.getAttribute('data-sp')];
+      const patch = { speed: rate };
+      if (sp) { patch.space = sp; patch.amount = 60; }
+      else if (FX.get().space === 'hall' && FX.get().speed === 0.85) patch.space = '';   // leaving Slowed + reverb takes its reverb with it
+      FX.set(patch); reflectBtn(); render();
+    }));
+  }
+
   function render() {
     if (tab === 'vol') return renderVol();
     if (tab === 'space') return renderSpace();
+    if (tab === 'speed') return renderSpeed();
     const gains = window.__hoqEQ.get();
     const on = window.__hoqEQ.isOn();
     const presetName = Object.keys(PRESETS).find((k) => PRESETS[k].every((v, i) => v === (gains[i] || 0)));
@@ -7877,8 +8092,8 @@ const hoqPfSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Open a track page through SoundCloud's own router (the player keeps going),
 // then press its play button once it shows up.
-function hoqPfOpenAndPlay(path) {
-  try { sessionStorage.setItem('hoqPfAuto', JSON.stringify({ path, t: Date.now() })); } catch (e) {}
+function hoqPfOpenAndPlay(path, seek) {
+  try { sessionStorage.setItem('hoqPfAuto', JSON.stringify({ path, t: Date.now(), seek: seek > 0 ? seek : 0 })); } catch (e) {}
   const a = document.createElement('a');
   a.href = path; a.style.display = 'none';
   document.body.appendChild(a); a.click(); a.remove();
@@ -7892,6 +8107,17 @@ function hoqPfAutoPlay() {
   if (!b) return;
   sessionStorage.removeItem('hoqPfAuto');
   if (!b.classList.contains('sc-button-pause')) b.click();
+  if (job.seek > 0) {
+    // once this track is actually playing, jump to the position (listen along)
+    const want = job.seek + 1, t0 = Date.now();
+    const iv = setInterval(() => {
+      const el = window.__hoqMediaEl;
+      if (Date.now() - t0 > 12000) { clearInterval(iv); return; }
+      if (el && !el.paused && el.currentTime > 0.2 && isFinite(el.duration) && want < el.duration - 3) {
+        clearInterval(iv); try { el.currentTime = want + (Date.now() - t0) / 1000; } catch (e) {}
+      }
+    }, 250);
+  }
 }
 
 // Play the artist's Tracks tab from the top, or a random track with shuffle on.
