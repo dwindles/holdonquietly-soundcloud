@@ -5312,7 +5312,7 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
   'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt',
-  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade', 'hoqConsole'];
+  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -6604,7 +6604,6 @@ function removeClutter() {
   try { setupOutputPicker(); } catch (e) {}
   try { setupEqPicker(); } catch (e) {}
   try { setupMiniMode(); } catch (e) {}
-  try { setupConsoleView(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
   document.documentElement.classList.toggle('hoq-feed', /\/feed/i.test(location.pathname));
@@ -7561,189 +7560,6 @@ function setupMiniMode() {
   }
   window.__hoqExitMini = exitMini;   // let the host force-exit if needed
   btn.addEventListener('click', () => { miniOn() ? exitMini() : enterMini(); });
-}
-
-// Likes "Console view": the Likes tile grid becomes a big side-scrolling shelf
-// that uses the whole window, like the old YouTube TV / console app. Mouse wheel
-// and arrow keys move along it (Enter plays); SoundCloud's own lazy loading keeps
-// feeding it as you reach the end. The switch sits at the bottom of the Library
-// menu, only on the Likes page.
-function setupConsoleView() {
-  const root = document.documentElement;
-  const onLib = /^\/you\/likes\/?$/.test(location.pathname);   // Likes only
-  let on = false; try { on = localStorage.getItem('hoqConsole') === '1'; } catch (e) {}
-  root.classList.toggle('hoq-console-on', onLib && on);
-
-  if (!document.getElementById('hoq-console-css')) {
-    const st = document.createElement('style');
-    st.id = 'hoq-console-css';
-    st.textContent = `
-      html.hoq-console-on .l-container, html.hoq-console-on .l-collection, html.hoq-console-on .l-main,
-      html.hoq-console-on .collectionSection, html.hoq-console-on .badgeList {
-        max-width:none !important; width:auto !important; }
-      html.hoq-console-on .l-container { padding-left:28px !important; padding-right:28px !important; }
-      html.hoq-console-on .badgeList { margin-left:0 !important; margin-right:0 !important; }
-      /* keep the list's bottom below the fold (page doesn't scroll in this view)
-         so SoundCloud's auto-loader doesn't fetch every like at once */
-      html.hoq-console-on .badgeList { min-height:300vh !important; }
-      html.hoq-console-on .badgeList.hoq-feed { min-height:0 !important; }
-      html.hoq-console-on .badgeList > .lazyLoadingList__list {
-        display:grid !important; grid-auto-flow:column !important; grid-template-rows:repeat(var(--hoq-rows,2), auto) !important;
-        grid-auto-columns:var(--hoq-tile,220px) !important; column-gap:22px !important; row-gap:18px !important;
-        overflow-x:auto !important; overflow-y:hidden !important; overscroll-behavior-x:contain;
-        scroll-snap-type:x proximity; scroll-padding-left:36px;
-        padding:10px 36px 18px !important; margin:0 -28px !important;
-        -webkit-mask-image:linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 60px), transparent 100%);
-                mask-image:linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 60px), transparent 100%); }
-      html.hoq-console-on .badgeList > .lazyLoadingList__list::after { display:none !important; }
-      html.hoq-console-on .badgeList__item { float:none !important; width:auto !important; height:auto !important; margin:0 !important;
-        padding:0 !important; scroll-snap-align:start; transition:transform .18s cubic-bezier(.2,.8,.2,1) !important; }
-      html.hoq-console-on .badgeList__item > *, html.hoq-console-on .badgeList__item .audibleTile,
-      html.hoq-console-on .badgeList__item .playableTile, html.hoq-console-on .userBadgeListItem { width:100% !important; max-width:none !important; }
-      html.hoq-console-on .badgeList__item .audibleTile__artwork, html.hoq-console-on .badgeList__item .playableTile__artwork,
-      html.hoq-console-on .badgeList__item .userBadgeListItem__artwork, html.hoq-console-on .badgeList__item .userBadgeListItem__image {
-        display:block !important; width:100% !important; height:auto !important; aspect-ratio:1 / 1; flex:none !important; padding:0 !important; }
-      html.hoq-console-on .badgeList__item .audibleTile__image, html.hoq-console-on .badgeList__item .playableTile__image,
-      html.hoq-console-on .badgeList__item .image { width:100% !important; height:100% !important; }
-      /* focus lift, console style: the tile under the mouse/keyboard grows */
-      html.hoq-console-on .badgeList__item:hover, html.hoq-console-on .badgeList__item.hoq-cfocus { transform:scale(1.06); z-index:2; position:relative; }
-      html.hoq-console-on .badgeList__item.hoq-cfocus .image, html.hoq-console-on .badgeList__item:hover .image {
-        box-shadow:0 0 0 3px var(--sc-accent,#ff5500), 0 14px 34px rgba(0,0,0,.5) !important; }
-      html.hoq-console-on .badgeList__item [class*="__heading"], html.hoq-console-on .badgeList__item [class*="__title"] a,
-      html.hoq-console-on .badgeList__item [class*="mainHeading"] { font-size:12.5px !important; line-height:1.3 !important; }
-      html.hoq-console-on .badgeList__item [class*="__username"], html.hoq-console-on .badgeList__item [class*="subtitle"] { font-size:11.5px !important; line-height:1.3 !important; }
-      html.hoq-console-on .badgeList__item .playableTile__description { margin-top:6px !important; }
-      /* the shelf is the only scroller: no page scroll, no overlay scrollbar */
-      html.hoq-console-on, html.hoq-console-on body { overflow:hidden !important; }
-      html.hoq-console-on #hoq-scroll { display:none !important; }
-      /* SoundCloud gives every tile a 48px bottom margin: dead space on a shelf */
-      html.hoq-console-on .badgeList__item .audibleTile, html.hoq-console-on .badgeList__item .playableTile { margin:0 !important; }
-      /* third View button (grid / list / console) */
-      .listDisplayToggle .hoq-console-li .hoq-console-btn svg { width:16px; height:16px; }
-    `;
-    (document.head || root).appendChild(st);
-  }
-
-  // The switch is a third button beside SoundCloud's own View buttons
-  // (grid / list / console), only on Likes. Picking grid or list turns it off.
-  const opts = document.querySelector('.listDisplayToggle__options');
-  if (opts && !onLib) { const x = opts.querySelector('.hoq-console-li'); if (x) x.remove(); }
-  if (opts && onLib) {
-    let li = opts.querySelector('.hoq-console-li');
-    if (!li) {
-      li = document.createElement('li');
-      li.className = 'sc-mr-1x hoq-console-li';
-      li.innerHTML = '<button type="button" class="hoq-console-btn sc-button sc-button-secondary sc-button-medium sc-button-icon" title="Console view: big side-scrolling tiles">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="12.5" rx="2"/><rect x="6" y="8.5" width="5" height="5.5" rx="1"/><rect x="13" y="8.5" width="5" height="5.5" rx="1"/><path d="M9 21h6"/></svg></button>';
-      opts.appendChild(li);
-      li.querySelector('button').addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        // console view is built on the grid: switch SoundCloud to grid first
-        if (!document.querySelector('.badgeList')) { const g = opts.querySelector('.listDisplayToggle__badgeToggle'); if (g) g.click(); }
-        try { localStorage.setItem('hoqConsole', '1'); } catch (er) {}
-        setupConsoleView();
-      });
-      // SoundCloud's grid / list buttons switch the console view off
-      opts.addEventListener('click', (e) => {
-        if (e.target.closest('.hoq-console-li')) return;
-        if (e.target.closest('button')) { try { localStorage.setItem('hoqConsole', '0'); } catch (er) {} setTimeout(setupConsoleView, 0); }
-      }, true);
-    }
-    // only one of the three looks picked: hide the grid button's "selected"
-    // paint while console is on (its accent is inline, so lift it off and put
-    // it back afterwards)
-    const cb = li.querySelector('button');
-    cb.classList.toggle('sc-button-selected', on);
-    cb.style.setProperty('color', on ? 'var(--sc-accent, #ff5500)' : '', on ? 'important' : '');
-    const gb = opts.querySelector('.listDisplayToggle__badgeToggle');
-    if (gb) {
-      const painted = [gb, ...gb.querySelectorAll('[style]')];
-      if (on && !gb.dataset.hoqHeld) {
-        gb.dataset.hoqHeld = '1';
-        painted.forEach((el) => { el.dataset.hoqStyle = el.getAttribute('style') || ''; el.removeAttribute('style'); });
-        gb.classList.remove('sc-button-selected'); gb.dataset.hoqSel = '1';
-      } else if (!on && gb.dataset.hoqHeld) {
-        delete gb.dataset.hoqHeld;
-        [gb, ...gb.querySelectorAll('[data-hoq-style]')].forEach((el) => { if (el.dataset.hoqStyle) el.setAttribute('style', el.dataset.hoqStyle); delete el.dataset.hoqStyle; });
-        if (gb.dataset.hoqSel && document.querySelector('.badgeList')) gb.classList.add('sc-button-selected');
-        delete gb.dataset.hoqSel;
-      }
-    }
-  }
-  if (!(onLib && on)) return;
-
-  // Size the shelf to the window: pick the row count that keeps tiles near
-  // ~170px (3 rows on a normal window, more on a tall one), measuring the text
-  // under each picture instead of guessing it.
-  const GAP = 18;
-  const lists = [...document.querySelectorAll('.badgeList > .lazyLoadingList__list')];
-  lists.forEach((ul) => {
-    // re-measure only when the window size changes or the list is new (reading
-    // layout on a huge grid on every page change is what makes things crawl)
-    const key = window.innerWidth + 'x' + window.innerHeight + ':' + (ul.children.length >= 8);
-    if (ul.__hoqSized !== key || !ul.__hoqExtraOk) {
-      const prev = parseFloat(ul.style.getPropertyValue('--hoq-tile')) || 0;
-      const first = ul.children[0];
-      const extra = prev && first ? Math.max(24, first.getBoundingClientRect().height - prev) : 44;
-      const top = ul.getBoundingClientRect().top + window.scrollY;
-      const room = window.innerHeight - Math.max(100, Math.min(top, 300)) - 64 /* player */ - 28 /* shelf padding */;
-      const rows = ul.children.length < 8 ? 1 : Math.max(2, Math.min(6, Math.round((room + GAP) / (170 + extra + GAP))));
-      const tile = Math.round(Math.max(110, Math.min(320, (room - (rows - 1) * GAP) / rows - extra)));
-      if (String(rows) !== ul.style.getPropertyValue('--hoq-rows')) ul.style.setProperty('--hoq-rows', rows);
-      if (Math.abs(tile - prev) >= 3) ul.style.setProperty('--hoq-tile', tile + 'px');
-      ul.__hoqExtraOk = !!prev;          // second pass has a real measurement
-      ul.__hoqSized = key;
-    }
-    if (ul.__hoqConsole) return;
-    ul.__hoqConsole = true;
-    // SoundCloud loads more whenever the list's bottom is on screen. A shelf's
-    // bottom is ALWAYS on screen, so it would fetch every like you have (and
-    // freeze). .badgeList is made tall (CSS, below the fold) so that stops;
-    // near the end of the shelf we drop that for a moment and ask for ONE page.
-    const box = ul.closest('.badgeList');
-    let lastPoke = 0;
-    ul.addEventListener('scroll', () => {
-      if (ul.scrollLeft + ul.clientWidth < ul.scrollWidth - ul.clientWidth * 1.5) return;
-      const now = Date.now(); if (now - lastPoke < 1500) return; lastPoke = now;
-      box.classList.add('hoq-feed');
-      try { window.dispatchEvent(new Event('scroll')); } catch (e) {}
-      setTimeout(() => box.classList.remove('hoq-feed'), 350);
-    }, { passive: true });
-  });
-  if (!window.__hoqConsoleWheel) {
-    window.__hoqConsoleWheel = true;
-    // the wheel ANYWHERE on the page moves along the shelf (fast), except in
-    // menus / popovers / text fields that scroll themselves
-    window.addEventListener('wheel', (e) => {
-      if (!root.classList.contains('hoq-console-on') || e.ctrlKey) return;
-      if (e.target.closest && e.target.closest('.dropdownMenu, [role="menu"], [role="dialog"], .modal, input, textarea, [id^="hoq-"]:not(html)')) return;
-      const ul = document.querySelector('.badgeList > .lazyLoadingList__list'); if (!ul) return;
-      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      const px = e.deltaMode === 1 ? d * 40 : d;   // line-mode wheels
-      e.preventDefault();
-      ul.scrollBy({ left: px * 3.2, behavior: 'auto' });
-    }, { passive: false, capture: true });
-  }
-  if (!window.__hoqConsoleKeys) {
-    window.__hoqConsoleKeys = true;
-    // arrow keys walk the tiles like a controller; Enter plays the focused one
-    window.addEventListener('keydown', (e) => {
-      if (!root.classList.contains('hoq-console-on')) return;
-      if (e.target.closest && e.target.closest('input, textarea, [contenteditable="true"]')) return;
-      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter'].includes(e.key)) return;
-      const ul = document.querySelector('.badgeList > .lazyLoadingList__list'); if (!ul) return;
-      const items = [...ul.children];
-      let i = items.findIndex((x) => x.classList.contains('hoq-cfocus'));
-      if (e.key === 'Enter') { if (i >= 0) { const pb = items[i].querySelector('.sc-button-play, .playButton'); (pb || items[i].querySelector('a')).click(); e.preventDefault(); } return; }
-      const rows = +getComputedStyle(ul).getPropertyValue('--hoq-rows') || 1;
-      const step = { ArrowLeft: -rows, ArrowRight: rows, ArrowUp: -1, ArrowDown: 1 }[e.key];
-      i = Math.max(0, Math.min(items.length - 1, (i < 0 ? 0 : i + step)));
-      items.forEach((x) => x.classList.remove('hoq-cfocus'));
-      items[i].classList.add('hoq-cfocus');
-      items[i].scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-      e.preventDefault();
-    });
-  }
 }
 
 // The profile-tab bar and the library/collection nav lean toward the cursor
