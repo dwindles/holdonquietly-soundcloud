@@ -2740,6 +2740,8 @@ const BASE_CSS = `
   .dropdownMenu:has(.moreMenu) {
     background: rgba(12,12,16,0.78) !important; border: 1px solid rgba(255,255,255,0.09) !important;
     border-radius: 14px !important; box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
+    /* never taller than the window: scroll instead of running off the bottom */
+    max-height: calc(100vh - 64px) !important; overflow-y: auto !important; overflow-x: hidden !important; overscroll-behavior: contain;
   }
   .moreMenu, .moreMenu.m-light { width: 220px !important; padding: 6px !important; box-sizing: border-box !important;
     background: transparent !important; border: 0 !important; box-shadow: none !important; }
@@ -2747,7 +2749,7 @@ const BASE_CSS = `
   .moreMenu .headerMenu__list + .headerMenu__list { margin-top: 4px !important; padding-top: 4px !important;
     border-top: 1px solid rgba(255,255,255,0.07) !important; }
   .moreMenu .headerMenu__link, .moreMenu .moreMenu__link {
-    display: flex !important; align-items: center !important; height: 32px !important; padding: 0 10px !important;
+    display: flex !important; align-items: center !important; height: 30px !important; padding: 0 10px !important;
     border: 0 !important; border-radius: 8px !important; background: transparent !important; box-shadow: none !important;
     color: #d6d6de !important; font-size: 13px !important; font-weight: 500 !important; text-decoration: none !important;
     transition: background .12s ease, color .12s ease !important;
@@ -8277,7 +8279,7 @@ async function hoqPfPlayAll(slug, shuffle) {
 function setupProfileExtras() {
   hoqPfAutoPlay();
   const bar = document.querySelector('.l-user-hero') && document.querySelector('.userInfoBar__buttons');
-  if (!bar) return;
+  if (!bar) { const r = document.getElementById('hoq-pf-res'); if (r) r.remove(); return; }
   const slug = (location.pathname.split('/')[1] || '').toLowerCase();
   if (!slug || /^(you|discover|search|stream|feed|charts|upload|settings|messages|notifications|pages|terms-of-use|people)$/.test(slug)) return;
 
