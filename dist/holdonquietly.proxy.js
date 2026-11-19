@@ -259,6 +259,51 @@ function scPost(cmd) {
   } catch (e) {}
 })();
 
+// --- Output-device watchdog -------------------------------------------------------
+// A chosen output that stops taking audio (monitor/HDMI asleep or switched input,
+// headset unplugged, device grabbed exclusively) freezes the AudioContext clock.
+// SoundCloud then waits forever and EVERY song shows as buffering. If the clock
+// stalls while a song should be playing, fall back to the system default for this
+// session (the saved choice is kept) and say so. When Windows reports a device
+// change, the saved device is tried again.
+(() => {
+  try {
+    let lastAc = -1, lastWall = 0, stalls = 0, fellBackFrom = '';
+    const playingNow = () => { const b = document.querySelector('.playControls__play'); return !!b && /^pause/i.test(b.getAttribute('aria-label') || ''); };
+    const fallBack = (why) => {
+      const id = window.__hoqSinkId || '';
+      if (!id) return false;
+      fellBackFrom = id; window.__hoqSinkId = '';          // session only: localStorage keeps the choice
+      try { window.__hoqApplySink(); } catch (e) {}
+      try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Switched to your default speakers', 'Your chosen output stopped responding' + (why ? ' (' + why + ')' : '') + '. It will be tried again when it reconnects.'); } catch (e) {}
+      return true;
+    };
+    window.__hoqSinkWatch = { get fellBackFrom() { return fellBackFrom; } };
+    setInterval(() => {
+      const ac = window.__hoqSCAC; if (!ac) return;
+      if (!ac.__hoqErrHooked) { ac.__hoqErrHooked = true; try { ac.addEventListener('error', () => fallBack('device error')); } catch (e) {} }
+      const now = performance.now() / 1000;
+      if (playingNow() && ac.state === 'suspended') { try { ac.resume(); } catch (e) {} }
+      if (playingNow() && ac.state === 'running' && lastAc >= 0 && now - lastWall > 0.5) {
+        const rate = (ac.currentTime - lastAc) / (now - lastWall);
+        stalls = rate < 0.5 ? stalls + 1 : 0;
+        if (stalls >= 3) { stalls = 0; fallBack(''); }
+      } else stalls = 0;
+      lastAc = ac.currentTime; lastWall = now;
+    }, 1500);
+    navigator.mediaDevices && navigator.mediaDevices.addEventListener && navigator.mediaDevices.addEventListener('devicechange', () => {
+      if (!fellBackFrom) return;
+      navigator.mediaDevices.enumerateDevices().then((ds) => {
+        if (!ds.some((d) => d.kind === 'audiooutput' && d.deviceId === fellBackFrom)) return;
+        let saved = ''; try { saved = localStorage.getItem('hoqSinkId') || ''; } catch (e) {}
+        if (saved !== fellBackFrom) { fellBackFrom = ''; return; }   // they picked something else meanwhile
+        window.__hoqSinkId = fellBackFrom; fellBackFrom = '';
+        try { window.__hoqApplySink(); } catch (e) {}
+      }).catch(() => {});
+    });
+  } catch (e) {}
+})();
+
 // --- Equalizer -----------------------------------------------------------------
 // A 6-band graphic EQ spliced into SoundCloud's own audio graph at the very last
 // stage. Rather than reroute SC's source (which risks breaking its volume), we
@@ -277,12 +322,294 @@ function hoqEnsureEqChain(ac) {
     return b;
   });
   for (let i = 0; i < bands.length - 1; i++) rc.call(bands[i], bands[i + 1]);
-  rc.call(bands[bands.length - 1], ac.destination);   // real connect, or we'd recurse
+  let tail = ac.destination;
+  try { tail = hoqBuildFx(ac, rc); } catch (e) { tail = ac.destination; }
+  rc.call(bands[bands.length - 1], tail);   // real connect, or we'd recurse
   ac.__hoqEqBands = bands;
   ac.__hoqEqIn = bands[0];
+  (window.__hoqFxCtxs = window.__hoqFxCtxs || []).push(ac);
   try { hoqApplyEqGains(ac); } catch (e) {}
+  try { hoqApplyFx(ac); } catch (e) {}
   return ac.__hoqEqIn;
 }
+
+// --- Volume boost + leveler + space effects (after the EQ bands) -------------
+// bands -> pre -+-> dry ---------------------+
+//               +-> convolver (reverb) -> wet +-> sum -> HP -> LP -> pan -> boost -> limiter -> out
+//               +-> delay <-> feedback (echo) +
+// Reverbs are synthesized impulse responses (no downloaded files). Everything is
+// transparent at rest: no reverb buffer, filters wide open, boost 0 dB, limiter
+// at ratio 1. The limiter only engages when boosting/levelling so a +12 dB boost
+// squashes instead of clipping.
+const HOQ_SPACES = {
+  bathroom:   { label: 'Bathroom',    tip: 'The song through the door at a party', rt: .8, pre: 2, d0: 6000, d1: 2500, wet: .45, dry: .85, lp: 650, lpQ: .8, er: [[5, .5], [9, .4], [14, .3]] },
+  shower:     { label: 'Shower',      tip: 'Bright tiled echo', rt: 1.3, pre: 1, d0: 11000, d1: 6000, wet: .55, dry: .8, er: [[3, .7], [6, .6], [9, .5], [13, .4], [17, .35], [22, .3]] },
+  room:       { label: 'Room',        tip: 'A small live room', rt: .55, pre: 4, d0: 8000, d1: 3000, wet: .3, dry: 1 },
+  hall:       { label: 'Concert hall', tip: 'Big, smooth hall', rt: 2.4, pre: 22, d0: 7000, d1: 2000, wet: .38, dry: .9 },
+  church:     { label: 'Church',      tip: 'Long stone tail', rt: 5, pre: 38, d0: 6000, d1: 1200, wet: .5, dry: .75 },
+  stadium:    { label: 'Stadium',     tip: 'Huge, with a bounce back', rt: 3.2, pre: 70, d0: 5000, d1: 1500, wet: .42, dry: .8, hp: 110, echo: .42, fb: .28, echoMix: .3 },
+  cave:       { label: 'Cave',        tip: 'Dark and echoey', rt: 3.8, pre: 30, d0: 3500, d1: 700, wet: .5, dry: .75, echo: .29, fb: .38, echoMix: .3 },
+  nextdoor:   { label: 'Next room',   tip: 'Through the wall', rt: .6, pre: 6, d0: 3000, d1: 900, wet: .35, dry: .8, lp: 320, lpQ: .7 },
+  car:        { label: 'Car outside', tip: 'Someone bumping it in the parking lot', rt: 1.8, pre: 15, d0: 4000, d1: 1200, wet: .3, dry: .9, lp: 420, lpQ: 1.6, echo: .12, fb: .1, echoMix: .18 },
+  underwater: { label: 'Underwater',  tip: 'Muffled and floaty', rt: 1.6, pre: 10, d0: 1500, d1: 400, wet: .55, dry: .7, lp: 420, lpQ: 4 },
+  radio:      { label: 'Old radio',   tip: 'Thin AM-radio tone', rt: .25, pre: 2, d0: 4000, d1: 2000, wet: .12, dry: 1, hp: 450, lp: 3200, lpQ: 1.2 },
+  phone:      { label: 'Phone speaker', tip: 'Played off a phone on the table', rt: .15, pre: 1, d0: 6000, d1: 3000, wet: .08, dry: 1, hp: 750, lp: 7000, lpQ: 1.8 },
+  tunnel:     { label: 'Tunnel',      tip: 'Metallic flutter echo', rt: 2.2, pre: 8, d0: 5000, d1: 1800, wet: .35, dry: .85, echo: .055, fb: .5, echoMix: .25 },
+  eightd:     { label: '8D',          tip: 'Circles around your head (headphones)', rt: 1.4, pre: 12, d0: 7000, d1: 2500, wet: .28, dry: .95, pan: .9 },
+};
+function hoqFxState() {
+  const g = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
+  const boost = Math.max(0, Math.min(12, +g('hoqBoost', '0') || 0));
+  const space = HOQ_SPACES[g('hoqSpace', '')] ? g('hoqSpace', '') : '';
+  let amount = +g('hoqSpaceAmt', '100'); if (!(amount >= 0 && amount <= 100)) amount = 100;
+  let speed = +g('hoqSpeed', '1'); if (!(speed >= 0.5 && speed <= 1.5)) speed = 1;
+  let xfade = +g('hoqXfade', '0'); if (!(xfade >= 0 && xfade <= 8)) xfade = 0;
+  return { boost, level: g('hoqLevel', '0') === '1', space, amount, speed, xfade };
+}
+function hoqMakeIR(ac, s) {
+  const sr = ac.sampleRate, pre = Math.floor(sr * s.pre / 1000);
+  const len = pre + Math.floor(sr * s.rt * 1.15) + 1;
+  const buf = ac.createBuffer(2, len, sr);
+  let seed = 0x2545f491;
+  const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return ((seed >>> 0) / 4294967296) * 2 - 1; };
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch); let lp = 0, a = 0;
+    for (let i = pre; i < len; i++) {
+      const t = (i - pre) / sr;
+      if (((i - pre) & 63) === 0) { const fc = s.d0 * Math.pow(s.d1 / s.d0, Math.min(1, t / s.rt)); a = 1 - Math.exp(-2 * Math.PI * fc / sr); }
+      lp += a * (rnd() - lp);
+      const fadeIn = Math.min(1, t / 0.004);   // no click at the reverb onset
+      d[i] = lp * Math.exp(-6.9 * t / s.rt) * fadeIn;
+    }
+    (s.er || []).forEach(([ms, gn], k) => {   // discrete early reflections (tiles/walls)
+      const idx = Math.floor(sr * (ms + (ch ? 0.7 * (k + 1) : 0)) / 1000);
+      if (idx < len) d[idx] += gn * (k % 2 ? -1 : 1) * 0.6;
+    });
+  }
+  // Normalise energy so wet ~ the dry level regardless of length: sum(h^2) = 1.
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch); let e = 0;
+    for (let i = 0; i < len; i++) e += d[i] * d[i];
+    const k = e > 0 ? 1 / Math.sqrt(e) : 0;
+    for (let i = 0; i < len; i++) d[i] *= k;
+  }
+  return buf;
+}
+function hoqBuildFx(ac, rc) {
+  const n = {};
+  n.pre = ac.createGain();
+  n.dry = ac.createGain();
+  n.conv = ac.createConvolver(); n.conv.normalize = false;
+  n.wet = ac.createGain(); n.wet.gain.value = 0;
+  n.delay = ac.createDelay(1.5); n.delay.delayTime.value = 0.3;
+  n.fb = ac.createGain(); n.fb.gain.value = 0;
+  n.echoLp = ac.createBiquadFilter(); n.echoLp.type = 'lowpass'; n.echoLp.frequency.value = 3000;
+  n.echoOut = ac.createGain(); n.echoOut.gain.value = 0;
+  n.sum = ac.createGain();
+  n.hp = ac.createBiquadFilter(); n.hp.type = 'highpass'; n.hp.frequency.value = 10; n.hp.Q.value = 0.7;
+  n.lp = ac.createBiquadFilter(); n.lp.type = 'lowpass'; n.lp.frequency.value = Math.min(20000, ac.sampleRate / 2 - 100); n.lp.Q.value = 0.7;
+  n.panTrim = ac.createGain();   // panning stereo folds L+R onto one side (+6 dB); trim for 8D
+  n.pan = ac.createStereoPanner();
+  n.clip = ac.createWaveShaper(); n.clip.oversample = 'none';   // curve only while boosting/effects
+  n.osc = ac.createOscillator(); n.osc.frequency.value = 0.11;
+  n.oscAmt = ac.createGain(); n.oscAmt.gain.value = 0;
+  n.agc = ac.createGain();       // "even out volume": slow auto-gain toward one loudness
+  n.xf = ac.createGain();        // crossfade: song fades out into the next (driven by hoqPlaybackTick)
+  n.meter = ac.createAnalyser(); n.meter.fftSize = 2048;
+  n.boost = ac.createGain();
+  n.lim = ac.createDynamicsCompressor();
+  n.lim.threshold.value = 0; n.lim.knee.value = 0; n.lim.ratio.value = 1; n.lim.attack.value = 0.003; n.lim.release.value = 0.25;
+  rc.call(n.pre, n.dry); rc.call(n.dry, n.sum);
+  rc.call(n.pre, n.conv); rc.call(n.conv, n.wet); rc.call(n.wet, n.sum);
+  rc.call(n.pre, n.delay); rc.call(n.delay, n.echoLp); rc.call(n.echoLp, n.fb); rc.call(n.fb, n.delay);
+  rc.call(n.echoLp, n.echoOut); rc.call(n.echoOut, n.sum);
+  rc.call(n.sum, n.hp); rc.call(n.hp, n.lp); rc.call(n.lp, n.panTrim); rc.call(n.panTrim, n.pan); rc.call(n.pan, n.agc); rc.call(n.agc, n.xf); rc.call(n.xf, n.boost); rc.call(n.pan, n.meter);
+  rc.call(n.boost, n.lim); rc.call(n.lim, n.clip); rc.call(n.clip, ac.destination);
+  rc.call(n.osc, n.oscAmt); rc.call(n.oscAmt, n.pan.pan);
+  try { n.osc.start(); } catch (e) {}
+  n.irs = {};
+  ac.__hoqFx = n;
+  return n.pre;
+}
+function hoqApplyFx(ac) {
+  const n = ac && ac.__hoqFx; if (!n) return;
+  const st = hoqFxState(), t = ac.currentTime, nyq = Math.min(20000, ac.sampleRate / 2 - 100);
+  const set = (p, v, tc) => { try { p.setTargetAtTime(v, t, tc || 0.04); } catch (e) { p.value = v; } };
+  const s = st.space ? HOQ_SPACES[st.space] : null, a = s ? st.amount / 100 : 0;
+  // reverb buffer: swap while the wet path is faded out so it never clicks
+  if (n.curSpace !== st.space) {
+    n.curSpace = st.space;
+    try { n.wet.gain.cancelScheduledValues(t); n.wet.gain.setValueAtTime(0, t); } catch (e) { n.wet.gain.value = 0; }
+    try {
+      if (s) { if (!n.irs[st.space]) n.irs[st.space] = hoqMakeIR(ac, s); n.conv.buffer = n.irs[st.space]; }
+      else n.conv.buffer = null;
+    } catch (e) {}
+  }
+  set(n.wet.gain, s ? s.wet * a : 0, 0.08);
+  set(n.dry.gain, s ? 1 - (1 - s.dry) * a : 1);
+  const echoOn = s && s.echo;
+  if (echoOn) set(n.delay.delayTime, s.echo, 0.01);
+  set(n.fb.gain, echoOn ? s.fb * a : 0);
+  set(n.echoOut.gain, echoOn ? s.echoMix * a : 0);
+  set(n.hp.frequency, s && s.hp ? 10 * Math.pow(s.hp / 10, a) : 10, 0.06);
+  set(n.lp.frequency, s && s.lp ? nyq * Math.pow(s.lp / nyq, a) : nyq, 0.06);
+  set(n.lp.Q, s && s.lp ? 0.7 + ((s.lpQ || 0.7) - 0.7) * a : 0.7);
+  set(n.oscAmt.gain, s && s.pan ? s.pan * a : 0, 0.2);
+  set(n.panTrim.gain, s && s.pan ? 1 - 0.3 * a : 1, 0.2);
+  if (!(s && s.pan)) set(n.pan.pan, 0, 0.2);
+  // Soft clipper catches the few peaks the compressor's attack lets through.
+  // Identity below 0.8, smooth knee to 1.0 above. No curve at rest = bit-exact pass.
+  const needClip = st.boost > 0 || st.level || !!s;
+  if (needClip && !n.clipCurve) {
+    const N = 4097, c = new Float32Array(N);
+    for (let i = 0; i < N; i++) { const x = (i / (N - 1)) * 4 - 2, ax = Math.abs(x); c[i] = ax <= 0.8 ? x : Math.sign(x) * (0.8 + 0.2 * Math.tanh((ax - 0.8) / 0.2)); }
+    n.clipCurve = c;
+  }
+  try { n.clip.curve = needClip ? n.clipCurve : null; } catch (e) {}
+  set(n.boost.gain, Math.pow(10, st.boost / 20));
+  hoqAgc(ac, st.level);
+  // limiter: off (ratio 1) at rest; brickwall-ish when boosting / levelling / heavy reverb
+  if (st.boost > 0 || st.level || (s && s.wet * a > 0.3)) {
+    set(n.lim.threshold, -1.5, 0.1); set(n.lim.knee, 0, 0.1); set(n.lim.ratio, 20, 0.1);
+    n.lim.attack.value = 0.002; n.lim.release.value = 0.2;
+  } else {
+    set(n.lim.threshold, 0, 0.1); set(n.lim.knee, 0, 0.1); set(n.lim.ratio, 1, 0.1);
+  }
+}
+// Auto-volume: measures loudness (pre-boost) a few times a second, keeps a ~3 s
+// running average, and glides a gain toward a -16 dB RMS target (max +12/-9 dB).
+// Silence/gaps between songs are ignored so it doesn't pump up the noise floor.
+const HOQ_AGC_TARGET = -16;
+function hoqAgc(ac, on) {
+  const n = ac.__hoqFx; if (!n) return;
+  if (!on) {
+    if (n.agcTimer) { clearInterval(n.agcTimer); n.agcTimer = 0; }
+    try { n.agc.gain.setTargetAtTime(1, ac.currentTime, 0.3); } catch (e) { n.agc.gain.value = 1; }
+    n.agcPow = 0; return;
+  }
+  if (n.agcTimer) return;
+  const buf = new Float32Array(n.meter.fftSize);
+  n.agcPow = 0;
+  n.agcTimer = setInterval(() => {
+    try {
+      if (ac.state !== 'running') return;
+      n.meter.getFloatTimeDomainData(buf);
+      let e = 0; for (let i = 0; i < buf.length; i++) e += buf[i] * buf[i];
+      const p = e / buf.length;
+      if (p < 1e-5) return;                                // below -50 dB: silence, hold
+      n.agcPow = n.agcPow ? n.agcPow * 0.92 + p * 0.08 : p;   // ~3 s average at 4 Hz
+      const db = 10 * Math.log10(n.agcPow);
+      const want = Math.max(-9, Math.min(12, HOQ_AGC_TARGET - db));
+      n.agc.gain.setTargetAtTime(Math.pow(10, want / 20), ac.currentTime, 1.2);
+      n.agcDb = want;
+    } catch (e) {}
+  }, 250);
+}
+window.__hoqFX = {
+  spaces: HOQ_SPACES,
+  get: hoqFxState,
+  set(patch) {
+    const map = { boost: 'hoqBoost', space: 'hoqSpace', amount: 'hoqSpaceAmt', level: 'hoqLevel', speed: 'hoqSpeed', xfade: 'hoqXfade' };
+    Object.keys(patch || {}).forEach((k) => {
+      if (!map[k]) return;
+      let v = patch[k]; if (k === 'level') v = v ? '1' : '0';
+      try { localStorage.setItem(map[k], String(v)); } catch (e) {}
+    });
+    (window.__hoqFxCtxs || []).forEach((ac) => { try { hoqApplyFx(ac); } catch (e) {} });
+  },
+  active() { const s = hoqFxState(); return s.boost > 0 || s.level || !!s.space || s.speed !== 1 || s.xfade > 0; },
+};
+// Seek the way a person does: press on SoundCloud's own progress bar at the spot.
+// Setting the audio element's currentTime directly bypasses SoundCloud's HLS
+// loader (it fetches the chunks itself), so playback sat 'buffering' forever.
+function hoqSeek(sec) {
+  try {
+    const w = document.querySelector('.playControls .playbackTimeline__progressWrapper');
+    if (!w) return false;
+    const dur = +w.getAttribute('aria-valuemax') || ((window.__hoqMediaEl || {}).duration);
+    if (!(dur > 0) || !(sec >= 0)) return false;
+    const r = w.getBoundingClientRect();
+    if (!r.width) return false;
+    const x = r.left + r.width * Math.min(0.995, sec / dur), y = r.top + r.height / 2;
+    const o = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons: 1 };
+    w.dispatchEvent(new MouseEvent('mousedown', o));
+    w.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, o, { buttons: 0 })));
+    document.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, o, { buttons: 0 })));
+    w.dispatchEvent(new MouseEvent('click', Object.assign({}, o, { buttons: 0 })));
+    return true;
+  } catch (e) { return false; }
+}
+
+window.__hoqSeek = hoqSeek;
+
+// --- Playback ticker: speed/pitch, crossfade, resume --------------------------
+// Speed: playbackRate with preservesPitch OFF, so speed and pitch move together
+// like a record (slowed / nightcore) — a straight resample, no time-stretch warble.
+// Crossfade: SoundCloud only ever plays one track at a time, so two songs can't
+// overlap; instead the last N seconds fade out and the next song fades in over
+// N/2 (a gain stage after the leveller). Resume: the last track + position are
+// saved every few seconds; SoundCloud restores the track itself on launch (at
+// 0:00), so the first time it plays this session we jump back to where you were.
+(() => {
+  let xfOut = false, fadeIn = false, lastTitle = '', lastPos = 0, resumeDone = false, saveAt = 0;
+  const curTitle = () => { const a = document.querySelector('.playbackSoundBadge__titleLink'); return a ? (a.getAttribute('title') || a.textContent || '').trim() : ''; };
+  const resumeSaved = () => { try { return JSON.parse(localStorage.getItem('hoqResume')) || null; } catch (e) { return null; } };
+  setInterval(() => {
+    const el = window.__hoqMediaEl;
+    if (!el) return;
+    const st = hoqFxState();
+    // ads are muted / fast-forwarded by the ad skipper: leave their rate alone
+    if (!el.muted) {
+      if (el.preservesPitch !== (st.speed === 1)) { try { el.preservesPitch = st.speed === 1; } catch (e) {} }
+      if (Math.abs(el.playbackRate - st.speed) > 0.001) { try { el.playbackRate = st.speed; } catch (e) {} }
+    }
+    const title = curTitle(), pos = el.currentTime || 0, dur = el.duration;
+    const rate = el.playbackRate || 1;
+
+    // resume: once per session, on the first real playback of the restored track
+    // Auto-resume is OFF: seeking the moment a song starts stalled SoundCloud's
+    // stream loader on signed-in accounts (stuck buffering). Position is still
+    // saved; the jump back stays disabled until it can be done safely.
+    if (false && !resumeDone && !el.paused && title) {
+      resumeDone = true;
+      const r = resumeSaved();
+      const fresh = r && r.pos > 10 && Date.now() - (r.at || 0) < 30 * 86400000;
+      if (fresh && r.title === title && pos < 3 && isFinite(dur) && r.pos < dur - 15) {
+        hoqSeek(r.pos);
+      } else if (fresh && r.title !== title && r.path && pos < 3 && performance.now() < 15 * 60000) {
+        // SoundCloud restored the last track you PICKED, not the one autoplay had
+        // moved on to: switch to where you actually were
+        try { el.pause(); } catch (e) {}
+        hoqPfOpenAndPlay(r.path, r.pos);
+      }
+    }
+    if (title && !el.paused && pos > 5 && Date.now() - saveAt > 4000) {
+      saveAt = Date.now();
+      let path = ''; try { const h = npPublicUrl('.playbackSoundBadge__titleLink'); path = h ? new URL(h).pathname : ''; } catch (e) {}
+      try { localStorage.setItem('hoqResume', JSON.stringify({ title, path, pos: Math.floor(pos), at: saveAt })); } catch (e) {}
+    }
+
+    // crossfade envelope
+    const n = window.__hoqSCAC && window.__hoqSCAC.__hoqFx;
+    if (!n) return;
+    const X = st.xfade;
+    if (title !== lastTitle) { if (xfOut && X) fadeIn = true; xfOut = false; lastTitle = title; }
+    else if (xfOut && pos < lastPos - 5) { fadeIn = !!X; xfOut = false; }   // repeat-one looped back
+    lastPos = pos;
+    let g = 1;
+    if (X > 0 && isFinite(dur) && dur > X * 2 + 10) {
+      const remain = (dur - pos) / rate;
+      if (remain < X) { xfOut = true; g = Math.max(0, remain / X); }
+      if (fadeIn) {
+        const inT = (X / 2), played = pos / rate;
+        if (played < inT) g = Math.min(g, Math.max(0.02, played / inT)); else fadeIn = false;
+      }
+    } else fadeIn = false;
+    if (el.paused) return;
+    try { n.xf.gain.setTargetAtTime(g, window.__hoqSCAC.currentTime, 0.06); } catch (e) { n.xf.gain.value = g; }
+  }, 100);
+})();
+
 function hoqApplyEqGains(ac) {
   const bands = ac && ac.__hoqEqBands; if (!bands) return;
   let on = false, gains = [0, 0, 0, 0, 0, 0];
@@ -320,7 +647,7 @@ window.__hoqEQ = {
   set(gains, on) {
     try { localStorage.setItem('hoqEQ', JSON.stringify(gains)); } catch (e) {}
     try { localStorage.setItem('hoqEQOn', on ? '1' : '0'); } catch (e) {}
-    try { if (window.__hoqSCAC) hoqApplyEqGains(window.__hoqSCAC); } catch (e) {}
+    (window.__hoqFxCtxs || []).forEach((ac) => { try { hoqApplyEqGains(ac); } catch (e) {} });
   },
 };
 
@@ -493,10 +820,19 @@ const BASE_CSS = `
     background: rgba(12,12,14,0.32) !important;
     backdrop-filter: blur(20px) saturate(1.3) !important;
   }
+  /* The bar's blur lives on a layer BEHIND its contents, not on the bar itself:
+     a backdrop-filter on the bar makes it a "backdrop root", so nothing inside
+     it (the Next up panel) could blur the page; the queue just showed through. */
   html.sc-coverbg .playControls {
-    background: rgba(12,12,14,0.5) !important;
-    backdrop-filter: blur(24px) saturate(1.4) !important;
+    background: transparent !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
     border-top: 1px solid rgba(255,255,255,0.06) !important;
+  }
+  html.sc-coverbg .playControls::after {
+    content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    visibility: visible;   /* the bar itself is visibility:hidden (only its inner shows) */
+    background: rgba(12,12,14,0.5);
+    backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4);
   }
   html.sc-coverbg .playControls::before,
   html.sc-coverbg .playControls__inner,
@@ -821,6 +1157,11 @@ const BASE_CSS = `
     transition: box-shadow .18s ease, filter .18s ease !important;
   }
   a.uploadButton:hover { box-shadow: 0 0 18px var(--sc-accent, #ff5500) !important; }
+  /* Signed out, SoundCloud wraps Upload in a plain block (.header__upload) so it
+     sat at the top of the row, and its label is "secondary" grey text on the
+     accent. Center the wrapper; label solid white. */
+  .header__upload { display: flex !important; align-items: center !important; align-self: stretch !important; }
+  a.uploadButton .uploadButton__title { color: #fff !important; -webkit-text-fill-color: #fff !important; background: none !important; }
 
   /* Header avatar + icon buttons: subtle accent glow so they don't look plain */
   .header__userNav img, .userNavButton__avatar, .userBadge__image .sc-artwork {
@@ -925,7 +1266,6 @@ const BASE_CSS = `
   html.hoq-no-glow .fullHero__title, html.hoq-no-glow .soundTitle__title,
   html.hoq-no-glow .mixedSelectionModule__titleText, html.hoq-no-glow .lazyLoadingList__header,
   html.hoq-no-glow .sectionHead__title { text-shadow: none !important; }
-  html.hoq-no-glow .collectionNav.g-tabs .active a { box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important; }
   /* Grayscale covers ON (opt-in) */
   html.hoq-gray .image span, html.hoq-gray .sc-artwork, html.hoq-gray .sound__coverArt span,
   html.hoq-gray .fullHero__artwork span, html.hoq-gray .playableTile__image span { filter: grayscale(1) !important; }
@@ -985,12 +1325,15 @@ const BASE_CSS = `
   html:has(.queue.m-visible) .l-sidebar-right { pointer-events: none !important; }
   /* match the app's own dark-frosted panels (header / dropdowns): a translucent
      dark ground with the same backdrop blur — no shimmer, no glass. */
+  /* acrylic: a dark tint over a heavy, saturated blur. The old 50% tint let a
+     light page wash it out to flat grey; this keeps it dark but picks up the
+     page's colour. */
   .playControls__queue {
-    background: rgba(12,12,16,0.5) !important;
-    border-left: 1px solid rgba(255,255,255,0.08) !important;
-    box-shadow: -18px 0 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(24px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important; }
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 140px), rgba(14,14,19,0.74) !important;
+    border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 14px 14px 0 0 !important; overflow: hidden !important;
+    box-shadow: 0 -12px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+    backdrop-filter: blur(34px) saturate(1.8) brightness(0.85) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(1.8) brightness(0.85) !important; }
   /* theme the panel chrome to the accent so it matches the rest of the app */
   .playControls__queue .queue__title { color: #fff !important; }
   .playControls__queue .queueItemView.m-playing .queueItemView__title a,
@@ -1002,7 +1345,84 @@ const BASE_CSS = `
   .playControls__queue .queue__scrollableInner,
   .playControls__queue .queue__itemsHeight,
   .playControls__queue .queueFallback { background: transparent !important; }
-  .playControls__queue .queueItemView { border-radius: 10px !important; }
+  /* --- Next up, redone: compact header, clean rows (title over artist, the
+     "From related tracks…" line dropped), actions on hover in place of the
+     duration, played rows faded, the playing row tinted. Rows must stay 56px:
+     SoundCloud positions them in 56px steps. --- */
+  .playControls__queue .queue__panel { display: flex !important; align-items: center !important; gap: 6px !important;
+    padding: 14px 12px 10px 18px !important; border: 0 !important; }
+  .playControls__queue .queue__title { flex: 1 1 auto !important; margin: 0 !important; padding: 0 !important; float: none !important;
+    font: 600 15px/1.2 Inter,-apple-system,Arial,sans-serif !important; letter-spacing: 0 !important; }
+  .playControls__queue .queue__clear, .playControls__queue .queue__hide { float: none !important; margin: 0 !important; box-shadow: none !important;
+    border: 0 !important; background: transparent !important; color: #a6a6b0 !important; -webkit-text-fill-color: currentColor !important;
+    transition: background .12s ease, color .12s ease !important; }
+  .playControls__queue .queue__clear { height: 28px !important; padding: 0 10px !important; border-radius: 8px !important;
+    font: 600 12.5px/28px Inter,-apple-system,Arial,sans-serif !important; }
+  .playControls__queue .queue__hide { width: 28px !important; height: 28px !important; padding: 0 !important; border-radius: 50% !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queue__hide svg { width: 13px !important; height: 13px !important; }
+  .playControls__queue .queue__clear:hover, .playControls__queue .queue__hide:hover { background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+  .playControls__queue .queue__itemsHeight { padding: 0 8px !important; background-image: none !important; }
+  /* every row sits in a wrapper SoundCloud paints solid (#fff / grey in the dark
+     theme): that was the flat grey behind the rows */
+  .playControls__queue .queue__itemWrapper { background: transparent !important; background-color: transparent !important; }
+  .playControls__queue .queueItemView { height: 56px !important; box-sizing: border-box !important; display: flex !important; align-items: center !important;
+    gap: 10px !important; margin: 0 !important; padding: 0 8px 0 4px !important; border: 0 !important; border-radius: 10px !important;
+    background: transparent !important; transition: background .12s ease, opacity .12s ease !important; }
+  .playControls__queue .queueItemView:hover { background: rgba(255,255,255,0.06) !important; }
+  .playControls__queue .queueItemView.m-dimmed { opacity: .45 !important; }
+  .playControls__queue .queueItemView.m-dimmed:hover { opacity: 1 !important; }
+  .playControls__queue .queueItemView.m-active, .playControls__queue .queueItemView.m-playing {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 26%, transparent) !important; opacity: 1 !important; }
+  .playControls__queue .queueItemView__dragHandle { flex: 0 0 14px !important; width: 14px !important; margin: 0 !important; color: #8e8e99 !important;
+    opacity: 0 !important; cursor: grab !important; transition: opacity .12s ease !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__dragHandle { opacity: .7 !important; }
+  .playControls__queue .queueItemView__dragHandle svg { width: 14px !important; height: 14px !important; display: block !important; }
+  .playControls__queue .queueItemView__artwork { flex: 0 0 40px !important; position: relative !important; width: 40px !important; height: 40px !important; }
+  .playControls__queue .queueItemView__artworkImage { width: 40px !important; height: 40px !important; margin: 0 !important; border-radius: 6px !important; overflow: hidden !important; }
+  .playControls__queue .queueItemView__artworkImage::after { display: none !important; }
+  .playControls__queue .queueItemView__artworkImage .sc-artwork { width: 40px !important; height: 40px !important; border-radius: 6px !important; }
+  .playControls__queue .queueItemView__playButton { position: absolute !important; inset: 0 !important; display: flex !important; align-items: center !important;
+    justify-content: center !important; border-radius: 6px !important; background: rgba(0,0,0,0.5) !important; opacity: 0 !important; transition: opacity .12s ease !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__playButton { opacity: 1 !important; }
+  .playControls__queue .queueItemView__playButton .sc-button { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; background: none !important; box-shadow: none !important; color: #fff !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queueItemView__playButton .sc-button > div { width: 100% !important; height: 100% !important; margin: 0 !important;
+    display: flex !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queueItemView__playButton svg { display: block !important; width: 16px !important; height: 16px !important; margin: 0 !important; }
+  .playControls__queue .queueItemView__details { flex: 1 1 auto !important; min-width: 0 !important; display: flex !important; flex-direction: column-reverse !important;
+    justify-content: center !important; gap: 2px !important; margin: 0 !important; }
+  .playControls__queue .queueItemView__title, .playControls__queue .queueItemView__meta { min-width: 0 !important; margin: 0 !important; line-height: 1.25 !important; }
+  .playControls__queue .queueItemView__title a { font: 600 13px/1.25 Inter,-apple-system,Arial,sans-serif !important; color: #ececf1 !important;
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; -webkit-text-fill-color: currentColor !important; }
+  .playControls__queue .queueItemView.m-active .queueItemView__title a, .playControls__queue .queueItemView.m-playing .queueItemView__title a {
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; }
+  .playControls__queue .queueItemView__meta { display: flex !important; overflow: hidden !important; }
+  .playControls__queue .queueItemView__username { font: 500 11.5px/1.25 Inter,-apple-system,Arial,sans-serif !important; color: #8e8e99 !important;
+    -webkit-text-fill-color: currentColor !important; background: none !important; max-width: 100% !important; }
+  .playControls__queue .queueItemView__username:hover { color: #fff !important; }
+  .playControls__queue .queueItemView__context { display: none !important; }
+  .playControls__queue .queueItemView__duration { flex: none !important; min-width: 30px !important; margin: 0 !important; text-align: right !important;
+    font: 500 11px Inter,-apple-system,Arial,sans-serif !important; color: #7d7d88 !important; font-variant-numeric: tabular-nums !important; }
+  .playControls__queue .queueItemView__actions { display: none !important; flex: none !important; align-items: center !important; gap: 0 !important; margin: 0 !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__actions { display: flex !important; }
+  .playControls__queue .queueItemView:hover .queueItemView__duration { display: none !important; }
+  .playControls__queue .queueItemView__actions .sc-button { width: 28px !important; height: 28px !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; border-radius: 50% !important; background: transparent !important; box-shadow: none !important; color: #a6a6b0 !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+  .playControls__queue .queueItemView__actions .sc-button:hover { background: rgba(255,255,255,0.09) !important; color: #fff !important; }
+  .playControls__queue .queueItemView__actions .sc-button svg { width: 14px !important; height: 14px !important; }
+  .playControls__queue .queueItemView__like.sc-button-selected { color: var(--sc-accent, #ff5500) !important; }
+  /* autoplay station card + scrollbar */
+  .playControls__queue .queueFallback { margin: 6px 8px !important; padding: 12px 12px 12px 14px !important; box-sizing: border-box !important;
+    border-radius: 12px !important; border: 1px solid rgba(255,255,255,0.07) !important; background: rgba(255,255,255,0.035) !important; }
+  .playControls__queue .queueFallback__stationMode { display: flex !important; align-items: center !important; gap: 12px !important; padding: 0 !important; }
+  .playControls__queue .queueFallback__text { flex: 1 1 auto !important; min-width: 0 !important; }
+  .playControls__queue .queueFallback__heading { margin: 0 0 2px !important; font: 600 13px/1.3 Inter,-apple-system,Arial,sans-serif !important; color: #ececf1 !important; }
+  .playControls__queue .queueFallback__subheading { font: 400 11.5px/1.35 Inter,-apple-system,Arial,sans-serif !important; color: #8e8e99 !important; }
+  .playControls__queue .queueFallback .sc-toggle.sc-toggle-on { background-color: var(--sc-accent, #ff5500) !important; border-color: transparent !important; }
+  .playControls__queue .g-scrollbar { width: 4px !important; right: 3px !important; border-radius: 99px !important; background: rgba(255,255,255,0.22) !important; }
   html.hoq-no-frost .playControls__queue {
     background: rgba(14,14,18,0.97) !important;
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
@@ -1493,7 +1913,7 @@ const BASE_CSS = `
   /* ===== 3D lift on tab bars (profile tabs + library/collection nav) =====
      JS tilts the hovered tab toward the cursor; CSS gives it a lit accent lift.
      Gated by the "3D tab bars" toggle (html.hoq-no-tabtilt) and Low-end mode. */
-  .userInfoBar__tabs .profileTabs, .l-nav .collectionNav.g-tabs { perspective: 900px; }
+  .userInfoBar__tabs .profileTabs { perspective: 900px; }
   .userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link {
     transform-style: preserve-3d;
     transition: transform .16s cubic-bezier(.2,.7,.2,1), background .14s ease, color .14s ease, box-shadow .18s ease !important; }
@@ -1537,48 +1957,59 @@ const BASE_CSS = `
   /* settings note line */
   #sc-palette .pal-note { font-size: 11px; color: #8a8a90; line-height: 1.35; margin: 2px 2px 6px; }
 
-  .collectionNav.g-tabs {
-    display: flex !important; flex-direction: column !important;
-    align-items: stretch !important; gap: 3px !important;
-    background: rgba(12,12,16,0.42) !important; border: 1px solid rgba(255,255,255,0.10) !important;
-    border-radius: 14px !important; padding: 8px !important;
-    overflow: visible !important; box-sizing: border-box !important;
-    backdrop-filter: blur(24px) saturate(1.5) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
-    box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
+  /* ===== Library side nav: quiet list with icons (v1.6.2) =====
+     One look for every state: muted text + icon, soft hover, accent-tinted pick.
+     No glow, no 3D lift, no frosted box (the page is already the blurred cover). */
+  .collectionNav.g-tabs, .l-nav .collectionNav.g-tabs {
+    display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 2px !important;
+    background: rgba(255,255,255,0.035) !important; border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 14px !important; padding: 6px !important; overflow: visible !important; box-sizing: border-box !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; perspective: none !important;
   }
   .collectionNav.g-tabs li, .collectionNav.g-tabs .g-tabs-item {
     display: block !important; width: 100% !important; max-width: 100% !important;
-    margin: 0 !important; border: 0 !important; box-sizing: border-box !important;
+    margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: border-box !important;
   }
-  /* Kill SoundCloud's horizontal active-underline indicator (stray line when vertical) */
-  .collectionNav.g-tabs a::before, .collectionNav.g-tabs a::after,
-  .collectionNav.g-tabs li::before, .collectionNav.g-tabs li::after,
+  /* Overview on its own, then the rest */
+  .collectionNav.g-tabs .networkTabs__library { padding-bottom: 6px !important; margin-bottom: 4px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important; }
+  .collectionNav.g-tabs a::after, .collectionNav.g-tabs li::before, .collectionNav.g-tabs li::after,
   .collectionNav.g-tabs .active::after { display: none !important; content: none !important; }
-  .collectionNav.g-tabs a {
-    display: block !important; width: 100% !important; max-width: 100% !important; text-align: left !important;
-    padding: 10px 14px !important; border-radius: 9px !important; border: 0 !important;
-    box-sizing: border-box !important; color: #b7b7ba !important;
-    font-weight: 600 !important; font-size: 14px !important;
-    box-shadow: none !important; transition: background .12s ease, color .12s ease !important;
+  .collectionNav.g-tabs a, .collectionNav.g-tabs a.g-tabs-link {
+    display: flex !important; align-items: center !important; gap: 11px !important;
+    width: 100% !important; height: 36px !important; padding: 0 12px !important; margin: 0 !important;
+    border: 0 !important; border-radius: 9px !important; box-sizing: border-box !important; text-align: left !important;
+    color: #a6a6b0 !important; font-size: 13.5px !important; font-weight: 500 !important; letter-spacing: 0 !important;
+    background: transparent !important; box-shadow: none !important; text-shadow: none !important; transform: none !important;
+    transition: background .14s ease, color .14s ease !important;
   }
-  .collectionNav.g-tabs a:hover {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 10%, rgba(255,255,255,0.05)) !important;
-    color: #fff !important;
-    box-shadow: 0 0 13px color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
+  .collectionNav.g-tabs a::before {
+    content: '' !important; display: block !important; position: static !important; flex: 0 0 18px !important;
+    width: 18px !important; height: 18px !important; border: 0 !important; background: currentColor !important; opacity: .75;
+    -webkit-mask: var(--hoq-ni) center / 18px 18px no-repeat; mask: var(--hoq-ni) center / 18px 18px no-repeat;
+    transition: opacity .14s ease, background .14s ease !important;
   }
-  /* Selected item: ONE clear indicator instead of bg + border + inset bar +
-     outer glow + text glow all stacked (which read as boxy). A soft accent
-     wash, the left accent bar, and accent text — nothing else. */
+  .collectionNav.g-tabs a:hover { background: rgba(255,255,255,0.06) !important; color: #f2f2f5 !important; box-shadow: none !important; }
+  .collectionNav.g-tabs a:hover::before { opacity: 1; }
   .collectionNav.g-tabs .active a, .collectionNav.g-tabs a.active,
-  .collectionNav.g-tabs li.active a, .collectionNav.g-tabs [aria-current] a,
-  .collectionNav.g-tabs a[aria-current] {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
-    color: color-mix(in srgb, var(--sc-accent, #ff5500) 70%, #ffffff) !important;
-    font-weight: 700 !important; border: 0 !important;
-    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important;
-    text-shadow: none !important;
+  .collectionNav.g-tabs li.active a, .collectionNav.g-tabs [aria-current] a, .collectionNav.g-tabs a[aria-current],
+  html.hoq-no-glow .collectionNav.g-tabs .active a, html.hoq-no-glow .collectionNav.g-tabs a.active {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 16%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #ffffff) !important;
+    font-weight: 600 !important; border: 0 !important; text-shadow: none !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 30%, transparent) !important;
   }
+  .collectionNav.g-tabs a.active::before, .collectionNav.g-tabs .active a::before {
+    background: var(--sc-accent, #ff5500) !important; opacity: 1; }
+  .collectionNav.g-tabs .networkTabs__library a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Crect%20x%3D%273.5%27%20y%3D%273.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3Crect%20x%3D%2713.5%27%20y%3D%273.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3Crect%20x%3D%273.5%27%20y%3D%2713.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3Crect%20x%3D%2713.5%27%20y%3D%2713.5%27%20width%3D%277%27%20height%3D%277%27%20rx%3D%271.6%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__likes a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%2020s-7.5-4.6-7.5-10.2A4.3%204.3%200%200%201%2012%207.2a4.3%204.3%200%200%201%207.5%202.6C19.5%2015.4%2012%2020%2012%2020z%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__sets a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%206h11M4%2011h11M4%2016h7%27%2F%3E%3Ccircle%20cx%3D%2716.5%27%20cy%3D%2717%27%20r%3D%272.5%27%2F%3E%3Cpath%20d%3D%27M19%2017V8.5l2%20.8%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__albums a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%278.5%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%272.5%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__stations a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%271.8%27%2F%3E%3Cpath%20d%3D%27M8.2%208.2a5.4%205.4%200%200%200%200%207.6M15.8%208.2a5.4%205.4%200%200%201%200%207.6M5.4%205.4a9.3%209.3%200%200%200%200%2013.2M18.6%205.4a9.3%209.3%200%200%201%200%2013.2%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__following a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%279%27%20cy%3D%278%27%20r%3D%273.5%27%2F%3E%3Cpath%20d%3D%27M2.5%2020a6.5%206.5%200%200%201%2013%200M16%204.6a3.5%203.5%200%200%201%200%206.8M18.2%2014.2A6.5%206.5%200%200%201%2021.5%2020%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__purchases a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M5%208h14l-1.2%2012H6.2z%27%2F%3E%3Cpath%20d%3D%27M9%208V6.5a3%203%200%200%201%206%200V8%27%2F%3E%3C%2Fsvg%3E"); }
+  .collectionNav.g-tabs .networkTabs__history a { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%278.5%27%2F%3E%3Cpath%20d%3D%27M12%207.5V12l3%202%27%2F%3E%3C%2Fsvg%3E"); }
+  html.hoq-lowend .collectionNav.g-tabs { background: rgba(16,16,20,0.98) !important; }
 
   /* ===== Library "Filter" input — themed field with accent focus glow ===== */
   .textfield__inputWrapper .textfield__input, .collectionSection .textfield__input {
@@ -1710,11 +2141,10 @@ const BASE_CSS = `
     padding: 0 !important; height: auto !important; max-height: none !important; overflow: visible !important;
   }
   .l-fixed-left .searchOptions__navigation {
-    background: rgba(12,12,16,0.42) !important;
-    border: 1px solid rgba(255,255,255,0.10) !important; border-radius: 14px !important;
-    box-shadow: 0 18px 52px rgba(0,0,0,0.5) !important;
-    backdrop-filter: blur(24px) saturate(1.5) !important; -webkit-backdrop-filter: blur(24px) saturate(1.5) !important;
-    padding: 8px !important;
+    display: flex !important; flex-direction: column !important; gap: 2px !important; margin: 0 !important;
+    background: rgba(255,255,255,0.035) !important; border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 14px !important; padding: 6px !important; box-shadow: none !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
   }
   /* "Search results for …" title bar — was a solid black block; make it see-through. */
   .l-search .l-fixed-top, .l-search .searchTitle, .l-search .searchTitle__text {
@@ -1724,15 +2154,41 @@ const BASE_CSS = `
   }
   .l-search .searchTitle__text { text-shadow: 0 1px 8px rgba(0,0,0,0.55) !important; }
 
-  .searchOptions__navigationItem { border-radius: 9px !important; transition: background .12s ease !important; }
-  .searchOptions__navigationItem .searchOptions__navigationLink { color: #b7b7ba !important; }
-  .searchOptions__navigationItem:hover { background: rgba(255,255,255,0.06) !important; }
-  .searchOptions__navigationItem:hover .searchOptions__navigationLink { color: #fff !important; }
-  .searchOptions__navigationItem.active {
-    background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
-    box-shadow: inset 3px 0 0 var(--sc-accent, #ff5500) !important;
+  /* Search filters: same quiet icon list as the Library nav (v1.6.15).
+     "Everything" sits on its own above the type filters. */
+  .searchOptions__navigationItem { display: block !important; width: 100% !important; max-width: none !important;
+    margin: 0 !important; padding: 0 !important; border: 0 !important; box-sizing: border-box !important;
+    border-radius: 9px !important; background: transparent !important; box-shadow: none !important; }
+  .searchOptions__navigationItem.g-nav-item-search { padding-bottom: 6px !important; margin-bottom: 4px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important; border-radius: 0 !important; }
+  .searchOptions__navigationItem .searchOptions__navigationLink {
+    display: flex !important; align-items: center !important; gap: 11px !important; height: 36px !important;
+    width: 100% !important; padding: 0 12px !important; border-radius: 9px !important; box-sizing: border-box !important;
+    background: transparent !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important;
+    color: #a6a6b0 !important; font-size: 13.5px !important; font-weight: 500 !important; line-height: 1 !important;
+    letter-spacing: 0 !important; text-decoration: none !important; white-space: nowrap !important;
+    transition: background .14s ease, color .14s ease !important;
   }
-  .searchOptions__navigationItem.active .searchOptions__navigationLink { color: var(--sc-accent, #ff5500) !important; }
+  .searchOptions__navigationLink::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px; background: currentColor; opacity: .75;
+    -webkit-mask: var(--hoq-ni) center / 18px 18px no-repeat; mask: var(--hoq-ni) center / 18px 18px no-repeat;
+    transition: opacity .14s ease, background .14s ease;
+  }
+  .searchOptions__navigationItem:hover .searchOptions__navigationLink { background: rgba(255,255,255,0.06) !important; color: #f2f2f5 !important; }
+  .searchOptions__navigationItem:hover .searchOptions__navigationLink::before { opacity: 1; }
+  .searchOptions__navigationItem.active .searchOptions__navigationLink {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 16%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #ffffff) !important; font-weight: 600 !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 30%, transparent) !important;
+  }
+  .searchOptions__navigationItem.active .searchOptions__navigationLink::before { background: var(--sc-accent, #ff5500); opacity: 1; }
+  .searchOptions__navigationItem.g-nav-item-search { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2711%27%20cy%3D%2711%27%20r%3D%276.5%27%2F%3E%3Cpath%20d%3D%27M20%2020l-4.2-4.2%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-high_tier { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%203.5l1.8%204.9%204.9%201.8-4.9%201.8L12%2016.9l-1.8-4.9-4.9-1.8%204.9-1.8z%27%2F%3E%3Cpath%20d%3D%27M18.5%2015.5l.7%201.8%201.8.7-1.8.7-.7%201.8-.7-1.8-1.8-.7%201.8-.7z%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-sounds { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%2010v4M8%207v10M12%204v16M16%208v8M20%2011v2%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-people { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%279%27%20cy%3D%278%27%20r%3D%273.5%27%2F%3E%3Cpath%20d%3D%27M2.5%2020a6.5%206.5%200%200%201%2013%200M16%204.6a3.5%203.5%200%200%201%200%206.8M18.2%2014.2A6.5%206.5%200%200%201%2021.5%2020%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-albums { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%278.5%27%2F%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%272.5%27%2F%3E%3C%2Fsvg%3E"); }
+  .searchOptions__navigationItem.searchOptions__navigation-playlists { --hoq-ni: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M4%206h11M4%2011h11M4%2016h7%27%2F%3E%3Ccircle%20cx%3D%2716.5%27%20cy%3D%2717%27%20r%3D%272.5%27%2F%3E%3Cpath%20d%3D%27M19%2017V8.5l2%20.8%27%2F%3E%3C%2Fsvg%3E"); }
 
   /* ===== Search suggestions dropdown → acrylic, see-through (was solid black) ===== */
   :has(> #searchMenuList), .headerSearch__autosuggests, .searchAutosuggests,
@@ -1940,7 +2396,12 @@ const BASE_CSS = `
     -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10.268 21a2 2 0 0 0 3.464 0'/><path d='M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326'/></svg>") !important;
     mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10.268 21a2 2 0 0 0 3.464 0'/><path d='M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326'/></svg>") !important;
   }
+  /* plain bubble; the notched one (dot drawn in the notch) only when unread */
   .notificationIcon.messages > div {
+    -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'/></svg>") !important;
+    mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z'/></svg>") !important;
+  }
+  .notificationIcon.messages[class*='newItems__'] > div {
     -webkit-mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12.7 3H4a2 2 0 0 0-2 2v16.286a.71.71 0 0 0 1.212.502l2.202-2.202A2 2 0 0 1 6.828 19H20a2 2 0 0 0 2-2v-4.7'/><circle cx='19' cy='6' r='3'/></svg>") !important;
     mask-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12.7 3H4a2 2 0 0 0-2 2v16.286a.71.71 0 0 0 1.212.502l2.202-2.202A2 2 0 0 1 6.828 19H20a2 2 0 0 0 2-2v-4.7'/><circle cx='19' cy='6' r='3'/></svg>") !important;
   }
@@ -2223,21 +2684,112 @@ const BASE_CSS = `
   /* Style ONLY the action-menu rows (Repost / Share / Add to Playlist…). Those
      dropdowns have no .dropdownContent, unlike Notifications/DMs — so this leaves
      the notification + message layouts completely alone. */
-  .dropdownMenu:not(:has(.dropdownContent)) .sc-button,
-  .dropdownMenu:not(:has(.dropdownContent)) button,
-  .dropdownMenu:not(:has(.dropdownContent)) a[role="menuitem"] {
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) .sc-button,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) button,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) a[role="menuitem"] {
     display: flex !important; align-items: center !important; gap: 10px !important;
     width: 100% !important; justify-content: flex-start !important; text-align: left !important;
     background: transparent !important; border: 0 !important; box-shadow: none !important;
     border-radius: 8px !important; color: #d4d4d7 !important; font-weight: 600 !important;
     padding: 8px 11px !important; transition: background .12s ease, color .12s ease !important;
   }
-  .dropdownMenu:not(:has(.dropdownContent)) .sc-button:hover,
-  .dropdownMenu:not(:has(.dropdownContent)) button:hover,
-  .dropdownMenu:not(:has(.dropdownContent)) a[role="menuitem"]:hover {
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) .sc-button:hover,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) button:hover,
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) a[role="menuitem"]:hover {
     background: var(--sc-accent, #ff5500) !important; color: #fff !important;
   }
-  .dropdownMenu:not(:has(.dropdownContent)) .sc-button:hover * { color: #fff !important; }
+  .dropdownMenu:not(:has(.dropdownContent, .dropdownContent__container)) .sc-button:hover * { color: #fff !important; }
+
+  /* ===== Notifications / Messages popovers: same family as the other menus =====
+     avatar | who + what + when | action (follow pill or the track's artwork) */
+  .dropdownMenu:has(.dropdownContent__container) {
+    background: rgba(12,12,16,0.82) !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 14px !important; box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
+  }
+  .dropdownContent__container { padding: 6px !important; }
+  /* SoundCloud sizes its scroll wrapper wider than the box to tuck a scrollbar
+     away; scrollbars are hidden here, so that extra width just pushed the right
+     edge (the Follow back pill) out of the frame. Pin everything to the box. */
+  .dropdownMenu:has(.dropdownContent__container) .g-scrollable, .dropdownMenu:has(.dropdownContent__container) .g-scrollable-inner,
+  .dropdownMenu:has(.dropdownContent__container) [class*="__scrollable"] {
+    width: auto !important; max-width: 100% !important; margin-right: 0 !important; padding-right: 0 !important;
+    box-sizing: border-box !important; overflow-x: hidden !important; }
+  .dropdownMenu .dropdownContent, .dropdownMenu .dropdownContent__container, .dropdownMenu .dropdownContent__list,
+  .dropdownMenu .dropdownContent__listItem { max-width: 100% !important; box-sizing: border-box !important; }
+  .dropdownContent__header { display: flex !important; align-items: center !important; justify-content: space-between !important;
+    padding: 6px 8px 10px !important; border: 0 !important; }
+  .dropdownContent__header h2 { font-size: 13px !important; font-weight: 600 !important; color: #ececf1 !important; letter-spacing: 0 !important; margin: 0 !important; }
+  .dropdownContent__headerButton { font-size: 12px !important; font-weight: 500 !important; color: #8e8e99 !important; text-decoration: none !important; }
+  .dropdownContent__headerButton:hover { color: #fff !important; }
+  .dropdownContent__list { margin: 0 !important; padding: 0 !important; }
+  .dropdownContent__listItem { margin: 0 !important; padding: 0 !important; border: 0 !important; background: transparent !important; }
+  .dropdownContent__listItem + .dropdownContent__listItem { margin-top: 2px !important; }
+  .notificationBadge__linkContainer { position: relative !important; border-radius: 10px !important; transition: background .12s ease !important; }
+  .notificationBadge__linkContainer:hover { background: rgba(255,255,255,0.06) !important; }
+  .notificationBadge, .notificationBadge.m-small { background: transparent !important; border: 0 !important; padding: 8px !important; margin: 0 !important;
+    width: auto !important; max-width: 100% !important; box-sizing: border-box !important; }
+  .notificationBadge__linkContainer, .notificationBadge__row { max-width: 100% !important; box-sizing: border-box !important; }
+  .notificationBadge__row { display: flex !important; align-items: center !important; gap: 11px !important; width: 100% !important; }
+  .notificationBadge__side { flex: none !important; position: relative !important; z-index: 2 !important; margin: 0 !important; padding: 0 !important; }
+  .notificationBadge__side:last-child { margin-left: auto !important; }
+  .notificationBadge__main { flex: 1 1 auto !important; min-width: 0 !important; display: flex !important; flex-direction: column !important; gap: 2px !important;
+    font-size: 12.5px !important; line-height: 1.35 !important; color: #a6a6b0 !important; }
+  .notificationBadge__main .sc-text-secondary { color: #a6a6b0 !important; }
+  .notificationBadge__username { font-size: 12.5px !important; font-weight: 600 !important; color: #f0f0f4 !important; margin: 0 4px 0 0 !important; }
+  /* the global gradient-text link rule (.sc-text-primary / .sc-link-primary) turns
+     names into a muddy cover gradient here: plain solid text in these popovers */
+  .dropdownMenu .sc-text-primary, .dropdownMenu .sc-link-primary, .dropdownMenu .notificationBadge__username {
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; }
+  .dropdownMenu .notificationBadge__username { color: #f0f0f4 !important; }
+  .notificationBadge__main .sc-text-h5 { font-size: inherit !important; }
+  .notificationBadge .userAvatarBadge__imageContainer, .notificationBadge .userAvatarBadge__image {
+    width: 36px !important; height: 36px !important; border-radius: 50% !important; }
+  .notificationBadge .activityBadge__artwork { display: block !important; width: 36px !important; height: 36px !important;
+    border-radius: 7px !important; background-size: cover !important; }
+  .activityBadge__timeIndicator { display: inline-flex !important; align-items: center !important; gap: 4px !important;
+    font-size: 11px !important; color: #7d7d88 !important; padding: 0 !important; }
+  .activityBadge__icon { width: 11px !important; height: 11px !important; opacity: .8 !important; }
+  /* follow pill: "Follow back" = accent tint, "Following" = quiet */
+  .notificationBadge .sc-button-follow { height: 26px !important; min-width: 0 !important; padding: 0 11px !important; border-radius: 99px !important;
+    font-size: 11.5px !important; font-weight: 600 !important; box-shadow: none !important; border: 0 !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; }
+  .notificationBadge .sc-button-follow:hover { background: color-mix(in srgb, var(--sc-accent, #ff5500) 32%, transparent) !important; }
+  .notificationBadge .sc-button-follow.sc-button-selected { background: rgba(255,255,255,0.07) !important; color: #a6a6b0 !important; }
+  .notificationBadge .sc-button-follow.sc-button-selected:hover { background: rgba(255,90,70,0.12) !important; color: #ff8a7a !important; }
+  .dropdownContent__footerLink { display: block !important; margin: 6px 0 0 !important; padding: 10px 8px 6px !important; text-align: center !important;
+    border-top: 1px solid rgba(255,255,255,0.07) !important; font-size: 12px !important; font-weight: 500 !important;
+    color: #a6a6b0 !important; text-decoration: none !important; }
+  .dropdownContent__footerLink:hover { color: #fff !important; }
+
+  /* ===== Header "..." menu (.moreMenu): same look as the EQ / output menus ===== */
+  .dropdownMenu:has(.moreMenu) {
+    background: rgba(12,12,16,0.78) !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 14px !important; box-shadow: 0 18px 52px rgba(0,0,0,0.55) !important;
+    /* never taller than the window: scroll instead of running off the bottom */
+    max-height: calc(100vh - 64px) !important; overflow-y: auto !important; overflow-x: hidden !important; overscroll-behavior: contain;
+  }
+  .moreMenu, .moreMenu.m-light { width: 220px !important; padding: 6px !important; box-sizing: border-box !important;
+    background: transparent !important; border: 0 !important; box-shadow: none !important; }
+  .moreMenu .headerMenu__list { margin: 0 !important; padding: 0 !important; border: 0 !important; }
+  .moreMenu .headerMenu__list + .headerMenu__list { margin-top: 4px !important; padding-top: 4px !important;
+    border-top: 1px solid rgba(255,255,255,0.07) !important; }
+  .moreMenu .headerMenu__link, .moreMenu .moreMenu__link {
+    display: flex !important; align-items: center !important; height: 30px !important; padding: 0 10px !important;
+    border: 0 !important; border-radius: 8px !important; background: transparent !important; box-shadow: none !important;
+    color: #d6d6de !important; font-size: 13px !important; font-weight: 500 !important; text-decoration: none !important;
+    transition: background .12s ease, color .12s ease !important;
+  }
+  .moreMenu .headerMenu__link:hover, .moreMenu .moreMenu__link:hover, .moreMenu .headerMenu__link:focus-visible {
+    background: rgba(255,255,255,0.07) !important; color: #fff !important;
+  }
+  /* Go+ upsell: a quiet accent line, not a shout */
+  .moreMenu .moreMenu__link.m-highlight { color: color-mix(in srgb, var(--sc-accent, #ff5500) 65%, #fff) !important; }
+  .moreMenu .moreMenu__link.m-highlight:hover { background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important; }
+  /* Sign out: muted, warns on hover */
+  .moreMenu a[href="/logout"] { color: #9a9aa6 !important; }
+  .moreMenu a[href="/logout"]:hover { color: #ff8a7a !important; background: rgba(255,90,70,0.10) !important; }
 
   /* ===== Comment-sort dropdown (.linkMenu: Newest / Oldest / Track Time) =====
      Same acrylic glass as the header popovers (.dropdownMenu) — low-alpha fill so
@@ -2298,6 +2850,31 @@ const BASE_CSS = `
     box-shadow: 0 0 15px color-mix(in srgb, var(--sc-accent, #ff5500) 32%, transparent) !important;
   }
   .commentsList__sortSelect .select__dropdownButton svg { fill: currentColor !important; }
+  /* Profile header: SoundCloud prints the name / city on hard black boxes over
+     the banner. Drop the boxes; a soft shadow keeps them readable on any banner. */
+  .profileHeaderInfo [class*="g-type-shrinkwrap"] {
+    background: none !important; background-color: transparent !important; padding-left: 0 !important; padding-right: 0 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,.7), 0 2px 14px rgba(0,0,0,.55) !important; }
+  .profileHeaderInfo__userName { color: #fff !important; -webkit-text-fill-color: #fff !important; }
+  .profileHeaderInfo__additional[class*="g-type-shrinkwrap"] { color: rgba(255,255,255,.82) !important; -webkit-text-fill-color: currentColor !important; }
+  .profileHeaderInfo__content br { display: none; }
+  .profileHeaderInfo__content > h3 { display: block !important; margin-top: 4px !important; }
+  /* Notifications page filter ("All notifications ▾"): a quiet pill, same
+     family as the menus it opens */
+  .activitiesFilterSelect__button.sc-button {
+    display: inline-flex !important; align-items: center !important; gap: 6px !important;
+    height: 32px !important; padding: 0 10px 0 13px !important; margin-right: 8px !important;
+    background: rgba(255,255,255,0.05) !important; border: 1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 99px !important; box-shadow: none !important; text-shadow: none !important;
+    color: #e4e4ea !important; font-size: 13px !important; font-weight: 600 !important; line-height: 1 !important; letter-spacing: 0 !important;
+    -webkit-text-fill-color: currentColor !important; transition: background .12s ease, border-color .12s ease !important;
+  }
+  .activitiesFilterSelect__button.sc-button:hover, .activitiesFilterSelect__button.sc-button[aria-expanded="true"] {
+    background: rgba(255,255,255,0.09) !important; border-color: rgba(255,255,255,0.16) !important; color: #fff !important; }
+  .activitiesFilterSelect__button svg { width: 14px !important; height: 14px !important; padding: 0 !important; margin: 0 !important;
+    opacity: .65; transition: transform .15s ease, opacity .12s ease; }
+  .activitiesFilterSelect__button:hover svg { opacity: 1; }
+  .activitiesFilterSelect__button[aria-expanded="true"] svg { transform: rotate(180deg); }
 
   /* ===== Modals incl. the Share popup — acrylic glass ===== */
   .modal__modal, .g-modal, .shareSheet, .sharePanel, .share__inner,
@@ -2314,6 +2891,168 @@ const BASE_CSS = `
     background: rgba(0,0,0,0.5) !important;
     backdrop-filter: blur(5px) !important; -webkit-backdrop-filter: blur(5px) !important;
   }
+
+  /* ===== Header, right side: one tidy grouped row =====
+     Upload | output · EQ · mini | notifications · messages · more | avatar.
+     .header__userNav becomes display:contents so its buttons line up (and
+     reorder) with ours in the one flex row; the avatar goes last. */
+  .header__right { display: flex !important; align-items: center !important; gap: 2px !important; }
+  .header__userNav { display: contents !important; }
+  .header__soundInput, .header__upload { order: 1; margin-right: 10px !important; }
+  #hoq-out-btn { order: 2; } #hoq-eq-btn { order: 3; } #hoq-mini-btn { order: 4; }
+  .header__loginMenu { order: 5; margin-left: 8px !important; }
+  .header__userNavActivitiesButton { order: 6; } .header__userNavMessagesButton { order: 7; }
+  .header__right > .header__navMenu { order: 8; margin: 0 !important; }
+  .header__userNavUsernameButton { order: 9; }
+  .header__right > .header__navMenu li { display: flex !important; }
+  /* every icon button: same size, same grey, soft hover tile, no glow */
+  .header #hoq-out-btn, .header .hoq-hdr-icon, .header .header__userNavActivitiesButton,
+  .header .header__userNavMessagesButton, .header .header__moreButton {
+    position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    width: 34px !important; height: 34px !important; margin: 0 !important; padding: 0 !important; border: 0 !important;
+    border-radius: 10px !important; background: transparent !important; box-shadow: none !important; filter: none !important;
+    color: #a6a6b0 !important; transition: background .12s ease, color .12s ease !important; }
+  .header #hoq-out-btn:hover, .header .hoq-hdr-icon:hover, .header .header__userNavActivitiesButton:hover,
+  .header .header__userNavMessagesButton:hover, .header .header__moreButton:hover {
+    background: rgba(255,255,255,0.08) !important; color: #fff !important; filter: none !important; }
+  .header #hoq-out-btn svg, .header .hoq-hdr-icon svg { width: 19px !important; height: 19px !important; }
+  .header .header__userNavActivitiesButton svg, .header .header__userNavMessagesButton svg { width: 21px !important; height: 21px !important; }
+  .header .header__moreButton svg { width: 17px !important; height: 17px !important; }
+  .header .header__userNavActivitiesButton *, .header .header__userNavMessagesButton *, .header .header__moreButton * { color: inherit !important; }
+  .header .notificationIcon, .header .header__moreButtonIcon { display: flex !important; align-items: center !important; justify-content: center !important; position: relative !important; }
+  /* "on" (output pinned / effects active): a small accent dot, not a whole orange icon */
+  .header #hoq-out-btn.on, .header .hoq-hdr-icon.on { color: #a6a6b0 !important; }
+  .header #hoq-out-btn.on:hover, .header .hoq-hdr-icon.on:hover { color: #fff !important; }
+  .header #hoq-out-btn.on::after, .header .hoq-hdr-icon.on::after { content: ''; position: absolute; top: 6px; right: 6px; width: 6px; height: 6px;
+    border-radius: 50%; background: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff); box-shadow: 0 0 0 2px rgba(10,10,14,0.55); }
+  /* unread badge: the same small dot, in the same spot */
+  /* the glyph box is exactly 22x22, so the dot can sit on a known spot: in the
+     message bubble's notch (circle at 19,6 of 24), on the bell's top-right */
+  .header .notificationIcon { width: 22px !important; height: 22px !important; }
+  .header .notificationIcon__badge { position: absolute !important; margin: 0 !important; padding: 0 !important; line-height: 0 !important; right: auto !important; bottom: auto !important; }
+  .header .notificationIcon.messages .notificationIcon__badge { left: 13.4px !important; top: 1.5px !important; }
+  .header .notificationIcon.activities .notificationIcon__badge { left: 13px !important; top: 0 !important; }
+  .header .notificationIcon__badge .newItemBadge { display: none !important; }
+  .header .notificationIcon[class*='newItems__'] .newItemBadge, .header .newItemBadge[class*='newItems__'] {
+    display: block !important; position: static !important; margin: 0 !important; width: 8px !important; height: 8px !important; min-width: 0 !important; padding: 0 !important;
+    border-radius: 50% !important; background: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff) !important;
+    box-shadow: 0 0 0 2px rgba(10,10,14,0.55) !important; font-size: 0 !important; }
+  /* group dividers */
+  .header #hoq-out-btn { margin-left: 2px !important; }
+  .header .header__userNavActivitiesButton { margin-left: 13px !important; }
+  .header .header__userNavActivitiesButton::before, .header .header__userNavUsernameButton::before {
+    content: ''; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 1px; background: rgba(255,255,255,0.12); }
+  /* avatar last: small pill with a quiet chevron */
+  .header .header__userNavUsernameButton { position: relative !important; display: inline-flex !important; align-items: center !important; gap: 3px !important;
+    height: 34px !important; margin: 0 0 0 13px !important; padding: 0 6px 0 4px !important; border-radius: 99px !important;
+    background: transparent !important; transition: background .12s ease !important; }
+  .header .header__userNavUsernameButton:hover { background: rgba(255,255,255,0.08) !important; }
+  .header .header__userNavAvatar, .header .header__userNavAvatar .sc-artwork {
+    width: 26px !important; height: 26px !important; border-radius: 50% !important;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.16) !important; filter: none !important; }
+  .header .header__userNavUsernameButtonIcon { margin: 0 !important; color: #8e8e99 !important; display: flex !important; }
+  .header .header__userNavUsernameButtonIcon svg { width: 12px !important; height: 12px !important; }
+  .header .header__userNavUsernameButtonIcon, .header .header__userNavUsernameButtonIcon > div { display: flex !important; align-items: center !important; height: 34px !important; margin: 0 !important; padding: 0 !important; }
+  .header .header__userNavUsernameButtonIcon svg { display: block !important; }
+  /* ===== SoundCloud's little notices ("… was saved to your Library") =====
+     Same card as the app's own toasts: bottom-right above the player, cover,
+     title, a muted line; the × shows on hover. */
+  #gritter-notice-wrapper { position: fixed !important; top: auto !important; left: auto !important;
+    right: 18px !important; bottom: 96px !important; width: 330px !important; z-index: 2147483500 !important; }
+  .gritter-item-wrapper { position: relative !important; margin: 8px 0 0 !important; background: none !important;
+    display: block !important; width: auto !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; border-radius: 0 !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    animation: hoqGritIn .32s cubic-bezier(.2,.9,.3,1) both; }
+  @keyframes hoqGritIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  .gritter-top, .gritter-bottom { display: none !important; }
+  .gritter-item { display: flex !important; align-items: center !important; gap: 12px !important; margin: 0 !important;
+    padding: 10px 34px 10px 10px !important; border-radius: 14px !important; min-height: 0 !important;
+    background: rgba(20,20,24,0.78) !important; border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5) !important; color: #fff !important;
+    backdrop-filter: blur(22px) saturate(1.6) !important; -webkit-backdrop-filter: blur(22px) saturate(1.6) !important;
+    font: 500 13px/1.35 Inter,-apple-system,Arial,sans-serif !important; }
+  .gritter-item > div[style*="clear"] { display: none !important; }
+  .gritter-image { float: none !important; flex: none !important; width: 40px !important; height: 40px !important; margin: 0 !important;
+    border-radius: 8px !important; object-fit: cover !important; box-shadow: 0 2px 8px rgba(0,0,0,0.35) !important; }
+  .gritter-with-image, .gritter-without-image { float: none !important; flex: 1 1 auto !important; min-width: 0 !important; width: auto !important;
+    display: flex !important; flex-direction: column !important; gap: 1px !important; padding: 0 !important; margin: 0 !important; }
+  .gritter-item p { margin: 0 !important; padding: 0 !important; }
+  .gritter-item p:empty { display: none !important; }
+  .gritter-title { display: block !important; margin: 0 !important; padding: 0 !important; color: #fff !important; text-shadow: none !important;
+    font: 600 13px/1.3 Inter,-apple-system,Arial,sans-serif !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+  .gritter-item .sc-text-secondary { color: #a6a6b0 !important; font-size: 12px !important; }
+  .gritter-item a.sc-link-primary { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff) !important; font-weight: 600 !important; }
+  .gritter-item a.sc-link-primary:hover { text-decoration: underline !important; }
+  .gritter-close { display: flex !important; align-items: center !important; justify-content: center !important;
+    position: absolute !important; top: 50% !important; right: 8px !important; left: auto !important; width: 22px !important; height: 22px !important;
+    margin: -11px 0 0 !important; border-radius: 50% !important; background: transparent !important; color: #8e8e99 !important;
+    opacity: 0 !important; transition: opacity .12s ease, background .12s ease !important; text-indent: 0 !important; }
+  .gritter-item-wrapper:hover .gritter-close { opacity: 1 !important; }
+  .gritter-close:hover { background: rgba(255,255,255,0.1) !important; color: #fff !important; }
+  .gritter-close svg { width: 11px !important; height: 11px !important; }
+  /* "Go to playlist" under the Discover / made-for-you rows: slim pill + arrow */
+  .selectionModulePlaylistLink .sc-button {
+    display: inline-flex !important; align-items: center !important; gap: 7px !important;
+    height: 30px !important; padding: 0 12px 0 14px !important; margin: 0 !important; border-radius: 99px !important;
+    border: 1px solid rgba(255,255,255,0.12) !important; background: rgba(255,255,255,0.05) !important;
+    color: #e4e4ea !important; -webkit-text-fill-color: currentColor !important; box-shadow: none !important; text-shadow: none !important;
+    font: 600 12.5px/1 Inter,-apple-system,Arial,sans-serif !important; letter-spacing: 0 !important; white-space: nowrap !important;
+    transition: background .14s ease, border-color .14s ease, color .14s ease !important; }
+  .selectionModulePlaylistLink .sc-button::after {
+    content: ''; width: 12px; height: 12px; flex: none; background: currentColor; opacity: .75;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+    transition: transform .16s ease, opacity .14s ease; }
+  .selectionModulePlaylistLink .sc-button:hover {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 20%, transparent) !important;
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important; color: #fff !important; }
+  .selectionModulePlaylistLink .sc-button:hover::after { transform: translateX(2px); opacity: 1; }
+  /* ===== Player bar: cleaned up =====
+     Times, volume and the song text are quiet (no orange paint); the play
+     button carries the accent on its own; the right-side actions are even
+     tiles with a hover, like the header. */
+  .playControls .playbackTimeline__timePassed, .playControls .playbackTimeline__duration,
+  .playControls .playbackTimeline__timePassed *, .playControls .playbackTimeline__duration * {
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; color: #8e8e99 !important; border-color: transparent !important;
+    font-family: Inter,-apple-system,Arial,sans-serif !important; font-size: 11.5px !important; font-weight: 500 !important; font-variant-numeric: tabular-nums !important; }
+  .playControls .playbackTimeline__timePassed span[aria-hidden], .playControls .playbackTimeline__timePassed > span:last-child { color: #c9c9d2 !important; }
+  .playControls .volume__button, .playControls .volume__button * { color: #a6a6b0 !important; fill: currentColor !important; background: transparent !important; border-color: transparent !important; }
+  .playControls .volume__button:hover, .playControls .volume__button:hover * { color: #fff !important; }
+  .playControls .hoq-vol-pct { color: #8e8e99 !important; font: 500 11px Inter,-apple-system,Arial,sans-serif !important; font-variant-numeric: tabular-nums !important; }
+  .playControls .playControls__play { border-radius: 10px !important; box-shadow: none !important; color: #fff !important;
+    background-color: var(--sc-accent, #ff5500) !important; transition: filter .12s ease, transform .1s ease !important; }
+  .playControls .playControls__play:hover { filter: brightness(1.1) !important; }
+  .playControls .playControls__play:active { transform: scale(.95) !important; }
+  .playControls .playControls__play svg { color: #fff !important; fill: #fff !important; }
+  .playbackSoundBadge .playbackSoundBadge__titleLink, .playbackSoundBadge .playbackSoundBadge__titleLink span {
+    background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+    -webkit-text-fill-color: currentColor !important; color: #ececf1 !important; font-weight: 600 !important; text-shadow: none !important; }
+  .playbackSoundBadge .playbackSoundBadge__lightLink { color: #8e8e99 !important; -webkit-text-fill-color: currentColor !important; background: none !important; }
+  .playbackSoundBadge .playbackSoundBadge__titleLink:hover, .playbackSoundBadge .playbackSoundBadge__lightLink:hover { color: #fff !important; }
+  .playbackSoundBadge__actions { display: flex !important; align-items: center !important; gap: 2px !important; }
+  .playbackSoundBadge__actions > .sc-button, .playbackSoundBadge__actions > #hoq-ambient-btn,
+  .playbackSoundBadge__actions > #hoq-playbtn, .playbackSoundBadge__actions > #hoq-share {
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    width: 32px !important; height: 32px !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; border-radius: 9px !important; background: transparent !important; box-shadow: none !important;
+    color: #a6a6b0 !important; filter: none !important; transition: background .12s ease, color .12s ease !important; }
+  .playbackSoundBadge__actions > .sc-button:hover, .playbackSoundBadge__actions > #hoq-ambient-btn:hover,
+  .playbackSoundBadge__actions > #hoq-playbtn:hover, .playbackSoundBadge__actions > #hoq-share:hover {
+    background: rgba(255,255,255,0.08) !important; color: #fff !important; }
+  .playbackSoundBadge__actions > .sc-button svg, .playbackSoundBadge__actions > button svg { width: 16px !important; height: 16px !important; }
+  .playbackSoundBadge__actions > .sc-button-like.sc-button-selected,
+  .playbackSoundBadge__actions > .sc-button-follow.sc-button-selected { color: var(--sc-accent, #ff5500) !important; }
+  .playbackSoundBadge__actions > #hoq-playbtn:hover { color: #7d86ff !important; }
+  .playbackSoundBadge__actions > #hoq-playbtn.done { color: var(--sc-accent, #ff5500) !important; }
+  /* hairline between SoundCloud's actions and ours (Discord) */
+  .playbackSoundBadge__actions > #hoq-playbtn { position: relative !important; margin-left: 13px !important; }
+  .playbackSoundBadge__actions > #hoq-playbtn::before { content: ''; position: absolute; left: -7px; top: 8px; bottom: 8px; width: 1px; background: rgba(255,255,255,0.12); }
+  /* Upload: calm pill, no glow */
+  .header a.uploadButton { height: 30px !important; padding: 0 14px !important; border-radius: 9px !important; margin: 0 !important;
+    box-shadow: none !important; font-weight: 600 !important; transition: filter .12s ease !important; }
+  .header a.uploadButton:hover { box-shadow: none !important; filter: brightness(1.12) !important; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -2446,24 +3185,33 @@ const MUI_CSS = `
 
   /* --- per-row "Play in Discord" (addQueueButtons) --------------------------
      Lives in both documents, so it is defined outside the .hoq-webi scope. */
-  .hoq-q {
-    position: absolute; top: 6px; right: 6px; z-index: 20;
-    width: 26px; height: 26px; padding: 0; border-radius: 999px;
-    display: flex; align-items: center; justify-content: center;
-    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 42%, transparent);
-    background: rgba(16,16,20,0.72);
-    backdrop-filter: blur(10px) saturate(150%); -webkit-backdrop-filter: blur(10px) saturate(150%);
-    color: var(--sc-accent, #ff5500); cursor: pointer;
-    opacity: 0; transform: translateY(-3px);
-    transition: opacity .15s ease, transform .15s ease, background .15s ease;
+  .hoq-q:not(.hoq-q-in) {
+    position: absolute; top: 8px; right: 8px; z-index: 20;
+    height: 26px; min-width: 26px; padding: 0 6px; box-sizing: border-box; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255,255,255,0.12) !important; background: rgba(14,14,18,0.86) !important;
+    color: #c9c9d2 !important; -webkit-text-fill-color: currentColor !important; cursor: pointer;
+    font: 600 11.5px/1 Inter,-apple-system,Arial,sans-serif; white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    opacity: 0; transform: translateY(-2px);
+    transition: opacity .15s ease, transform .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
   }
-  *:hover > .hoq-q, .hoq-q:focus-visible { opacity: 1; transform: none; }
-  .hoq-q:hover { background: rgba(28,28,34,0.9); }
-  .hoq-q svg { width: 13px; height: 13px; }
-  .hoq-q.done {
-    background: var(--sc-accent, #ff5500); color: #fff; opacity: 1;
-    transform: none; border-color: transparent; cursor: default;
+  *:hover > .hoq-q:not(.hoq-q-in), .hoq-q:not(.hoq-q-in):focus-visible { opacity: 1; transform: none; }
+  .hoq-q:not(.hoq-q-in) svg { width: 13px; height: 13px; flex: none; fill: currentColor; }
+  .hoq-q:not(.hoq-q-in) span { max-width: 0; overflow: hidden; transition: max-width .2s ease, margin .2s ease; }
+  .hoq-q:not(.hoq-q-in):hover { background: #5865f2 !important; border-color: transparent !important; color: #fff !important; }
+  .hoq-q:not(.hoq-q-in):hover span, .hoq-q:not(.hoq-q-in).done span { max-width: 110px; margin-left: 6px; }
+  .hoq-q:not(.hoq-q-in).done {
+    background: var(--sc-accent, #ff5500) !important; color: #fff !important; opacity: 1;
+    transform: none; border-color: transparent !important; cursor: default;
   }
+  .hoq-q:not(.hoq-q-in).done svg { fill: none; }
+  /* in the tile's action row: one more of SoundCloud's icon buttons */
+  .hoq-q.hoq-q-in svg { width: 16px; height: 16px; fill: currentColor; }
+  .hoq-q.hoq-q-in span { display: none !important; }
+  .hoq-q.hoq-q-in:hover { color: #7d86ff !important; -webkit-text-fill-color: currentColor !important; }
+  .hoq-q.hoq-q-in.done { color: var(--sc-accent, #ff5500) !important; cursor: default; }
+  .hoq-q.hoq-q-in.done svg { fill: none; }
 
   /* --- webi V2 frame only --------------------------------------------------
      themeFrames() tags the iframe's document with .hoq-webi so these can't leak
@@ -2878,7 +3626,7 @@ function recolorOrange() {
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton')) {
+    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you, #hoq-out-btn, .hoq-hdr-icon, .notificationIcon__badge, .playbackTimeline__timePassed, .playbackTimeline__duration, .volume__button, .playControls__play, .playbackSoundBadge, .hoq-vol-pop')) {
       continue;
     }
     _seenOrange.add(el);
@@ -2980,9 +3728,20 @@ function buildCustomWave() {
   if (wf.getBoundingClientRect().width < 300) return;
   const canvas = wf.querySelector('canvas');
   if (!canvas || !canvas.width) return;
-
-  const key = (currentCoverUrl() || location.pathname) + ':' + canvas.width;
   const existing = wf.querySelector(':scope > .hoq-wave');
+
+  // While a new song loads, SoundCloud first paints a PLACEHOLDER (a flat line
+  // with a bump in the middle) and only adds .loaded once the real waveform is
+  // drawn. Copying the placeholder left a flat waveform that never updated, so
+  // until then drop our copy and let SoundCloud's own loading state show.
+  if (!wf.classList.contains('loaded')) {
+    if (existing) existing.remove();
+    wf.classList.remove('hoq-cw');
+    return;
+  }
+  // canvas identity in the key: a re-rendered waveform gets a new canvas
+  if (!canvas.__hoqId) canvas.__hoqId = Math.random().toString(36).slice(2, 8);
+  const key = (currentCoverUrl() || location.pathname) + ':' + canvas.width + ':' + canvas.__hoqId;
   if (existing && existing.dataset.key === key) { updateWaveProgress(); return; }
 
   let heights;
@@ -3000,6 +3759,10 @@ function buildCustomWave() {
       heights.push(Math.max(0.08, (half - top) / half));
     }
   } catch (e) { return; } // canvas not ready / unreadable → leave SC's waveform visible
+  // a blank or not-yet-painted canvas reads as all-flat: try again next tick
+  // instead of locking in a flat line
+  const tall = heights.filter((a) => a > 0.2).length;
+  if (tall < heights.length * 0.15) return;
 
   const barsHtml = heights.map((a) => '<i style="height:' + (a * 100).toFixed(1) + '%"></i>').join('');
   if (existing) existing.remove();
@@ -3489,32 +4252,40 @@ function buildTitlebar() {
         filter: drop-shadow(0 0 5px rgba(90,160,255,0.4));
       }
       #sc-titlebar .sc-tb-spacer { flex: 1; }
+      /* same tile as the header's icon buttons (34px, grey, soft hover tile) */
       #sc-titlebar .sc-tb-btn {
-        width: 40px; height: 48px; padding: 0;
+        width: 34px; height: 34px; padding: 0; margin: 0 2px; border-radius: 10px;
         display: flex; align-items: center; justify-content: center;
-        background: transparent; border: 0; color: #9a9a9c; cursor: pointer;
+        background: transparent; border: 0; color: #a6a6b0; cursor: pointer;
         transition: background .12s ease, color .12s ease;
       }
-      #sc-titlebar .sc-tb-btn svg { width: 15px; height: 15px; display: block; }
-      #sc-titlebar .sc-tb-btn:hover { background: rgba(255,255,255,0.09); color: #fff; }
+      #sc-titlebar .sc-tb-btn svg { width: 16px; height: 16px; display: block; }
+      #sc-titlebar .sc-tb-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
       #sc-titlebar .sc-tb-skipad:hover { color: var(--sc-accent, #ff5500); }
       #sc-titlebar .sc-tb-accentdot { fill: var(--sc-accent, #ff5500); }
-      /* macOS traffic-light window controls */
-      #sc-titlebar .sc-tb-lights { display: flex; align-items: center; gap: 8px; padding: 0 14px 0 8px; }
+      /* macOS-style window controls, calm like the rest of the header: soft grey
+         dots at rest (like an inactive Mac window); hovering the group brings
+         back red / yellow / green with their glyphs. A hairline sets them apart
+         from the header's icon groups. */
+      #sc-titlebar .sc-tb-lights { position: relative; display: flex; align-items: center; gap: 8px; height: 34px;
+        margin-left: 10px; padding: 0 14px 0 12px; }
+      #sc-titlebar .sc-tb-lights::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 1px; background: rgba(255,255,255,0.12); }
       #sc-titlebar .sc-light {
-        width: 13px; height: 13px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+        width: 12px; height: 12px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
         display: flex; align-items: center; justify-content: center; position: relative;
-        box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.15);
+        background: rgba(255,255,255,0.2); box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.08);
+        transition: background .14s ease, box-shadow .14s ease, transform .12s ease;
       }
-      #sc-titlebar .sc-tb-close.sc-light { background: #ff5f57; }
-      #sc-titlebar .sc-tb-min.sc-light { background: #febc2e; }
-      #sc-titlebar .sc-tb-max.sc-light { background: #28c840; }
+      #sc-titlebar .sc-tb-lights:hover .sc-tb-close.sc-light { background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+      #sc-titlebar .sc-tb-lights:hover .sc-tb-min.sc-light { background: #febc2e; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+      #sc-titlebar .sc-tb-lights:hover .sc-tb-max.sc-light { background: #28c840; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+      #sc-titlebar .sc-light:active { transform: scale(.9); }
       #sc-titlebar .sc-light span {
         font-size: 9px; line-height: 0; font-weight: 800; color: rgba(0,0,0,0.6);
         display: flex; align-items: center; justify-content: center;
         opacity: 0; transition: opacity .1s ease;
       }
-      #sc-titlebar .sc-light span svg { width: 9px; height: 9px; display: block; }
+      #sc-titlebar .sc-light span svg { width: 8px; height: 8px; display: block; }
       #sc-titlebar .sc-tb-lights:hover .sc-light span { opacity: 1; }
 
       #sc-palette {
@@ -4196,6 +4967,24 @@ function ensureDiscordPanel() {
         padding: 1px 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: .6px;
         color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); }
       #hoq-discord .hoq-dc-friend.is-me { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 35%, transparent); }
+      #hoq-discord .hoq-dc-ftext { flex: 1 1 auto; }
+      #hoq-discord .hoq-dc-along { flex: none; height: 28px; padding: 0 12px; border-radius: 99px; cursor: pointer; white-space: nowrap;
+        border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); color: #e4e4ea;
+        font: 600 12px Inter,-apple-system,Arial,sans-serif; transition: background .12s ease, border-color .12s ease; }
+      #hoq-discord .hoq-dc-along:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.22); }
+      #hoq-discord .hoq-dc-along.on { background: color-mix(in srgb, var(--sc-accent,#ff5500) 24%, transparent);
+        border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); color: #fff; }
+      #hoq-discord .hoq-dc-follow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 12px;
+        border-radius: 10px; font-size: 12.5px; color: #d6d6dc;
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 14%, rgba(12,12,14,0.5));
+        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 30%, transparent); }
+      #hoq-discord .hoq-dc-follow b { color: #fff; }
+      #hoq-discord .hoq-dc-unfollow { height: 26px; padding: 0 11px; border: 0; border-radius: 99px; cursor: pointer;
+        background: rgba(255,255,255,0.1); color: #fff; font: 600 12px Inter,-apple-system,Arial,sans-serif; }
+      #hoq-discord .hoq-dc-unfollow:hover { background: rgba(255,255,255,0.18); }
+      #hoq-discord .hoq-toast-test { margin-left: 8px; height: 22px; padding: 0 9px; border: 0; border-radius: 99px; cursor: pointer; vertical-align: middle;
+        background: rgba(255,255,255,0.1); color: #e4e4ea; font: 600 11px Inter,-apple-system,Arial,sans-serif; }
+      #hoq-discord .hoq-toast-test:hover { background: rgba(255,255,255,0.18); color: #fff; }
       /* ===== Community feed ===== */
       #hoq-discord .hoq-feed-composer { display: flex; gap: 11px; align-items: flex-start; margin-bottom: 14px; }
       #hoq-discord .hoq-feed-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none;
@@ -4338,53 +5127,66 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-pair-btn { flex: none; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer;
         font-weight: 700; font-size: 12px; background: var(--sc-accent,#ff5500); color: #fff; }
       #hoq-discord .hoq-pair-btn:hover { filter: brightness(1.1); }
-      /* Account bar: full width at the top of Settings, its own label hidden
-         (the bar names itself). */
       #hoq-discord .hoq-hoq-sec > .hoq-dc-label { display: none; }
-      #hoq-discord .hoq-hoq-bar { position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px; padding: 14px 16px;
-        margin-bottom: 6px; border-radius: 14px;
-        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 28%, rgba(255,255,255,0.08));
-        background: linear-gradient(100deg, color-mix(in srgb, var(--sc-accent,#ff5500) 16%, rgba(12,12,14,0.6)), rgba(12,12,14,0.55) 60%); }
+      /* Account card: picture | who + stats | buttons, profile switches as a
+         footer row. One quiet card: no rings, no boxed chips, no glow. */
+      #hoq-discord .hoq-hoq-bar { position: relative; overflow: hidden; display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px;
+        padding: 14px 16px; margin-bottom: 6px; border-radius: 14px;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
       #hoq-discord .hoq-hoq-bar > :not(.hoq-hoq-banner) { position: relative; z-index: 1; }
-      /* Signed in: the person's hoq profile banner (or their profile colours)
-         behind the card, darkened on the text side so it always reads. */
+      /* their banner / page background / blurred picture, kept dim so text reads */
       #hoq-discord .hoq-hoq-banner { position: absolute; inset: 0; z-index: 0; opacity: 0; transition: opacity .4s ease;
         background-size: cover; background-position: center; }
-      /* no banner: their picture, blurred big behind the card */
-      #hoq-discord .hoq-hoq-banner.is-blur { inset: -40px; filter: blur(28px) saturate(1.5) brightness(0.9); transform: scale(1.15); }
+      #hoq-discord .hoq-hoq-banner.is-blur { inset: -40px; filter: blur(30px) saturate(1.4); transform: scale(1.15); }
       #hoq-discord .hoq-hoq-banner::after { content: ''; position: absolute; inset: 0;
-        background: linear-gradient(90deg, rgba(10,10,12,0.88) 0%, rgba(10,10,12,0.66) 50%, rgba(10,10,12,0.4) 100%); }
-      #hoq-discord .hoq-hoq-bar.has-card { padding: 18px 20px; align-items: center; }
+        background: linear-gradient(90deg, rgba(12,12,15,0.9) 0%, rgba(12,12,15,0.78) 55%, rgba(12,12,15,0.6) 100%); }
       #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-banner { opacity: 1; }
-      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-pic { width: 72px; height: 72px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent), 0 8px 22px rgba(0,0,0,.45); }
-      #hoq-discord .hoq-hoq-line1 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
-      #hoq-discord .hoq-hoq-bar.has-card .hoq-hoq-name { font-size: 18px; }
-      #hoq-discord .hoq-hoq-badges { display: flex; flex-wrap: wrap; gap: 5px; }
-      #hoq-discord .hoq-hoq-badge { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
-        padding: 2px 8px; border-radius: 999px; color: #fff;
-        background: color-mix(in srgb, var(--sc-accent,#ff5500) 30%, rgba(255,255,255,0.06));
-        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent); }
-      #hoq-discord .hoq-hoq-bio { font-size: 13px; color: #e4e4e8; max-width: 640px; overflow: hidden;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-      #hoq-discord .hoq-hoq-bio[hidden], #hoq-discord .hoq-hoq-mini[hidden] { display: none; }
-      #hoq-discord .hoq-hoq-mini { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
-      #hoq-discord .hoq-hoq-chip { font-size: 11.5px; color: #dcdce2; padding: 3px 9px; border-radius: 8px;
-        background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08); }
-      #hoq-discord .hoq-hoq-chip b { color: var(--sc-accent,#ff5500); font-weight: 800; }
-      #hoq-discord .hoq-hoq-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
-      #hoq-discord .hoq-hoq-name { font-size: 14px; color: #fff; }
-      #hoq-discord .hoq-hoq-sub { font-style: normal; font-size: 12px; color: #a9a9b2; }
-      #hoq-discord .hoq-hoq-btns { display: flex; gap: 8px; flex: none; }
-      #hoq-discord .hoq-hoq-pub { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 12px;
-        color: #c9c9d2; cursor: pointer; width: fit-content; }
-      #hoq-discord .hoq-hoq-pub[hidden] { display: none; }
-      #hoq-discord .hoq-hoq-pubs { display: flex; flex-wrap: wrap; gap: 4px 18px; }
-      #hoq-discord .hoq-hoq-pub input { accent-color: var(--sc-accent,#ff5500); margin: 0; cursor: pointer; }
-      #hoq-discord .hoq-hoq-pic { flex: none; width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
-        background: rgba(255,255,255,0.06);
-        box-shadow: 0 0 0 2px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
-      #hoq-discord .hoq-hoq-pic.is-logo { object-fit: contain; padding: 7px; box-sizing: border-box; }
-      #hoq-discord .hoq-hoq-sub.is-bad { color: #ff8a7a; }
+      #hoq-discord .hoq-hoq-pic { width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+        background: rgba(255,255,255,0.06); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+      #hoq-discord .hoq-hoq-pic.is-logo { object-fit: contain; padding: 9px; box-sizing: border-box; box-shadow: none; }
+      #hoq-discord .hoq-hoq-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      #hoq-discord .hoq-hoq-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      #hoq-discord .hoq-hoq-name { font-size: 15px; font-weight: 650; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-badges { display: flex; gap: 4px; flex: none; }
+      #hoq-discord .hoq-hoq-badge { font-size: 10.5px; font-weight: 600; line-height: 17px; padding: 0 6px; border-radius: 5px;
+        color: #d4d4dc; background: rgba(255,255,255,0.09); white-space: nowrap; }
+      #hoq-discord .hoq-hoq-badge:first-child { color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, #fff);
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 18%, transparent); }
+      #hoq-discord .hoq-hoq-sub { font-style: normal; font-size: 12px; color: #8e8e99; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-sub.is-bad { color: #ff8a7a; white-space: normal; }
+      #hoq-discord .hoq-hoq-bio { font-size: 12.5px; color: #d6d6dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-bio[hidden], #hoq-discord .hoq-hoq-mini[hidden], #hoq-discord .hoq-hoq-pub[hidden] { display: none; }
+      /* stats: one line of text, numbers bright, dot-separated */
+      #hoq-discord .hoq-hoq-mini { display: flex; min-width: 0; margin-top: 2px; font-size: 12px; color: #8e8e99;
+        white-space: nowrap; overflow: hidden; }
+      #hoq-discord .hoq-hoq-chip { flex: none; }
+      #hoq-discord .hoq-hoq-chip:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      #hoq-discord .hoq-hoq-chip + .hoq-hoq-chip::before { content: '·'; margin: 0 7px; color: #5c5c66; }
+      #hoq-discord .hoq-hoq-chip b { color: #f0f0f4; font-weight: 600; }
+      #hoq-discord .hoq-hoq-btns { display: flex; gap: 6px; }
+      #hoq-discord .hoq-hoq-btns button { height: 30px; padding: 0 13px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+      #hoq-discord .hoq-hoq-bar.is-in .hoq-hoq-btn { background: transparent; color: #c9c9d2;
+        border: 1px solid rgba(255,255,255,0.14); }
+      #hoq-discord .hoq-hoq-bar.is-in .hoq-hoq-btn:hover { color: #fff; border-color: rgba(255,255,255,0.28); filter: none; }
+      /* "On my profile" footer: two small toggle pills */
+      #hoq-discord .hoq-hoq-pubs { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+        margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,0.07); font-size: 11.5px; color: #7d7d88; }
+      #hoq-discord .hoq-hoq-pubs:not(:has(.hoq-hoq-pub:not([hidden]))) { display: none; }
+      #hoq-discord .hoq-hoq-pubs > span { margin-right: 4px; }
+      #hoq-discord .hoq-hoq-pub { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+        border-radius: 99px; background: rgba(255,255,255,0.06); color: #b4b4be; cursor: pointer; user-select: none;
+        transition: background .14s ease, color .14s ease; }
+      #hoq-discord .hoq-hoq-pub:hover { background: rgba(255,255,255,0.1); color: #fff; }
+      #hoq-discord .hoq-hoq-pub input { position: absolute; opacity: 0; pointer-events: none; }
+      #hoq-discord .hoq-hoq-pub::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #5c5c66; transition: background .14s ease; }
+      #hoq-discord .hoq-hoq-pub:has(input:checked) { background: color-mix(in srgb, var(--sc-accent,#ff5500) 16%, transparent);
+        color: color-mix(in srgb, var(--sc-accent,#ff5500) 55%, #fff); }
+      #hoq-discord .hoq-hoq-pub:has(input:checked)::before { background: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-hoq-pub:has(input:focus-visible) { outline: 2px solid var(--sc-accent,#ff5500); outline-offset: 2px; }
+      #hoq-discord .hoq-hoq-sec { container-type: inline-size; }
+      @container (max-width: 520px) { #hoq-discord .hoq-hoq-bar { grid-template-columns: auto minmax(0, 1fr); }
+        #hoq-discord .hoq-hoq-btns { grid-column: 1 / -1; margin-top: 10px; } }
       #hoq-discord .hoq-pair-linkbtn { flex: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
         padding: 8px 15px; cursor: pointer; font-weight: 700; font-size: 12px;
         background: rgba(255,255,255,0.05); color: #e4e4e6; }
@@ -4436,7 +5238,7 @@ function ensureDiscordPanel() {
     <div class="hoq-dc-card">
       <div class="hoq-dc-top">
         <img class="hoq-dc-logo" src="${HOQ_LOGO}">
-        <div class="hoq-dc-titles"><span>hoq</span></div>
+        <div class="hoq-dc-titles"><span>holdonquietly</span></div>
         <div class="hoq-dc-accent" title="Current accent"><i class="a1"></i><i class="a2"></i></div>
       </div>
       <div class="hoq-sub">
@@ -4484,11 +5286,17 @@ function ensureDiscordPanel() {
         <div class="hoq-hoq-bar">
           <div class="hoq-hoq-banner"></div>
           <img class="hoq-hoq-pic" alt="">
-          <span class="hoq-hoq-text"><span class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></span><em class="hoq-hoq-sub">Not signed in · one account for holdonquietly.com and every hoq app. Keeps your listening stats safe. Your SoundCloud login stays separate.</em><span class="hoq-hoq-bio" hidden></span><span class="hoq-hoq-mini" hidden></span><span class="hoq-hoq-pubs"><label class="hoq-hoq-pub" hidden><input type="checkbox"> Show my listening stats on my profile</label><label class="hoq-hoq-pub hoq-hoq-nowpub" hidden><input type="checkbox"> Show what I'm playing on my profile</label></span></span>
-          <span class="hoq-hoq-btns">
+          <div class="hoq-hoq-text">
+            <div class="hoq-hoq-line1"><b class="hoq-hoq-name">holdonquietly account</b><span class="hoq-hoq-badges"></span></div>
+            <em class="hoq-hoq-sub">Not signed in · keeps your listening stats and settings with you</em>
+            <span class="hoq-hoq-bio" hidden></span>
+            <span class="hoq-hoq-mini" hidden></span>
+          </div>
+          <div class="hoq-hoq-btns">
             <button class="hoq-pair-linkbtn hoq-hoq-profile" type="button" hidden>Profile</button>
             <button class="hoq-pair-btn hoq-hoq-btn" type="button">Sign in</button>
-          </span>
+          </div>
+          <div class="hoq-hoq-pubs"><span>On my profile</span><label class="hoq-hoq-pub" hidden title="Show my listening stats on my profile"><input type="checkbox">Listening stats</label><label class="hoq-hoq-pub hoq-hoq-nowpub" hidden title="Show what I'm playing on my profile"><input type="checkbox">Now playing</label></div>
         </div>
       </div>
       <div class="hoq-dc-sec">
@@ -4533,6 +5341,15 @@ function ensureDiscordPanel() {
           </label>
         </div>
         <div class="hoq-dc-hint">Discord never shows you your own buttons — friends see them. Private (secret-link) tracks never get a link.</div>
+      </div>
+      <div class="hoq-dc-sec hoq-desk-sec">
+        <div class="hoq-dc-label">Desktop</div>
+        <div class="hoq-rp">
+          <label class="hoq-rp-row">
+            <span><b>Song pop-up <button type="button" class="hoq-toast-test">Preview</button></b><em>A small card with the cover and title in the corner of your screen when the song changes, while you're in another app or game.</em></span>
+            <input type="checkbox" class="hoq-rp-sw hoq-desk-sw" data-k="hoqToast">
+          </label>
+        </div>
       </div>
       <div class="hoq-dc-sec hoq-hook-sec">
         <div class="hoq-dc-label">Discord webhook</div>
@@ -4592,7 +5409,7 @@ function ensureDiscordPanel() {
           <div><div class="hoq-dc-label">Top artists</div><ol class="hoq-top hoq-top-artists"></ol></div>
           <div><div class="hoq-dc-label">Top tracks</div><ol class="hoq-top hoq-top-tracks"></ol></div>
         </div>
-        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. Sign in to your holdonquietly account (Settings) to keep them on your account. <button class="hoq-stat-reset">Reset</button></div>
+        <div class="hoq-dc-hint">Counted by the app &mdash; SoundCloud has no history to read. An account is optional, not needed. If you log in to holdonquietly.com, your stats stay linked to it, so they come back even if they're ever lost here. <button class="hoq-stat-reset">Reset</button></div>
       </div>
       <div class="hoq-dc-sec hoq-wide">
         <div class="hoq-dc-label">Friends listening</div>
@@ -4645,6 +5462,21 @@ function ensureDiscordPanel() {
       }
       setupRpSettings(rpSec);
     }
+  }
+  // Desktop-only switches (the host draws the pop-up), sent along with presence.
+  const deskSec = p.querySelector('.hoq-desk-sec');
+  if (deskSec) {
+    if (!hoqHasHost()) deskSec.remove();
+    else deskSec.querySelectorAll('.hoq-desk-sw').forEach((sw) => {
+      try { sw.checked = localStorage.getItem(sw.dataset.k) === '1'; } catch (e) {}
+      sw.addEventListener('change', () => { try { localStorage.setItem(sw.dataset.k, sw.checked ? '1' : '0'); } catch (e) {} _lastRpc = ''; try { rpcTick(); } catch (e) {} });
+    });
+    const tt = deskSec.querySelector('.hoq-toast-test');
+    if (tt) tt.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const np = currentNowPlaying();
+      scPost('toast:test:' + JSON.stringify({ title: np.title || 'Nothing playing yet', artist: np.artist || 'holdonquietly', cover: np.cover || '' }));
+    });
   }
   const hookSec = p.querySelector('.hoq-hook-sec');
   if (hookSec) { if (hoqHasHost()) setupHookSettings(hookSec); else hookSec.remove(); }
@@ -4815,6 +5647,10 @@ window.__hoqUpdate = function (state, ver) {
         '<span>Restart to finish installing.</span></div>' +
         '<button class="go">Restart</button><button class="x">×</button>';
       el.querySelector('.go').onclick = () => scPost('update:apply');
+    } else if (state === 'notice') {   // (state, title, detail): a short heads-up
+      el.innerHTML = '<div class="ic">!</div><div class="tx"><b>' + hoqEsc(ver) + '</b>' +
+        '<span>' + hoqEsc(arguments[2] || '') + '</span></div><button class="x">×</button>';
+      setTimeout(() => { try { el.classList.remove('show'); setTimeout(() => el.remove(), 400); } catch (e) {} }, 9000);
     } else { // 'done'
       el.innerHTML = '<div class="ic">✓</div><div class="tx"><b>Updated to ' + v + '</b>' +
         '<span>You’re on the latest version.</span></div><button class="x">×</button>';
@@ -4976,7 +5812,8 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // wins. A PC that's behind applies it and reloads once. Per-device things stay
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
-  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic'];
+  'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt',
+  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade', 'hoqSpeed', 'hoqXfade', 'hoqToast'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -5051,6 +5888,12 @@ function hoqStatsTick() {
     s.plays++;
     s.tracks[np.title] = (s.tracks[np.title] || 0) + 1;
     if (np.artist) s.artists[np.artist] = (s.artists[np.artist] || 0) + 1;
+    // first / last time each artist was played (for the "You & <artist>" card)
+    if (np.artist) {
+      const ak = np.artist.toLowerCase(), af = s.af || (s.af = {});
+      // 0 = played before this was tracked, so the first date is unknown
+      af[ak] = [af[ak] ? af[ak][0] : (s.artists[np.artist] > 1 ? 0 : now), now];
+    }
     day.plays++;
     day.tracks[np.title] = (day.tracks[np.title] || 0) + 1;
     if (np.artist) day.artists[np.artist] = (day.artists[np.artist] || 0) + 1;
@@ -5325,11 +6168,21 @@ function myId() {
 function hoqMe() {
   const av = (typeof findUserAvatar === 'function' ? findUserAvatar() : '') || '';
   let name = '';
-  const nb = document.querySelector('.userNav__usernameButton, .header__userNavButton, .profileMenu__username');
+  const nb = document.querySelector('.userNav__usernameButton, .header__userNavUsernameButton, .profileMenu__username');
   if (nb) name = (nb.getAttribute('title') || nb.textContent || '').trim();
+  // SoundCloud's newer header shows only the avatar (no username text): read the
+  // name off the avatar's label ("devuandoru’s avatar"), else the profile link.
+  if (!name) {
+    const lab = document.querySelector('.header__userNavAvatar [aria-label], .header__userNav [aria-label$="avatar"]');
+    const t = lab ? (lab.getAttribute('aria-label') || '') : '';
+    name = t.replace(/[’']s avatar$/i, '').trim();
+  }
+  const navProf = document.querySelector('a.header__userNavUsernameButton[href^="/"]');
+  if (!name && navProf) name = decodeURIComponent((navProf.getAttribute('href') || '').slice(1).split(/[/?#]/)[0]);
   if (!name) name = (localStorage.getItem('hoqDiscord') || '').trim();
   if (!name) name = 'Someone';
   let url = (localStorage.getItem('hoqSC') || '').trim();
+  if ((!url || /\/you$/.test(url)) && navProf) { const h = navProf.getAttribute('href'); if (h && h !== '/you') url = 'https://soundcloud.com' + h; }
   if (!url || /\/you$/.test(url)) {
     const prof = document.querySelector('.profileMenu a.headerMenu__link[href^="/"]:not([href="/you"])');
     const href = prof ? prof.getAttribute('href') : '';
@@ -5397,6 +6250,7 @@ function rpPrefs() {
     status: g('hoqRpStatus', 'artist'),
     buttons: g('hoqRpButtons', '1') === '1',
     pauseHide: g('hoqRpPauseHide', '1') === '1',
+    toast: g('hoqToast', '0') === '1',   // desktop song pop-up (off by default)
   };
 }
 
@@ -5529,7 +6383,7 @@ function setupHoqAccount(sec) {
       const parts = ['@' + (c.username || u.username || '')];
       if (c.created_at) parts.push('joined ' + fmtMonth(c.created_at));
       if (typeof c.friend_count === 'number') parts.push(c.friend_count + (c.friend_count === 1 ? ' friend' : ' friends'));
-      if (typeof c.views === 'number') parts.push(c.views.toLocaleString() + ' profile views');
+      if (typeof c.views === 'number') parts.push(c.views.toLocaleString() + (c.views === 1 ? ' view' : ' views'));
       if (!c.profile_public) parts.push('profile is private');
       sub.textContent = parts.join(' · ');
       const moodTxt = c.mood && c.mood.text ? (c.mood.face ? c.mood.face + ' ' : '') + 'mood: ' + c.mood.text : '';
@@ -5542,6 +6396,7 @@ function setupHoqAccount(sec) {
       const all = hoqStatsShown(), m = hoqStatsWindow(all, 30);
       const chip = (n, l) => '<span class="hoq-hoq-chip"><b>' + hoqEsc(n) + '</b> ' + hoqEsc(l) + '</span>';
       const chips = [chip(all.plays.toLocaleString(), 'plays'), chip(hoqFmtDur(all.seconds), 'listened'), chip(m.plays.toLocaleString(), 'this month')];
+      // (top artist goes last: it's the one that gets cut short if space runs out)
       const ta = best(m.artists) || best(all.artists);
       if (ta) chips.push(chip(ta, m.plays ? 'top this month' : 'top artist'));
       mini.innerHTML = chips.join('');
@@ -5580,6 +6435,7 @@ function setupHoqAccount(sec) {
     }
     sub.classList.toggle('is-bad', !!st.note && !st.busy && !st.signedIn);
     prof.hidden = !(st.signedIn && u.profile);
+    bar.classList.toggle('is-in', !!st.signedIn);
     // Their picture when signed in, else the hoq logo — the bar never has a hole.
     const src = st.signedIn && hoqSafeUrl(u.picture) ? hoqSafeUrl(u.picture) : HOQ_LOGO;
     pic.classList.toggle('is-logo', src === HOQ_LOGO);
@@ -5734,7 +6590,7 @@ function rpcTick() {
   const rp = rpPrefs();
   const url = npPublicUrl('.playbackSoundBadge__titleLink');
   const key = [np.title, url, pr.paused, Math.round(pr.pos / 8),
-    rp.on, rp.status, rp.buttons, rp.pauseHide].join('|');
+    rp.on, rp.status, rp.buttons, rp.pauseHide, rp.toast].join('|');
   if (key === _lastRpc) return;
   _lastRpc = key;
   const me = hoqMe(); // SoundCloud name/profile: the fallback when Discord isn't running
@@ -5745,7 +6601,7 @@ function rpcTick() {
     sc: localStorage.getItem('hoqSC') || me.url || '',
     title: np.title, artist: np.artist, cover: np.cover,
     url, artistUrl: npPublicUrl('.playbackSoundBadge__lightLink'),
-    pos: pr.pos, dur: pr.dur, paused: pr.paused,
+    pos: pr.pos, dur: pr.dur, paused: pr.paused, rate: (() => { try { return hoqFxState().speed; } catch (e) { return 1; } })(),
     rp,
   }));
   hoqNowPush(np.title, np.artist, url, np.cover, pr.paused);
@@ -5939,9 +6795,11 @@ window.__hoqPlayResult = function (ok, reason) {
 // Queue ANY track, not just the one playing. The bot resolves from the URL, so
 // title/artist/cover here only decide what the embed shows.
 // ---------------------------------------------------------------------------
-const HOQ_Q_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+// Discord mark + a label that slides out on hover, so it can't be mistaken for
+// SoundCloud's own play button.
+const HOQ_Q_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg><span>Play in Discord</span>';
 const HOQ_Q_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
-  'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Queued</span>';
 
 // A track permalink is exactly /<user>/<track> — two segments, no reserved first
 // segment, and not a /sets/ playlist.
@@ -6029,7 +6887,7 @@ function addQueueButtons(d) {
   let rows;
   try { rows = d.querySelectorAll(ROWS); } catch (e) { return; }
   rows.forEach((row) => {
-    if (row.querySelector(':scope > .hoq-q')) return;
+    if (row.querySelector('.hoq-q')) return;
     let info = null;
     for (const a of row.querySelectorAll('a[href]')) {
       info = trackLinkInfo(a);
@@ -6037,10 +6895,23 @@ function addQueueButtons(d) {
     }
     if (!info) return;
     const b = d.createElement('button');
-    b.className = 'hoq-q';
+    // In the tile's own action row (like / repost / share / … ) as one more of
+    // SoundCloud's icon buttons, so it never sits over the title or date. Rows
+    // without that toolbar get the small floating version.
+    const group = row.querySelector('.soundActions .sc-button-group');
+    b.className = group ? 'hoq-q hoq-q-in sc-button sc-button-secondary sc-button-small sc-button-icon sc-button-responsive' : 'hoq-q';
     b.type = 'button';
     b.title = 'Play in Discord';
     b.innerHTML = HOQ_Q_PLAY;
+    if (group) {
+      b.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (b.classList.contains('done')) return;
+        if (queueTrack(info)) { b.classList.add('done'); b.innerHTML = HOQ_Q_CHECK; b.title = 'Queued in Discord'; _hoqLastRowBtn = b; }
+      });
+      group.insertBefore(b, group.querySelector('.sc-button-more') || null);
+      return;
+    }
     b.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();   // don't let the row navigate / start playback
@@ -6101,7 +6972,8 @@ function startPlayButton() {
     document.head.appendChild(st);
   }
 
-  const PLAY  = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  // the Discord mark (same as the track rows), so it never reads as a second play button
+  const PLAY  = HOQ_Q_PLAY.slice(0, HOQ_Q_PLAY.indexOf('<span>'));
   const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 
   const btn = document.createElement('button');
@@ -6185,15 +7057,79 @@ window.__hoqFriends = function (list) {
   }
   // Rebuilt from scratch every poll. This used to `+=` onto whatever was there,
   // so with anyone else listening the whole list stacked up again every 15 s.
-  el.innerHTML = (others.length ? '' : '<div class="hoq-dc-hint">Only you are on right now.</div>') + rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
+  hoqFollowTick(others);
+  const fol = window.__hoqFollow;
+  el.innerHTML = (mine.length && !mine[0].name ? '<div class="hoq-dc-hint">Your name isn’t reaching friends: log in to SoundCloud, open Discord, or set a name in Settings.</div>' : '') + (fol ? '<div class="hoq-dc-follow"><span>Listening along with <b>' + hoqEsc(fol.name) + '</b></span><button type="button" class="hoq-dc-unfollow">Stop</button></div>' : '') +
+    (others.length ? '' : '<div class="hoq-dc-hint">Only you are on right now.</div>') + rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
     '<img class="hoq-dc-fcover" src="' + (hoqEsc(hoqSafeUrl(f.cover)) || HOQ_LOGO) + '">' +
     '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') +
     (f.id === me ? '<em class="hoq-me">you</em>' : '') + '</b>' +
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +
     (f.sc ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(f.sc) + '">' + hoqEsc(f.sc.replace(/^https?:\/\//, '')) + '</a>' : '') +
-    '</div></div>').join('');
+    '</div>' +
+    // Listen along: needs their track link from the server (newer friends server)
+    (f.id !== me && hoqTrackPath(f.url) ? '<button type="button" class="hoq-dc-along' + (fol && fol.id === f.id ? ' on' : '') + '" data-id="' + hoqEsc(f.id) + '" data-name="' + hoqEsc(f.name || 'Someone') + '">' + (fol && fol.id === f.id ? 'Listening' : 'Listen along') + '</button>' : '') +
+    '</div>').join('');
   el.querySelectorAll('.hoq-dc-sclink').forEach((a) => a.addEventListener('click', () => scPost('open:' + a.dataset.url)));
+  el.querySelectorAll('.hoq-dc-along').forEach((b) => b.addEventListener('click', () => {
+    const f = others.find((x) => x.id === b.dataset.id);
+    if (!f) return;
+    if (window.__hoqFollow && window.__hoqFollow.id === f.id) hoqFollowStop(''); else hoqFollowStart(f);
+    window.__hoqFriends(window.__hoqFriendsLast || list);
+  }));
+  const un = el.querySelector('.hoq-dc-unfollow');
+  if (un) un.addEventListener('click', () => { hoqFollowStop(''); window.__hoqFriends(window.__hoqFriendsLast || list); });
+  window.__hoqFriendsLast = list;
 };
+
+// ---- Listen along ------------------------------------------------------------
+// Follow a friend: play what they're playing, where they are in it, and keep
+// following their next songs (checked each time the friends list refreshes, every
+// 15 s). Changing the track yourself, or them going quiet, stops it.
+function hoqTrackPath(u) {
+  const t = hoqSafeUrl(u);
+  if (!t) return '';
+  try { const x = new URL(t); return /(^|\.)soundcloud\.com$/i.test(x.hostname) && x.pathname.split('/').filter(Boolean).length >= 2 ? x.pathname : ''; } catch (e) { return ''; }
+}
+function hoqFriendPos(f) {
+  if (typeof f.pos !== 'number') return 0;
+  return f.pos + (f.paused ? 0 : Math.max(0, +f.age || 0) / 1000 * (+f.rate || 1));
+}
+function hoqFollowStart(f) {
+  window.__hoqFollow = { id: f.id, name: f.name || 'Someone', path: '' };
+  try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Listening along with ' + (f.name || 'Someone'), 'Their songs play here as they change. Change the track yourself to stop.'); } catch (e) {}
+  hoqFollowTick([f]);
+}
+function hoqFollowStop(why) {
+  const f = window.__hoqFollow; window.__hoqFollow = null;
+  if (f && why) { try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Stopped listening along', why); } catch (e) {} }
+}
+function hoqFollowTick(list) {
+  const fol = window.__hoqFollow;
+  if (!fol) return;
+  const f = (list || []).find((x) => x.id === fol.id);
+  if (!f) { if (list && list.length !== 1) hoqFollowStop(fol.name + ' stopped listening.'); return; }
+  const path = hoqTrackPath(f.url);
+  if (!path) return;
+  const mine = (() => { try { const h = npPublicUrl('.playbackSoundBadge__titleLink'); return h ? new URL(h).pathname : ''; } catch (e) { return ''; } })();
+  const same = (a, b) => decodeURIComponent(a || '').toLowerCase() === decodeURIComponent(b || '').toLowerCase();
+  // we'd already put their song on, and now something else is playing that they
+  // aren't on: you picked a different track yourself
+  if (fol.path && same(fol.path, path) && mine && !same(mine, path) && Date.now() - (fol.at || 0) > 20000) {
+    hoqFollowStop('You changed the track.'); return;
+  }
+  if (!same(mine, path)) {
+    fol.path = path; fol.at = Date.now();
+    hoqPfOpenAndPlay(path, hoqFriendPos(f));
+    return;
+  }
+  fol.path = path;
+  // same song: pull our position back in line if it drifted
+  const el = window.__hoqMediaEl, want = hoqFriendPos(f);
+  if (el && !el.paused && typeof f.pos === 'number' && Math.abs(el.currentTime - want) > 6 && isFinite(el.duration) && want < el.duration - 3) {
+    hoqSeek(want);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Spotify-style horizontal volume slider (0-100), replacing SoundCloud's
@@ -6266,6 +7202,7 @@ function removeClutter() {
   try { setupOutputPicker(); } catch (e) {}
   try { setupEqPicker(); } catch (e) {}
   try { setupMiniMode(); } catch (e) {}
+  try { setupProfileExtras(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
   document.documentElement.classList.toggle('hoq-feed', /\/feed/i.test(location.pathname));
@@ -6297,9 +7234,20 @@ function removeClutter() {
     '.l-listen-wrapper, .l-about, .l-user, .userInfoBar, ' +
     '.l-user-hero, .profileHeader, .profileHeaderBackground, .profileHeaderInfo';
   const isStruct = (el) => !!(el && el.matches && el.matches(STRUCT_SEL));
+  // A user's own "Artist Pro" / "Next Pro" BADGE is not an upsell. The text
+  // match below used to hit it and climb up to the profile header's name block
+  // (name, city, badge all gone). Never hide anything that is, sits inside, or
+  // holds a profile header / creator badge / user card.
+  const PROTECT_IN = '.l-user-hero, .profileHeader, .creatorBadge, .sc-status-label, .userBadge, .userBadgeListItem, .soundTitle, .userInfoBar';
+  const PROTECT_HAS = '.creatorBadge, .sc-status-label, .profileHeaderInfo__userName, .userBadge__usernameLink';
+  const isProtected = (el) => !!(el.closest(PROTECT_IN) || el.querySelector(PROTECT_HAS));
+  // undo earlier hides that hit protected things
+  document.querySelectorAll('[data-schid]').forEach((el) => {
+    if (isProtected(el)) { el.style.display = ''; el.removeAttribute('data-schid'); }
+  });
   // Hide + tag so diagnostics can tell OUR hides from SoundCloud's own.
   const kill = (el) => {
-    if (!el || isStruct(el)) return;
+    if (!el || isStruct(el) || isProtected(el)) return;
     el.style.display = 'none';
     el.setAttribute('data-schid', '1');
   };
@@ -6444,7 +7392,9 @@ function removeClutter() {
   // bar — not just .header — but never our own injected UI.
   safe(() => {
     document.querySelectorAll('header, nav, div').forEach((el) => {
-      if (el.closest('#sc-titlebar, #sc-palette, #sc-ad-badge')) return;
+      // (our own UI too: the compact player's Bar/Name layouts are exactly a
+      // short full-width fixed bar and got shoved 34px down)
+      if (el.closest('#sc-titlebar, #sc-palette, #sc-ad-badge, [id^="hoq-"]')) return;
       const cs = getComputedStyle(el);
       if (cs.position !== 'fixed') return;
       const r = el.getBoundingClientRect();
@@ -6501,32 +7451,41 @@ function setupOutputPicker() {
       #hoq-out-btn:hover { color:#fff; }
       #hoq-out-btn.on { color:var(--sc-accent,#ff5500); }
       #hoq-out-btn svg { width:22px; height:22px; }
-      #hoq-out-menu { position:fixed; z-index:2147483000; min-width:260px; max-width:340px;
-        padding:8px; border-radius:14px;
-        background:rgba(12,12,16,0.72); border:1px solid rgba(255,255,255,0.10);
+      #hoq-out-menu { position:fixed; z-index:2147483000; width:310px; max-height:calc(100vh - 80px); overflow-y:auto;
+        padding:6px; border-radius:14px; box-sizing:border-box;
+        background:rgba(12,12,16,0.78); border:1px solid rgba(255,255,255,0.09);
         box-shadow:0 18px 52px rgba(0,0,0,0.55);
         backdrop-filter:blur(24px) saturate(1.5); -webkit-backdrop-filter:blur(24px) saturate(1.5);
         color:#e7e7ed; font-family:Inter,-apple-system,Arial,sans-serif;
         opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none;
         transition:opacity .13s ease, transform .13s ease; }
       #hoq-out-menu.show { opacity:1; transform:none; pointer-events:auto; }
-      .hoq-out-head { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-        color:#8a8a95; padding:6px 8px 8px; }
-      .hoq-out-item { display:flex; align-items:center; gap:9px; width:100%; box-sizing:border-box;
-        padding:9px 10px; border:0; border-radius:9px; background:transparent; color:#e7e7ed;
-        font-size:13.5px; text-align:left; cursor:pointer; transition:background .12s ease; }
-      .hoq-out-item:hover { background:rgba(255,255,255,0.07); }
-      .hoq-out-item .tick { width:15px; height:15px; flex:0 0 15px; color:var(--sc-accent,#ff5500); opacity:0; }
+      #hoq-out-menu button { font-family:inherit; }
+      .hoq-out-head { padding:8px 10px 8px; font-size:13px; font-weight:600; color:#ececf1; }
+      .hoq-out-group { padding:10px 10px 4px; font-size:11px; font-weight:500; color:#7d7d88; }
+      .hoq-out-sep { height:1px; margin:4px 6px; background:rgba(255,255,255,0.07); }
+      .hoq-out-item { display:flex; align-items:center; gap:10px; width:100%; box-sizing:border-box; min-height:44px;
+        padding:6px 10px 6px 7px; border:0; border-radius:9px; background:transparent; color:#e2e2e8;
+        text-align:left; cursor:pointer; transition:background .12s ease; }
+      .hoq-out-item:hover { background:rgba(255,255,255,0.06); }
+      .hoq-out-ic { flex:0 0 30px; width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
+        background:rgba(255,255,255,0.06); color:#a6a6b0; transition:background .12s ease, color .12s ease; }
+      .hoq-out-ic svg { width:16px; height:16px; }
+      .hoq-out-txt { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
+      .hoq-out-txt b, .hoq-out-txt small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .hoq-out-txt b { font-size:13px; font-weight:500; color:#ececf1; }
+      .hoq-out-txt small { font-size:11px; color:#7d7d88; }
+      .hoq-out-item .tick { width:14px; height:14px; flex:0 0 14px; color:var(--sc-accent,#ff5500); opacity:0; }
+      .hoq-out-item.sel { background:color-mix(in srgb, var(--sc-accent,#ff5500) 13%, transparent); }
       .hoq-out-item.sel .tick { opacity:1; }
-      .hoq-out-item.sel { color:#fff; }
-      .hoq-out-item .lbl { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .hoq-out-locked { padding:6px 8px 4px; }
-      .hoq-out-enable { display:inline-flex; align-items:center; gap:7px; margin-top:4px;
-        padding:8px 12px; border:0; border-radius:9px; cursor:pointer; font-size:13px; font-weight:600;
-        color:#fff; background:var(--sc-accent,#ff5500);
-        box-shadow:0 4px 16px color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
-      .hoq-out-note { padding:8px 8px 4px; font-size:11px; line-height:1.45; color:#7f7f8a; }
-      .hoq-out-msg { padding:6px 8px 2px; font-size:11.5px; color:var(--sc-accent,#ff5500); }
+      .hoq-out-item.sel .hoq-out-txt b { color:#fff; font-weight:600; }
+      .hoq-out-item.sel .hoq-out-ic { background:color-mix(in srgb, var(--sc-accent,#ff5500) 22%, transparent); color:var(--sc-accent,#ff5500); }
+      .hoq-out-locked { padding:6px 10px 4px; }
+      .hoq-out-enable { display:inline-flex; align-items:center; height:30px; padding:0 13px; border:0; border-radius:8px;
+        cursor:pointer; font-size:12.5px; font-weight:600; color:#fff; background:var(--sc-accent,#ff5500); }
+      .hoq-out-note { padding:8px 10px 6px; font-size:11px; line-height:1.45; color:#7d7d88; }
+      .hoq-out-msg { padding:6px 10px 4px; font-size:11.5px; color:color-mix(in srgb, var(--sc-accent,#ff5500) 60%, #fff); }
+      .hoq-out-msg:empty { display:none; }
       html.hoq-lowend #hoq-out-menu, html.hoq-no-frost #hoq-out-menu {
         background:rgba(16,16,20,0.98); backdrop-filter:none; -webkit-backdrop-filter:none; }
     `;
@@ -6585,6 +7544,26 @@ function setupOutputPicker() {
     } catch (e) { msg('Audio permission is needed to list device names.'); }
   };
 
+  // "Speakers (2- Focusrite USB Audio)" -> { name: 'Speakers', sub: 'Focusrite USB Audio' }
+  const splitLabel = (label) => {
+    const m = /^(.*?)\s*\(([^()]+)\)\s*$/.exec(label || '');
+    const name = (m ? m[1] : label || '').trim(), sub = m ? m[2].replace(/^\d+\s*-\s*/, '').trim() : '';
+    return name ? { name, sub } : { name: sub || label || 'Device', sub: '' };
+  };
+  const IC = {
+    speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><circle cx="12" cy="14.5" r="3.5"/><circle cx="12" cy="7" r="1"/></svg>',
+    display: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg>',
+    phones: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="2.5" y="14" width="4.5" height="7" rx="1.8"/><rect x="17" y="14" width="4.5" height="7" rx="1.8"/></svg>',
+    virtual: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7V3M15 7V3"/><path d="M6.5 7h11v4a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5V21"/></svg>',
+    system: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10"/><path d="M9.5 10.5 11.5 12.5 15 8.5"/></svg>',
+  };
+  const kindOf = (label) => {
+    if (/VB-Audio|Virtual|\bCABLE\b|Voicemeeter|Steam Streaming|NVIDIA Broadcast|Voicemod|SteelSeries Sonar/i.test(label)) return 'virtual';
+    if (/High Definition Audio Device|HDMI|DisplayPort|Display Audio|NVIDIA High Definition|Intel.*Display/i.test(label)) return 'display';
+    if (/head(phone|set)|earbuds?|airpods|buds|arctis|hyperx|wh-1000|bluetooth/i.test(label)) return 'phones';
+    return 'speaker';
+  };
+
   async function render() {
     let outs = [];
     try {
@@ -6594,21 +7573,34 @@ function setupOutputPicker() {
     // Labels are blank until an audio permission is granted once.
     const named = outs.filter((d) => d.deviceId && d.label);
     const locked = named.length === 0;
-
-    let html = '<div class="hoq-out-head">Play SoundCloud out of</div>';
     const cur = window.__hoqSinkId || '';
-    const row = (id, label) =>
-      `<button class="hoq-out-item${(cur === id) ? ' sel' : ''}" data-id="${id.replace(/"/g, '&quot;')}">${TICK}<span class="lbl">${hoqEsc(label)}</span></button>`;
-    html += row('', 'System default');
-    named.forEach((d) => { if (d.deviceId !== 'default') html += row(d.deviceId, d.label); });
+    // "default" / "communications" are Windows aliases of real devices: show the
+    // default's name under "System default" and drop the duplicates.
+    const defDev = named.find((d) => d.deviceId === 'default');
+    const defLbl = defDev ? splitLabel(defDev.label.replace(/^Default\s*-\s*/i, '')) : null;
+    const real = named.filter((d) => d.deviceId !== 'default' && d.deviceId !== 'communications');
+
+    const row = (id, kind, name, sub) =>
+      `<button class="hoq-out-item${(cur === id) ? ' sel' : ''}" data-id="${id.replace(/"/g, '&quot;')}" title="${hoqEsc(sub ? name + ' (' + sub + ')' : name)}">` +
+      `<span class="hoq-out-ic">${IC[kind]}</span><span class="hoq-out-txt"><b>${hoqEsc(name)}</b>${sub ? '<small>' + hoqEsc(sub) + '</small>' : ''}</span>${TICK}</button>`;
+    let html = '<div class="hoq-out-head">Play SoundCloud out of</div>';
+    html += row('', 'system', 'System default', defLbl ? 'Now: ' + defLbl.name + (defLbl.sub ? ' · ' + defLbl.sub : '') : 'Follows Windows');
+    const devRows = real.filter((d) => kindOf(d.label) !== 'virtual');
+    const virt = real.filter((d) => kindOf(d.label) === 'virtual');
+    if (devRows.length) html += '<div class="hoq-out-sep"></div>';
+    devRows.forEach((d) => { const l = splitLabel(d.label); html += row(d.deviceId, kindOf(d.label), l.name, l.sub); });
+    if (virt.length) {
+      html += '<div class="hoq-out-group">Virtual</div>';
+      virt.forEach((d) => { const l = splitLabel(d.label); html += row(d.deviceId, 'virtual', l.name, l.sub); });
+    }
     if (locked) {
       html += '<div class="hoq-out-locked">' +
         '<button class="hoq-out-enable" type="button">Show my devices</button></div>' +
-        '<div class="hoq-out-note">Chrome only reveals device names after a one-time audio permission. Nothing is recorded — the mic is opened to unlock the list, then closed instantly.</div>';
+        '<div class="hoq-out-note">Windows only shares device names after a one-time audio permission. Nothing is recorded: the mic opens to unlock the list and closes straight away.</div>';
     }
     menu.innerHTML = html;
     menu.querySelectorAll('.hoq-out-item').forEach((el) => {
-      el.addEventListener('click', () => select(el.getAttribute('data-id'), el.querySelector('.lbl').textContent));
+      el.addEventListener('click', () => select(el.getAttribute('data-id'), el.querySelector('.hoq-out-txt b').textContent));
     });
     const en = menu.querySelector('.hoq-out-enable');
     if (en) en.addEventListener('click', unlock);
@@ -6623,7 +7615,9 @@ function setupOutputPicker() {
     menu.style.left = 'auto';
   };
   const isOpen = () => menu.classList.contains('show');
-  const show = async () => { place(); await render(); menu.classList.add('show'); };
+  // one header menu at a time (the buttons stop their click, so the other menu's
+  // click-outside never fires)
+  const show = async () => { document.querySelectorAll('#hoq-out-menu.show, #hoq-eq-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); }); place(); await render(); menu.classList.add('show'); };
   const close = () => { menu.classList.remove('show'); };
   btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
   // Global listeners survive header re-renders (which can drop + re-add the button),
@@ -6632,7 +7626,8 @@ function setupOutputPicker() {
     window.__hoqOutBound = true;
     document.addEventListener('click', (e) => {
       const b = document.getElementById('hoq-out-btn');
-      if (isOpen() && !menu.contains(e.target) && (!b || !b.contains(e.target))) close();
+      const p = e.composedPath ? e.composedPath() : [e.target];   // the menu re-renders on pick: target may be detached
+      if (isOpen() && !p.includes(menu) && (!b || !p.includes(b))) close();
     });
     window.addEventListener('keydown', (e) => { if (isOpen() && e.key === 'Escape') close(); });
     window.addEventListener('resize', () => { if (isOpen()) place(); });
@@ -6698,30 +7693,64 @@ function setupEqPicker() {
     const st = document.createElement('style');
     st.id = 'hoq-eq-css';
     st.textContent = `
-      #hoq-eq-menu { width:288px; }
-      #hoq-eq-menu .hoq-eq-top { display:flex; align-items:center; justify-content:space-between; padding:2px 4px 10px; }
-      #hoq-eq-menu .hoq-eq-title { font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8a8a95; }
-      .hoq-eq-sw { position:relative; width:38px; height:21px; flex:0 0 38px; border-radius:99px; cursor:pointer;
-        background:rgba(255,255,255,0.10); border:1.5px solid rgba(255,255,255,0.20); transition:background .16s ease, border-color .16s ease; }
-      .hoq-eq-sw::after { content:''; position:absolute; top:1.5px; left:1.5px; width:15px; height:15px; border-radius:50%;
-        background:#e7e7ed; transition:transform .18s cubic-bezier(.34,1.56,.64,1), width .18s ease; }
-      .hoq-eq-sw.on { background:var(--sc-accent,#ff5500); border-color:var(--sc-accent,#ff5500);
-        box-shadow:0 0 10px color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
-      .hoq-eq-sw.on::after { transform:translateX(17px); background:#fff; }
-      #hoq-eq-menu .hoq-eq-presets { display:flex; flex-wrap:wrap; gap:6px; padding:0 2px 12px; }
-      .hoq-eq-preset { padding:5px 11px; border-radius:99px; border:1px solid rgba(255,255,255,0.14);
-        background:rgba(255,255,255,0.04); color:#c9c9d2; font-size:12px; cursor:pointer; transition:all .12s ease; }
-      .hoq-eq-preset:hover { background:rgba(255,255,255,0.10); color:#fff; }
-      .hoq-eq-preset.sel { background:var(--sc-accent,#ff5500); border-color:var(--sc-accent,#ff5500); color:#fff; }
-      .hoq-eq-row { display:flex; align-items:center; gap:10px; padding:4px 2px; }
-      .hoq-eq-row .f { width:34px; flex:0 0 34px; font-size:11px; color:#8a8a95; text-align:right; }
-      .hoq-eq-row .v { width:34px; flex:0 0 34px; font-size:11px; color:#c9c9d2; text-align:left; font-variant-numeric:tabular-nums; }
-      .hoq-eq-row input[type=range] { flex:1 1 auto; -webkit-appearance:none; appearance:none; height:4px; border-radius:99px;
-        background:rgba(255,255,255,0.16); outline:none; }
-      .hoq-eq-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px;
-        border-radius:50%; background:var(--sc-accent,#ff5500); cursor:pointer;
-        box-shadow:0 0 8px color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
-      .hoq-eq-note { padding:8px 4px 2px; font-size:11px; color:#7f7f8a; }
+      #hoq-eq-menu { width:300px; padding:8px; max-height:calc(100vh - 90px); overflow-y:auto; overflow-x:hidden;
+        --eq-a: var(--sc-accent,#ff5500); --eq-tint: color-mix(in srgb, var(--eq-a) 20%, transparent);
+        --eq-on: color-mix(in srgb, var(--eq-a) 65%, #fff); --eq-track: rgba(255,255,255,0.12); }
+      #hoq-eq-menu button { font-family:inherit; }
+      .hoq-eq-tabs { display:flex; padding:2px; margin:0 0 10px; border-radius:9px; background:rgba(255,255,255,0.06); }
+      .hoq-eq-tab { flex:1 1 0; position:relative; height:26px; border:0; border-radius:7px; background:transparent;
+        color:#9a9aa6; font-size:12px; font-weight:500; cursor:pointer; transition:background .15s ease, color .15s ease; }
+      .hoq-eq-tab:hover { color:#e6e6ec; }
+      .hoq-eq-tab.sel { background:rgba(255,255,255,0.11); color:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); }
+      .hoq-eq-tab i { display:inline-block; vertical-align:middle; margin:-2px 0 0 6px; width:5px; height:5px; border-radius:50%; background:var(--eq-a); }
+      .hoq-eq-sec { padding:4px 6px; }
+      .hoq-eq-sec + .hoq-eq-sec { margin-top:6px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.07); }
+      .hoq-eq-h { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:22px; margin-bottom:10px;
+        font-size:13px; font-weight:600; color:#ececf1; }
+      .hoq-eq-h b { font-weight:500; color:#9a9aa6; font-variant-numeric:tabular-nums; }
+      .hoq-eq-h small { display:block; margin-top:2px; font-size:11px; font-weight:400; color:#7d7d88; }
+      .hoq-eq-sec > .hoq-eq-h:last-child { margin-bottom:0; }
+      .hoq-eq-sw { position:relative; width:34px; height:20px; flex:0 0 34px; border-radius:99px; cursor:pointer;
+        background:rgba(255,255,255,0.14); transition:background .18s ease; }
+      .hoq-eq-sw::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+        background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.35); transition:transform .2s cubic-bezier(.3,1.4,.6,1); }
+      .hoq-eq-sw.on { background:var(--eq-a); }
+      .hoq-eq-sw.on::after { transform:translateX(14px); }
+      /* chips: quiet by default, tinted (not solid) when picked */
+      .hoq-eq-chips { display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; }
+      .hoq-eq-chips.c3 { grid-template-columns:repeat(3, 1fr); }
+      .hoq-eq-chips.c2 { grid-template-columns:repeat(2, 1fr); }
+      .hoq-eq-preset, .hoq-eq-space { height:28px; padding:0 4px; border:0; border-radius:7px; background:rgba(255,255,255,0.05);
+        color:#b9b9c3; font-size:12px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        transition:background .12s ease, color .12s ease; }
+      .hoq-eq-preset:hover, .hoq-eq-space:hover { background:rgba(255,255,255,0.10); color:#fff; }
+      .hoq-eq-preset.sel, .hoq-eq-space.sel { background:var(--eq-tint); color:var(--eq-on);
+        box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--eq-a) 40%, transparent); }
+      /* segmented steps (boost) */
+      .hoq-eq-seg { display:flex; margin-top:12px; padding:2px; border-radius:8px; background:rgba(255,255,255,0.05); }
+      .hoq-eq-seg .hoq-eq-preset { flex:1 1 0; height:24px; background:transparent; font-size:11.5px; font-variant-numeric:tabular-nums; }
+      .hoq-eq-seg .hoq-eq-preset.sel { background:rgba(255,255,255,0.11); color:#fff; box-shadow:none; }
+      /* sliders: thin filled track + white thumb */
+      #hoq-eq-menu input[type=range] { -webkit-appearance:none; appearance:none; margin:0; outline:none; cursor:pointer;
+        height:4px; border-radius:99px; background:linear-gradient(to right, var(--eq-a) var(--p,0%), var(--eq-track) var(--p,0%)); }
+      #hoq-eq-menu input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px;
+        border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.45); transition:transform .1s ease; }
+      #hoq-eq-menu input[type=range]:active::-webkit-slider-thumb { transform:scale(1.15); }
+      #hoq-eq-menu input[type=range]:disabled { opacity:.35; cursor:default; }
+      .hoq-eq-line { display:flex; align-items:center; gap:10px; }
+      .hoq-eq-line input { flex:1 1 auto; }
+      .hoq-eq-line span { font-size:11px; color:#7d7d88; font-variant-numeric:tabular-nums; min-width:30px; text-align:right; }
+      /* EQ faders: vertical, filled from the 0 dB centre line */
+      .hoq-eq-faders { position:relative; display:grid; grid-template-columns:repeat(6, 1fr); padding:2px 0 0; margin-bottom:12px; }
+      .hoq-eq-faders::before { content:''; position:absolute; left:8px; right:8px; top:75px; height:1px; background:rgba(255,255,255,0.08); }
+      .hoq-eq-fader { display:flex; flex-direction:column; align-items:center; gap:6px; }
+      .hoq-eq-fader .v { height:12px; font-size:10.5px; color:#9a9aa6; font-variant-numeric:tabular-nums; }
+      .hoq-eq-fader .f { font-size:10.5px; color:#7d7d88; }
+      #hoq-eq-menu .hoq-eq-fader input[type=range] { writing-mode:vertical-lr; direction:rtl; width:4px; height:110px;
+        background:linear-gradient(to top, var(--eq-track) min(50%, var(--p,50%)), var(--eq-a) min(50%, var(--p,50%)),
+          var(--eq-a) max(50%, var(--p,50%)), var(--eq-track) max(50%, var(--p,50%))); }
+      .hoq-eq-off .hoq-eq-faders { opacity:.45; }
+      .hoq-eq-tip { margin-top:10px; font-size:11px; color:#7d7d88; line-height:1.4; }
     `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -6741,45 +7770,142 @@ function setupEqPicker() {
     Vocal: [-2, -1, 2, 4, 3, 1],
     Treble: [0, 0, 0, 2, 4, 6],
     Punch: [5, 2, -1, 0, 2, 4],
+    // tiny/old PC speakers can't move air below ~100 Hz: cut it (it only distorts)
+    // and lift the upper-bass + presence instead so it still sounds full and loud
+    'Old PC': [-6, 5, 3, 1, 3, 2],
+    Night: [-3, -1, 1, 2, 1, -2],
   };
-  const reflectBtn = () => btn.classList.toggle('on', window.__hoqEQ.isOn());
+  const FX = window.__hoqFX;
+  const reflectBtn = () => btn.classList.toggle('on', window.__hoqEQ.isOn() || (FX && FX.active()));
+  let tab = 'eq'; try { tab = localStorage.getItem('hoqEqTab') || 'eq'; } catch (e) {}
+  if (!FX && tab !== 'eq') tab = 'eq';
+
+  function tabsHtml() {
+    if (!FX) return '';
+    const s = FX.get();
+    const dot = { eq: window.__hoqEQ.isOn(), vol: s.boost > 0 || s.level || s.xfade > 0, space: !!s.space, speed: s.speed !== 1 };
+    return '<div class="hoq-eq-tabs">' + [['eq', 'EQ'], ['vol', 'Volume'], ['space', 'Space'], ['speed', 'Speed']].map(([k, l]) =>
+      '<button class="hoq-eq-tab' + (tab === k ? ' sel' : '') + '" data-t="' + k + '">' + l + (dot[k] ? '<i></i>' : '') + '</button>').join('') + '</div>';
+  }
+  function bindTabs() {
+    menu.querySelectorAll('.hoq-eq-tab').forEach((el) => el.addEventListener('click', (e) => {
+      e.stopPropagation(); tab = el.getAttribute('data-t'); try { localStorage.setItem('hoqEqTab', tab); } catch (er) {} render(); place();
+    }));
+  }
+  // range fill: --p = how far along the track the value sits
+  const fill = (el) => { const mn = +el.min, mx = +el.max; el.style.setProperty('--p', ((+el.value - mn) / (mx - mn) * 100) + '%'); };
+  const dbTxt = (v) => (v > 0 ? '+' : '') + v;
+
+  function renderVol() {
+    const s = FX.get();
+    let h = tabsHtml();
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Boost<b class="hoq-eq-big">' + (s.boost > 0 ? '+' + s.boost + ' dB' : 'Off') + '</b></div>';
+    h += '<div class="hoq-eq-line"><input type="range" class="hoq-boost" min="0" max="12" step="1" value="' + s.boost + '"></div>';
+    h += '<div class="hoq-eq-seg">' + [0, 3, 6, 9, 12].map((v) =>
+      '<button class="hoq-eq-preset' + (s.boost === v ? ' sel' : '') + '" data-b="' + v + '">' + (v ? '+' + v : 'Off') + '</button>').join('') + '</div></div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h"><div>Even out volume<small>Every song plays at the same loudness</small></div>' +
+      '<div class="hoq-eq-sw hoq-lvl' + (s.level ? ' on' : '') + '" role="switch" aria-checked="' + s.level + '"></div></div></div>';
+    h += '<div class="hoq-eq-sec hoq-eq-tip" style="border:0;margin:0;padding-top:0">For quiet tracks or weak speakers. A limiter keeps it from crackling.</div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h"><div>Crossfade<small>Each song fades out into the next</small></div><b class="hoq-xf-v">' + (s.xfade ? s.xfade + ' s' : 'Off') + '</b></div>' +
+      '<div class="hoq-eq-line"><input type="range" class="hoq-xf" min="0" max="8" step="1" value="' + s.xfade + '"></div></div>';
+    menu.innerHTML = h; bindTabs();
+    const xr = menu.querySelector('.hoq-xf'), xv = menu.querySelector('.hoq-xf-v'); fill(xr);
+    xr.addEventListener('input', () => { fill(xr); FX.set({ xfade: +xr.value }); xv.textContent = +xr.value ? xr.value + ' s' : 'Off'; reflectBtn(); });
+    const big = menu.querySelector('.hoq-eq-big');
+    const r = menu.querySelector('.hoq-boost'); fill(r);
+    r.addEventListener('input', () => {
+      fill(r); FX.set({ boost: +r.value }); big.textContent = +r.value > 0 ? '+' + r.value + ' dB' : 'Off'; reflectBtn();
+      menu.querySelectorAll('[data-b]').forEach((p) => p.classList.toggle('sel', +p.getAttribute('data-b') === +r.value));
+    });
+    r.addEventListener('change', () => render());
+    menu.querySelectorAll('[data-b]').forEach((el) => el.addEventListener('click', () => { FX.set({ boost: +el.getAttribute('data-b') }); reflectBtn(); render(); }));
+    menu.querySelector('.hoq-lvl').addEventListener('click', () => { FX.set({ level: !FX.get().level }); reflectBtn(); render(); });
+  }
+  function renderSpace() {
+    const s = FX.get(), sp = FX.spaces;
+    let h = tabsHtml();
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Space<b>' + (s.space ? hoqEsc(sp[s.space].label) : 'Off') + '</b></div>';
+    h += '<div class="hoq-eq-chips c3"><button class="hoq-eq-space' + (!s.space ? ' sel' : '') + '" data-s="">Off</button>' +
+      Object.keys(sp).map((k) => '<button class="hoq-eq-space' + (s.space === k ? ' sel' : '') + '" data-s="' + k + '" title="' + hoqEsc(sp[k].tip || '') + '">' + hoqEsc(sp[k].label) + '</button>').join('') + '</div>';
+    h += '<div class="hoq-eq-tip">' + (s.space ? hoqEsc(sp[s.space].tip || '') : 'Put the music somewhere. Stacks with the EQ.') + '</div></div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Amount<b class="hoq-amt-v">' + (s.space ? s.amount + '%' : '–') + '</b></div>' +
+      '<div class="hoq-eq-line"><input type="range" class="hoq-amt" min="0" max="100" step="5" value="' + s.amount + '"' + (s.space ? '' : ' disabled') + '></div></div>';
+    menu.innerHTML = h; bindTabs();
+    menu.querySelectorAll('.hoq-eq-space').forEach((el) => el.addEventListener('click', () => { FX.set({ space: el.getAttribute('data-s') }); reflectBtn(); render(); }));
+    const r = menu.querySelector('.hoq-amt'), v = menu.querySelector('.hoq-amt-v'); fill(r);
+    r.addEventListener('input', () => { fill(r); FX.set({ amount: +r.value }); v.textContent = r.value + '%'; });
+  }
+
+  // Speed: speed + pitch together (a resample, like a record), with the usual presets
+  const SPEEDS = [['Normal', 1, ''], ['Slowed', 0.85, ''], ['Slowed + reverb', 0.85, 'hall'], ['Daycore', 0.75, ''], ['Sped up', 1.15, ''], ['Nightcore', 1.25, '']];
+  function renderSpeed() {
+    const s = FX.get();
+    const semi = (r) => { const v = Math.round(12 * Math.log2(r) * 10) / 10; return (v > 0 ? '+' : '') + v; };
+    const pick = SPEEDS.find(([, r, sp]) => Math.abs(r - s.speed) < 0.001 && (sp ? s.space === sp : !(r === 0.85 && s.space === 'hall')));
+    let h = tabsHtml();
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-h">Speed<b class="hoq-sp-v">' + s.speed.toFixed(2) + '×' + (s.speed !== 1 ? ' · ' + semi(s.speed) + ' st' : '') + '</b></div>';
+    h += '<div class="hoq-eq-chips c2">' + SPEEDS.map(([l], i) => '<button class="hoq-eq-preset' + (pick && pick[0] === l ? ' sel' : '') + '" data-sp="' + i + '">' + l + '</button>').join('') + '</div></div>';
+    h += '<div class="hoq-eq-sec"><div class="hoq-eq-line"><input type="range" class="hoq-sp" min="0.5" max="1.5" step="0.01" value="' + s.speed + '"></div>' +
+      '<div class="hoq-eq-tip">Speed and pitch move together, like speeding up a record: no warble. Slowed + reverb also turns on Concert hall in Space.</div></div>';
+    menu.innerHTML = h; bindTabs();
+    const r = menu.querySelector('.hoq-sp'), v = menu.querySelector('.hoq-sp-v'); fill(r);
+    r.addEventListener('input', () => { fill(r); FX.set({ speed: +r.value }); v.textContent = (+r.value).toFixed(2) + '×' + (+r.value !== 1 ? ' · ' + semi(+r.value) + ' st' : ''); reflectBtn(); });
+    r.addEventListener('change', () => render());
+    menu.querySelectorAll('[data-sp]').forEach((el) => el.addEventListener('click', () => {
+      const [, rate, sp] = SPEEDS[+el.getAttribute('data-sp')];
+      const patch = { speed: rate };
+      if (sp) { patch.space = sp; patch.amount = 60; }
+      else if (FX.get().space === 'hall' && FX.get().speed === 0.85) patch.space = '';   // leaving Slowed + reverb takes its reverb with it
+      FX.set(patch); reflectBtn(); render();
+    }));
+  }
 
   function render() {
+    if (tab === 'vol') return renderVol();
+    if (tab === 'space') return renderSpace();
+    if (tab === 'speed') return renderSpeed();
     const gains = window.__hoqEQ.get();
     const on = window.__hoqEQ.isOn();
     const presetName = Object.keys(PRESETS).find((k) => PRESETS[k].every((v, i) => v === (gains[i] || 0)));
-    let h = '<div class="hoq-eq-top"><span class="hoq-eq-title">Equalizer</span><div class="hoq-eq-sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '"></div></div>';
-    h += '<div class="hoq-eq-presets">' + Object.keys(PRESETS).map((k) =>
-      '<button class="hoq-eq-preset' + (presetName === k ? ' sel' : '') + '" data-p="' + k + '">' + k + '</button>').join('') + '</div>';
-    h += window.__hoqEQ.freqs.map((f, i) =>
-      '<div class="hoq-eq-row"><span class="f">' + window.__hoqEQ.labels[i] + '</span>' +
-      '<input type="range" min="-12" max="12" step="1" value="' + (gains[i] || 0) + '" data-i="' + i + '">' +
-      '<span class="v" data-v="' + i + '">' + ((gains[i] || 0) > 0 ? '+' : '') + (gains[i] || 0) + '</span></div>').join('');
-    h += '<div class="hoq-eq-note">Applies to SoundCloud only. Off = flat (bypassed).</div>';
-    menu.innerHTML = h;
+    let h = tabsHtml() + '<div class="hoq-eq-sec' + (on ? '' : ' hoq-eq-off') + '"><div class="hoq-eq-h">Equalizer<div class="hoq-eq-sw' + (on ? ' on' : '') + '" role="switch" aria-checked="' + on + '"></div></div>';
+    h += '<div class="hoq-eq-faders">' + window.__hoqEQ.freqs.map((f, i) =>
+      '<div class="hoq-eq-fader"><span class="v" data-v="' + i + '">' + dbTxt(gains[i] || 0) + '</span>' +
+      '<input type="range" min="-12" max="12" step="1" value="' + (gains[i] || 0) + '" data-i="' + i + '" title="' + window.__hoqEQ.labels[i] + ' Hz">' +
+      '<span class="f">' + window.__hoqEQ.labels[i] + '</span></div>').join('') + '</div>';
+    h += '<div class="hoq-eq-chips">' + Object.keys(PRESETS).map((k) =>
+      '<button class="hoq-eq-preset' + (presetName === k ? ' sel' : '') + '" data-p="' + k + '">' + k + '</button>').join('') + '</div></div>';
+    menu.innerHTML = h; bindTabs();
     menu.querySelector('.hoq-eq-sw').addEventListener('click', () => { window.__hoqEQ.set(window.__hoqEQ.get(), !window.__hoqEQ.isOn()); reflectBtn(); render(); });
     menu.querySelectorAll('.hoq-eq-preset').forEach((el) => el.addEventListener('click', () => {
       window.__hoqEQ.set(PRESETS[el.getAttribute('data-p')].slice(), true); reflectBtn(); render();
     }));
-    menu.querySelectorAll('input[type=range]').forEach((el) => el.addEventListener('input', () => {
-      const g = window.__hoqEQ.get(); g[+el.getAttribute('data-i')] = +el.value;
-      window.__hoqEQ.set(g, true);
-      const v = menu.querySelector('.v[data-v="' + el.getAttribute('data-i') + '"]'); if (v) v.textContent = (+el.value > 0 ? '+' : '') + el.value;
-      reflectBtn();
-      // update preset highlight without a full re-render (keeps slider focus)
-      const gg = window.__hoqEQ.get(); const pn = Object.keys(PRESETS).find((k) => PRESETS[k].every((vv, i) => vv === (gg[i] || 0)));
-      menu.querySelectorAll('.hoq-eq-preset').forEach((p) => p.classList.toggle('sel', p.getAttribute('data-p') === pn));
-    }));
+    menu.querySelectorAll('.hoq-eq-fader input[type=range]').forEach((el) => {
+      fill(el);
+      el.addEventListener('input', () => {
+        fill(el);
+        const g = window.__hoqEQ.get(); g[+el.getAttribute('data-i')] = +el.value;
+        window.__hoqEQ.set(g, true);
+        const v = menu.querySelector('.v[data-v="' + el.getAttribute('data-i') + '"]'); if (v) v.textContent = dbTxt(+el.value);
+        reflectBtn();
+        menu.querySelector('.hoq-eq-sec').classList.remove('hoq-eq-off');
+        const sw = menu.querySelector('.hoq-eq-sw'); if (sw) sw.classList.add('on');
+        // update preset highlight without a full re-render (keeps slider focus)
+        const gg = window.__hoqEQ.get(); const pn = Object.keys(PRESETS).find((k) => PRESETS[k].every((vv, i) => vv === (gg[i] || 0)));
+        menu.querySelectorAll('.hoq-eq-preset').forEach((p) => p.classList.toggle('sel', p.getAttribute('data-p') === pn));
+      });
+    });
   }
   const place = () => { const b = document.getElementById('hoq-eq-btn'); if (!b) return; const r = b.getBoundingClientRect(); menu.style.top = (r.bottom + 8) + 'px'; menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px'; menu.style.left = 'auto'; };
   const isOpen = () => menu.classList.contains('show');
-  const show = () => { render(); place(); menu.classList.add('show'); };
+  const show = () => { document.querySelectorAll('#hoq-out-menu.show, #hoq-eq-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); }); render(); place(); menu.classList.add('show'); };
   const close = () => menu.classList.remove('show');
   reflectBtn();
   btn.addEventListener('click', (e) => { e.stopPropagation(); isOpen() ? close() : show(); });
   if (!window.__hoqEqBound) {
     window.__hoqEqBound = true;
-    document.addEventListener('click', (e) => { const b = document.getElementById('hoq-eq-btn'); if (isOpen() && !menu.contains(e.target) && (!b || !b.contains(e.target))) close(); });
+    // composedPath, not contains(): clicking a chip re-renders the menu, so the
+    // target is already detached by the time this runs.
+    document.addEventListener('click', (e) => { const b = document.getElementById('hoq-eq-btn'); const p = e.composedPath ? e.composedPath() : [e.target]; if (isOpen() && !p.includes(menu) && (!b || !p.includes(b))) close(); });
     window.addEventListener('keydown', (e) => { if (isOpen() && e.key === 'Escape') close(); });
     window.addEventListener('resize', () => { if (isOpen()) place(); });
   }
@@ -6804,52 +7930,80 @@ function setupMiniMode() {
       html.hoq-mini, html.hoq-mini body { overflow:hidden !important; background:#0b0b0e !important; }
       html.hoq-mini body > *:not(#hoq-mini):not(#hoq-discord):not(script):not(style) { display:none !important; }
       html.hoq-mini #hoq-discord { display:none !important; }
-      #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none;
-        flex-direction:column; gap:9px; padding:12px 14px 11px; box-sizing:border-box;
-        background:linear-gradient(180deg, rgba(20,20,26,0.6), rgba(10,10,13,0.86));
+      /* Compact player. Three layouts (data-layout): player 380x112, bar 340x56,
+         name 290x34. A tools pill (layout / pin / fade / back) appears on hover;
+         the host fades the whole window when the mouse is away (overlay style). */
+      #hoq-mini { position:fixed; inset:0; z-index:2147483200; display:none; align-items:center;
+        box-sizing:border-box; background:#0d0d10; color:#ececf1; overflow:hidden;
         font-family:Inter,-apple-system,Arial,sans-serif; -webkit-user-select:none; user-select:none; }
       html.hoq-mini #hoq-mini { display:flex; }
-      #hoq-mini .mn-bg { position:absolute; inset:0; z-index:0; background-size:cover; background-position:center;
-        filter:blur(28px) saturate(1.5) brightness(.5); transform:scale(1.2); opacity:.6; }
-      #hoq-mini > * { position:relative; z-index:1; }
-      #hoq-mini .mn-top { display:flex; align-items:center; gap:12px; }
-      #hoq-mini .mn-art { width:60px; height:60px; flex:0 0 60px; border-radius:10px; background:#222 center/cover no-repeat;
-        box-shadow:0 6px 20px rgba(0,0,0,0.5); cursor:pointer; }
-      #hoq-mini .mn-art:hover { outline:2px solid color-mix(in srgb, var(--sc-accent,#ff5500) 60%, transparent); outline-offset:1px; }
-      #hoq-mini .mn-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
-      #hoq-mini .mn-title { font-size:14px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        text-shadow:0 1px 3px rgba(0,0,0,.6); }
-      #hoq-mini .mn-artist { font-size:12px; color:#c9c9d2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        text-shadow:0 1px 3px rgba(0,0,0,.6); }
-      #hoq-mini .mn-seek { display:flex; align-items:center; gap:8px; margin-top:2px; }
-      #hoq-mini .mn-time { font-size:10.5px; color:#b7b7c0; flex:0 0 auto; font-variant-numeric:tabular-nums; white-space:nowrap; }
-      #hoq-mini input.mn-range { -webkit-appearance:none; appearance:none; height:4px; border-radius:99px; background:rgba(255,255,255,0.18); outline:none; cursor:pointer; }
-      #hoq-mini input.mn-prog { flex:1 1 auto; }
-      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
-        background:var(--sc-accent,#ff5500); box-shadow:0 0 6px color-mix(in srgb, var(--sc-accent,#ff5500) 50%, transparent); }
-      #hoq-mini input.mn-range:disabled { opacity:.45; cursor:default; }
-      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:2px; }
-      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; position:relative;
-        border:0; border-radius:50%; background:transparent; color:#d6d6de; cursor:pointer; transition:background .12s ease, color .12s ease; flex:0 0 auto; }
-      #hoq-mini .mn-btn:hover { background:rgba(255,255,255,0.12); color:#fff; }
+      #hoq-mini .mn-bg { position:absolute; inset:-30px; z-index:0; background-size:cover; background-position:center;
+        filter:blur(30px) saturate(1.3) brightness(.4); transform:scale(1.1); }
+      #hoq-mini .mn-bg::after { content:''; position:absolute; inset:0; background:rgba(10,10,13,.35); }
+      #hoq-mini > :not(.mn-bg) { position:relative; z-index:1; }
+      #hoq-mini .mn-art { flex:none; border-radius:8px; background:#1c1c22 center/cover no-repeat; cursor:pointer;
+        box-shadow:0 4px 14px rgba(0,0,0,.4); transition:filter .15s ease; }
+      #hoq-mini .mn-art:hover { filter:brightness(1.1); }
+      #hoq-mini .mn-body { flex:1 1 auto; min-width:0; height:100%; display:flex; flex-direction:column; justify-content:center; gap:6px; }
+      #hoq-mini .mn-head { display:flex; align-items:center; gap:4px; min-width:0; }
+      #hoq-mini .mn-meta { flex:1 1 auto; min-width:0; }
+      #hoq-mini .mn-title, #hoq-mini .mn-artist, #hoq-mini .mn-line { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #hoq-mini .mn-title { font-size:13px; font-weight:600; color:#fff; }
+      #hoq-mini .mn-artist { margin-top:1px; font-size:11.5px; color:#a6a6b0; }
+      #hoq-mini .mn-line { flex:1 1 auto; min-width:0; font-size:12.5px; color:#fff; font-weight:600; }
+      #hoq-mini .mn-line span { color:#a6a6b0; font-weight:400; }
+      /* sliders: thin track, near-white fill (an accent from a dark cover can be as
+         dark as the track itself), thumb only on hover */
+      #hoq-mini input.mn-range { -webkit-appearance:none; appearance:none; display:block; margin:0; height:3px; border-radius:99px; outline:none; cursor:pointer;
+        background:linear-gradient(to right, rgba(255,255,255,.88) var(--p,0%), rgba(255,255,255,.16) var(--p,0%)); }
+      #hoq-mini input.mn-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:10px; height:10px; border-radius:50%;
+        background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.5); opacity:0; transition:opacity .12s ease; }
+      #hoq-mini input.mn-range:hover::-webkit-slider-thumb, #hoq-mini input.mn-range:active::-webkit-slider-thumb { opacity:1; }
+      #hoq-mini input.mn-range:disabled { opacity:.4; cursor:default; }
+      #hoq-mini .mn-seek { display:flex; align-items:center; gap:7px; font-size:10px; color:#8e8e99; font-variant-numeric:tabular-nums; }
+      #hoq-mini .mn-seek input { flex:1 1 auto; min-width:0; }
+      #hoq-mini .mn-ctrls { display:flex; align-items:center; gap:0; margin-left:-5px; }
+      #hoq-mini .mn-btn { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; position:relative;
+        width:26px; height:26px; padding:0; border:0; border-radius:7px; background:transparent; color:#c9c9d2; cursor:pointer;
+        transition:background .12s ease, color .12s ease; }
+      #hoq-mini .mn-btn:hover { background:rgba(255,255,255,.1); color:#fff; }
+      #hoq-mini .mn-btn svg { width:15px; height:15px; }
       #hoq-mini .mn-btn.on { color:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-btn svg { width:17px; height:17px; }
-      #hoq-mini .mn-play { background:var(--sc-accent,#ff5500); color:#fff; width:38px; height:38px; margin:0 2px; }
-      #hoq-mini .mn-play:hover { filter:brightness(1.1); background:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-play svg { width:20px; height:20px; }
+      #hoq-mini .mn-play { width:30px; height:30px; margin:0 2px; border-radius:50%; background:#fff !important; color:#0d0d10 !important; }
+      #hoq-mini .mn-play svg { width:14px; height:14px; }
       #hoq-mini .mn-like svg { fill:none; stroke:currentColor; }
+      #hoq-mini .mn-like.on { color:var(--sc-accent,#ff5500); }
       #hoq-mini .mn-like.on svg { fill:currentColor; }
-      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; bottom:3px; right:4px; font-size:8px; font-weight:800;
-        color:var(--sc-accent,#ff5500); }
-      #hoq-mini .mn-spacer { flex:1 1 auto; }
-      #hoq-mini .mn-vol { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
-      #hoq-mini .mn-vol svg { width:16px; height:16px; color:#b7b7c0; flex:0 0 auto; }
-      #hoq-mini input.mn-volrange { width:56px; flex:0 0 56px; }
-      #hoq-mini .mn-exit { position:absolute; top:6px; right:8px; width:22px; height:22px; z-index:3;
-        border:0; border-radius:50%; background:rgba(0,0,0,0.35); color:#c9c9d2; cursor:pointer;
-        display:flex; align-items:center; justify-content:center; }
-      #hoq-mini .mn-exit svg { width:12px; height:12px; }
-      #hoq-mini .mn-exit:hover { background:rgba(0,0,0,0.6); color:#fff; }
+      #hoq-mini .mn-repeat.one::after { content:'1'; position:absolute; top:2px; right:2px; font-size:8px; font-weight:800; line-height:1; }
+      #hoq-mini .mn-vol { display:flex; align-items:center; gap:5px; margin-left:auto; color:#8e8e99; }
+      #hoq-mini .mn-vol svg { width:14px; height:14px; flex:none; }
+      #hoq-mini input.mn-volrange { width:48px; }
+      /* hover tools pill (top-right) */
+      /* tools sit in the title row (left of like) and only show on hover: they
+         take room from the title, never cover a control */
+      #hoq-mini .mn-tools { display:none; flex:none; gap:0; padding:1px; margin-right:2px; border-radius:8px; background:rgba(255,255,255,.07); }
+      #hoq-mini:hover .mn-tools { display:flex; }
+      #hoq-mini .mn-tools .mn-btn { width:22px; height:22px; color:#a6a6b0; }
+      #hoq-mini .mn-tools .mn-btn svg { width:13px; height:13px; }
+      #hoq-mini .mn-tools .mn-btn.on { color:var(--sc-accent,#ff5500); }
+      #hoq-mini .mn-flash { position:absolute; left:10px; bottom:10px; z-index:4; padding:3px 9px; border-radius:99px; max-width:calc(100% - 20px); overflow:hidden; text-overflow:ellipsis;
+        background:rgba(14,14,18,.9); font-size:11px; color:#fff; white-space:nowrap; opacity:0; transition:opacity .15s ease; pointer-events:none; }
+      #hoq-mini .mn-flash.show { opacity:1; }
+      /* layouts */
+      #hoq-mini[data-layout="player"] { padding:12px; gap:12px; }
+      #hoq-mini[data-layout="player"] .mn-art { width:88px; height:88px; }
+      #hoq-mini[data-layout="bar"] { padding:8px 10px 8px 8px; gap:10px; }
+      #hoq-mini[data-layout="bar"] .mn-art { width:40px; height:40px; border-radius:6px; }
+      #hoq-mini[data-layout="name"] { padding:5px 8px 5px 5px; gap:8px; }
+      #hoq-mini[data-layout="name"] .mn-art { width:24px; height:24px; border-radius:5px; box-shadow:none; }
+      #hoq-mini:not([data-layout="player"]) .mn-flash { bottom:auto; top:50%; left:6px; transform:translateY(-50%); }
+      #hoq-mini[data-layout="name"] .mn-tools .mn-btn { width:20px; height:20px; }
+      #hoq-mini:not([data-layout="player"]) .mn-body > :not(.mn-head) { display:none; }
+      #hoq-mini:not([data-layout="player"]) .mn-head .mn-mini-ctrls { display:flex; }
+      #hoq-mini .mn-mini-ctrls { display:none; align-items:center; }
+      #hoq-mini[data-layout="name"] .mn-mini-ctrls, #hoq-mini[data-layout="name"] .mn-meta { display:none !important; }
+      #hoq-mini:not([data-layout="name"]) .mn-line { display:none; }
+      #hoq-mini[data-layout="name"] .mn-like { width:22px; height:22px; }
     `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -6868,10 +8022,25 @@ function setupMiniMode() {
     repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
     like: '<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
     vol: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+    layout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v6"/></svg>',
+    fade: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>',
   };
   const fmt = (s) => { if (!isFinite(s) || s < 0) s = 0; s = Math.floor(s); const m = Math.floor(s / 60); const ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; };
+  const fillR = (r) => r.style.setProperty('--p', (r.value - r.min) / (r.max - r.min) * 100 + '%');
   let scrubbing = false, adjustingVol = false;
+
+  // Settings (synced with the account like the rest): layout, always on top,
+  // and how see-through the window gets while the mouse is away.
+  const LAYOUTS = { player: [380, 112], bar: [340, 56], name: [290, 34] };
+  const LAYOUT_NAMES = { player: 'Player', bar: 'Bar', name: 'Name only' };
+  const FADES = [100, 70, 50, 30];
+  const pref = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
+  const setPref = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
+  const layout = () => { const l = pref('hoqMiniLayout', 'player'); return LAYOUTS[l] ? l : 'player'; };
+  const pinned = () => pref('hoqMiniPin', '1') !== '0';
+  const fade = () => { const f = +pref('hoqMiniFade', '100'); return FADES.includes(f) ? f : 100; };
 
   let widget = document.getElementById('hoq-mini');
   if (!widget) {
@@ -6879,50 +8048,86 @@ function setupMiniMode() {
     widget.id = 'hoq-mini';
     widget.innerHTML =
       '<div class="mn-bg"></div>' +
-      '<button class="mn-exit" title="Exit compact player">' + SVG.exit + '</button>' +
-      '<div class="mn-top">' +
-        '<div class="mn-art" title="Back to full app"></div>' +
-        '<div class="mn-main">' +
-          '<div class="mn-title">—</div>' +
-          '<div class="mn-artist"></div>' +
-          '<div class="mn-seek"><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0"><span class="mn-time">0:00 / 0:00</span></div>' +
+      '<div class="mn-art" title="Back to full app"></div>' +
+      '<div class="mn-body">' +
+        '<div class="mn-head">' +
+          '<div class="mn-meta"><div class="mn-title">Not playing</div><div class="mn-artist"></div></div>' +
+          '<div class="mn-line"></div>' +
+          '<span class="mn-mini-ctrls">' +
+            '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
+            '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
+          '</span>' +
+          '<span class="mn-tools">' +
+            '<button class="mn-btn mn-t-layout" title="Layout">' + SVG.layout + '</button>' +
+            '<button class="mn-btn mn-t-pin" title="Keep on top">' + SVG.pin + '</button>' +
+            '<button class="mn-btn mn-t-fade" title="Fade when the mouse is away">' + SVG.fade + '</button>' +
+            '<button class="mn-btn mn-t-exit" title="Back to full app">' + SVG.exit + '</button>' +
+          '</span>' +
+          '<button class="mn-btn mn-like" title="Like">' + SVG.like + '</button>' +
+        '</div>' +
+        '<div class="mn-seek"><span class="mn-t0">0:00</span><input type="range" class="mn-range mn-prog" min="0" max="1000" value="0"><span class="mn-t1">0:00</span></div>' +
+        '<div class="mn-ctrls">' +
+          '<button class="mn-btn mn-shuffle" title="Shuffle">' + SVG.shuffle + '</button>' +
+          '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
+          '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
+          '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
+          '<button class="mn-btn mn-repeat" title="Repeat">' + SVG.repeat + '</button>' +
+          '<span class="mn-vol" title="Volume (or scroll anywhere)">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
         '</div>' +
       '</div>' +
-      '<div class="mn-ctrls">' +
-        '<button class="mn-btn mn-shuffle" title="Shuffle">' + SVG.shuffle + '</button>' +
-        '<button class="mn-btn mn-prev" title="Previous">' + SVG.prev + '</button>' +
-        '<button class="mn-btn mn-play" title="Play/pause">' + SVG.play + '</button>' +
-        '<button class="mn-btn mn-next" title="Next">' + SVG.next + '</button>' +
-        '<button class="mn-btn mn-repeat" title="Repeat">' + SVG.repeat + '</button>' +
-        '<button class="mn-btn mn-like" title="Like">' + SVG.like + '</button>' +
-        '<span class="mn-spacer"></span>' +
-        '<span class="mn-vol">' + SVG.vol + '<input type="range" class="mn-range mn-volrange" min="0" max="100" value="100"></span>' +
-      '</div>';
+      '<div class="mn-flash"></div>';
     document.body.appendChild(widget);
     // Dragging the card body moves the OS window (frameless), except on controls
-    // and the cover art (which is a click target — "back to full app"). Without
-    // excluding the art, mousedown starts an OS window-move and its click never
-    // lands, so clicking the cover dragged the window instead of restoring.
+    // and the cover art (which is a click target — "back to full app").
     widget.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (e.target.closest('button, input, .mn-art')) return;
       scPost('win:drag');
     });
     const clickSc = (sel) => { const el = document.querySelector(sel); if (el) el.click(); setTimeout(update, 60); };
-    widget.querySelector('.mn-prev').addEventListener('click', () => window.__hoqMedia('prev'));
-    widget.querySelector('.mn-next').addEventListener('click', () => window.__hoqMedia('next'));
-    widget.querySelector('.mn-play').addEventListener('click', () => { window.__hoqMedia('playpause'); setTimeout(update, 80); });
-    widget.querySelector('.mn-shuffle').addEventListener('click', () => clickSc('.shuffleControl'));
-    widget.querySelector('.mn-repeat').addEventListener('click', () => clickSc('.repeatControl'));
-    widget.querySelector('.mn-like').addEventListener('click', () => clickSc('.playbackSoundBadge__like'));
-    widget.querySelector('.mn-art').addEventListener('click', () => exitMini());   // cover = back to full app
-    widget.querySelector('.mn-exit').addEventListener('click', () => exitMini());
+    const on = (sel, fn) => widget.querySelectorAll(sel).forEach((b) => b.addEventListener('click', fn));
+    on('.mn-prev', () => window.__hoqMedia('prev'));
+    on('.mn-next', () => window.__hoqMedia('next'));
+    on('.mn-play', () => { window.__hoqMedia('playpause'); setTimeout(update, 80); });
+    on('.mn-shuffle', () => clickSc('.shuffleControl'));
+    on('.mn-repeat', () => clickSc('.repeatControl'));
+    on('.mn-like', () => clickSc('.playbackSoundBadge__like'));
+    on('.mn-art', () => exitMini());
+    on('.mn-t-exit', () => exitMini());
+    let flashT = 0;
+    const flash = (t) => { const f = widget.querySelector('.mn-flash'); f.textContent = t; f.classList.add('show'); clearTimeout(flashT); flashT = setTimeout(() => f.classList.remove('show'), 1300); };
+    on('.mn-t-layout', () => {
+      const keys = Object.keys(LAYOUTS), next = keys[(keys.indexOf(layout()) + 1) % keys.length];
+      setPref('hoqMiniLayout', next); applyLayout(true); flash(LAYOUT_NAMES[next]);
+    });
+    on('.mn-t-pin', () => { setPref('hoqMiniPin', pinned() ? '0' : '1'); scPost('mini:pin:' + (pinned() ? '1' : '0')); reflectTools(); flash(pinned() ? 'Kept on top' : 'Not on top'); });
+    on('.mn-t-fade', () => {
+      const next = FADES[(FADES.indexOf(fade()) + 1) % FADES.length];
+      setPref('hoqMiniFade', next); reflectTools(); flash(next === 100 ? 'Fade off' : 'Fades to ' + next + '% when the mouse is away');
+    });
+    // Overlay fade: see-through while the mouse is away, solid on hover.
+    document.documentElement.addEventListener('mouseleave', () => { if (miniOn() && fade() < 100) scPost('mini:alpha:' + fade()); });
+    document.documentElement.addEventListener('mouseenter', () => { if (miniOn()) scPost('mini:alpha:100'); });
     const prog = widget.querySelector('.mn-prog');
-    prog.addEventListener('input', () => { scrubbing = true; const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-time').textContent = fmt(prog.value / 1000 * el.duration) + ' / ' + fmt(el.duration); });
-    prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) { try { el.currentTime = prog.value / 1000 * el.duration; } catch (e) {} } scrubbing = false; });
+    prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * el.duration); });
+    prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) hoqSeek(prog.value / 1000 * el.duration); scrubbing = false; });
     const vol = widget.querySelector('.mn-volrange');
-    vol.addEventListener('input', () => { adjustingVol = true; const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } });
+    const setVol = () => { fillR(vol); const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } };
+    vol.addEventListener('input', () => { adjustingVol = true; setVol(); });
     vol.addEventListener('change', () => { adjustingVol = false; });
+    // scroll anywhere on the player = volume
+    widget.addEventListener('wheel', (e) => { e.preventDefault(); vol.value = Math.max(0, Math.min(100, +vol.value + (e.deltaY < 0 ? 5 : -5))); setVol(); flash('Volume ' + vol.value + '%'); }, { passive: false });
+  }
+  const miniOn = () => document.documentElement.classList.contains('hoq-mini');
+  function reflectTools() {
+    widget.querySelector('.mn-t-pin').classList.toggle('on', pinned());
+    widget.querySelector('.mn-t-fade').classList.toggle('on', fade() < 100);
+  }
+  function applyLayout(resize) {
+    const l = layout();
+    widget.setAttribute('data-layout', l);
+    if (resize && miniOn()) scPost('mini:size:' + LAYOUTS[l][0] + 'x' + LAYOUTS[l][1]);
+    reflectTools();
   }
 
   function np() {
@@ -6952,14 +8157,19 @@ function setupMiniMode() {
     return { title, artist, cover, paused, liked, shuffling, repeat };
   }
   function update() {
-    if (!document.documentElement.classList.contains('hoq-mini')) return;
+    if (!miniOn()) return;
     const s = np();
     const set = (sel, txt) => { const el = widget.querySelector(sel); if (el && el.textContent !== txt) el.textContent = txt; };
     set('.mn-title', s.title || 'Not playing');
     set('.mn-artist', s.artist || '');
+    const line = widget.querySelector('.mn-line');
+    const lineHtml = hoqEsc(s.title || 'Not playing') + (s.artist ? ' <span>· ' + hoqEsc(s.artist) + '</span>' : '');
+    if (line.innerHTML !== lineHtml) line.innerHTML = lineHtml;
     const art = widget.querySelector('.mn-art'); const bg = widget.querySelector('.mn-bg');
-    if (s.cover) { art.style.backgroundImage = s.cover; bg.style.backgroundImage = s.cover; }
-    const pb = widget.querySelector('.mn-play'); if (pb) pb.innerHTML = s.paused ? SVG.play : SVG.pause;
+    // the player badge only carries a 50px thumbnail: ask for the 500px one
+    const big = s.cover ? s.cover.replace(/-(t\d+x\d+|large|small|badge|tiny)\.(jpg|png|jpeg)/i, '-t500x500.$2') : '';
+    if (big && art.style.backgroundImage !== big) { art.style.backgroundImage = big; bg.style.backgroundImage = big; }
+    widget.querySelectorAll('.mn-play').forEach((pb) => { const h = s.paused ? SVG.play : SVG.pause; if (pb.innerHTML !== h) pb.innerHTML = h; });
     widget.querySelector('.mn-like').classList.toggle('on', s.liked);
     widget.querySelector('.mn-shuffle').classList.toggle('on', s.shuffling);
     const rpBtn = widget.querySelector('.mn-repeat');
@@ -6967,16 +8177,18 @@ function setupMiniMode() {
     rpBtn.classList.toggle('one', s.repeat === 'one');
     // progress + time + volume from the actual audio element
     const el = window.__hoqMediaEl;
-    const prog = widget.querySelector('.mn-prog'); const timeEl = widget.querySelector('.mn-time'); const vol = widget.querySelector('.mn-volrange');
+    const prog = widget.querySelector('.mn-prog'); const vol = widget.querySelector('.mn-volrange');
     const dur = el && isFinite(el.duration) ? el.duration : 0;
     const cur = el ? el.currentTime : 0;
     prog.disabled = !dur;
-    if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; timeEl.textContent = fmt(cur) + ' / ' + fmt(dur); }
-    if (!adjustingVol && el) vol.value = Math.round((el.muted ? 0 : el.volume) * 100);
+    if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; fillR(prog); set('.mn-t0', fmt(cur)); set('.mn-t1', fmt(dur)); }
+    if (!adjustingVol && el) { vol.value = Math.round((el.muted ? 0 : el.volume) * 100); fillR(vol); }
   }
   function enterMini() {
     document.documentElement.classList.add('hoq-mini');
-    scPost('mini:on');
+    applyLayout(false);
+    const sz = LAYOUTS[layout()];
+    scPost('mini:on:' + sz[0] + 'x' + sz[1] + ':' + (pinned() ? '1' : '0'));
     update();
     // Tighter cadence so the progress bar moves smoothly.
     if (!window.__hoqMiniTimer) window.__hoqMiniTimer = setInterval(update, 500);
@@ -6987,14 +8199,311 @@ function setupMiniMode() {
     if (window.__hoqMiniTimer) { clearInterval(window.__hoqMiniTimer); window.__hoqMiniTimer = null; }
   }
   window.__hoqExitMini = exitMini;   // let the host force-exit if needed
-  btn.addEventListener('click', () => { document.documentElement.classList.contains('hoq-mini') ? exitMini() : enterMini(); });
+  btn.addEventListener('click', () => { miniOn() ? exitMini() : enterMini(); });
+}
+
+// ---- Profile extras -------------------------------------------------------
+// On any artist profile: Play all / Shuffle, a "Find a track" box that searches
+// their whole catalogue, a "You & <artist>" card from the local listening stats,
+// and "New" tags on tracks posted since you last opened their page. The track
+// list comes from SoundCloud's own API (same client_id the page itself uses),
+// fetched once per profile per session.
+const __hoqPf = { cache: {}, prev: {}, slug: '', cid: '' };
+function hoqPfClientId() {
+  if (__hoqPf.cid) return __hoqPf.cid;
+  const n = performance.getEntriesByType('resource').map((e) => e.name).reverse().find((x) => /[?&]client_id=/.test(x));
+  __hoqPf.cid = n ? ((n.match(/client_id=([^&]+)/) || [])[1] || '') : '';
+  return __hoqPf.cid;
+}
+function hoqPfData(slug) {
+  if (__hoqPf.cache[slug]) return __hoqPf.cache[slug];
+  const p = (async () => {
+    const cid = hoqPfClientId();
+    if (!cid) throw new Error('no client id yet');
+    const api = 'https://api-v2.soundcloud.com';
+    const u = await fetch(api + '/resolve?url=' + encodeURIComponent('https://soundcloud.com/' + slug) + '&client_id=' + cid).then((r) => r.json());
+    if (!u || u.kind !== 'user') throw new Error('not a user');
+    const tracks = [];
+    let next = api + '/users/' + u.id + '/tracks?limit=200&linked_partitioning=1&client_id=' + cid;
+    for (let i = 0; next && i < 8; i++) {
+      const j = await fetch(next).then((r) => r.json());
+      (j.collection || []).forEach((t) => {
+        if (!t || t.kind !== 'track') return;
+        tracks.push({
+          title: t.title || '', path: (t.permalink_url || '').replace(/^https?:\/\/[^/]+/, ''),
+          date: Date.parse(t.display_date || t.created_at || '') || 0, dur: t.duration || 0, plays: t.playback_count || 0,
+          art: (t.artwork_url || (u.avatar_url || '')).replace('-large.', '-t50x50.'),
+        });
+      });
+      next = j.next_href ? j.next_href + (/[?&]client_id=/.test(j.next_href) ? '' : '&client_id=' + cid) : '';
+    }
+    return { user: u, tracks };
+  })();
+  __hoqPf.cache[slug] = p;
+  p.catch(() => { delete __hoqPf.cache[slug]; });
+  return p;
+}
+const hoqPfDate = (t) => {
+  if (!t) return '';
+  const d = new Date(t), now = new Date();
+  return d.toLocaleDateString(undefined, d.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+};
+const hoqPfDur = (ms) => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const hoqPfSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Open a track page through SoundCloud's own router (the player keeps going),
+// then press its play button once it shows up.
+function hoqPfOpenAndPlay(path, seek) {
+  try { sessionStorage.setItem('hoqPfAuto', JSON.stringify({ path, t: Date.now(), seek: seek > 0 ? seek : 0 })); } catch (e) {}
+  const a = document.createElement('a');
+  a.href = path; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function hoqPfAutoPlay() {
+  let job = null; try { job = JSON.parse(sessionStorage.getItem('hoqPfAuto')); } catch (e) {}
+  if (!job) return;
+  if (Date.now() - job.t > 15000) { sessionStorage.removeItem('hoqPfAuto'); return; }
+  if (decodeURIComponent(location.pathname).toLowerCase() !== decodeURIComponent(job.path).toLowerCase()) return;
+  const b = document.querySelector('.fullHero__title .soundTitle__playButton .sc-button-play, .fullListenHero .sc-button-play');
+  if (!b) return;
+  sessionStorage.removeItem('hoqPfAuto');
+  if (!b.classList.contains('sc-button-pause')) b.click();
+  if (job.seek > 0) {
+    // once this track is actually playing, jump to the position (listen along)
+    const want = job.seek + 1, t0 = Date.now();
+    const iv = setInterval(() => {
+      const el = window.__hoqMediaEl;
+      if (Date.now() - t0 > 20000) { clearInterval(iv); return; }
+      if (el && !el.paused && el.currentTime > 4 && el.readyState >= 3 && isFinite(el.duration) && want < el.duration - 3) {
+        clearInterval(iv); hoqSeek(want + (Date.now() - t0) / 1000);
+      }
+    }, 250);
+  }
+}
+
+// Play the artist's Tracks tab from the top, or a random track with shuffle on.
+async function hoqPfPlayAll(slug, shuffle) {
+  const onTracks = () => new RegExp('^/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/tracks/?$', 'i').test(location.pathname);
+  if (!onTracks()) {
+    const a = document.querySelector('.userInfoBar__tabs a[href$="/tracks"]');
+    if (a) a.click(); else return;
+  }
+  let btns = [];
+  for (let i = 0; i < 50; i++) {
+    btns = onTracks() ? [...document.querySelectorAll('.soundList__item .soundTitle__playButton .sc-button-play')] : [];
+    if (btns.length) break;
+    await hoqPfSleep(150);
+  }
+  if (!btns.length) return;
+  const sh = document.querySelector('.playControls .shuffleControl');
+  const shOn = () => !!(sh && /m-shuffling|sc-button-selected/.test(sh.className));
+  if (!shuffle && shOn()) sh.click();
+  const b = shuffle ? btns[Math.floor(Math.random() * btns.length)] : btns[0];
+  if (!b.classList.contains('sc-button-pause')) b.click();
+  if (shuffle) { await hoqPfSleep(400); if (sh && !shOn()) sh.click(); }
+}
+
+function setupProfileExtras() {
+  hoqPfAutoPlay();
+  const bar = document.querySelector('.l-user-hero') && document.querySelector('.userInfoBar__buttons');
+  if (!bar) { const r = document.getElementById('hoq-pf-res'); if (r) r.remove(); return; }
+  const slug = (location.pathname.split('/')[1] || '').toLowerCase();
+  if (!slug || /^(you|discover|search|stream|feed|charts|upload|settings|messages|notifications|pages|terms-of-use|people)$/.test(slug)) return;
+
+  // When did you last open this profile? Kept per profile; this visit's "since"
+  // stays fixed until the app restarts, so the New tags don't vanish on a re-render.
+  if (!(slug in __hoqPf.prev)) {
+    let seen = {}; try { seen = JSON.parse(localStorage.getItem('hoqProfSeen')) || {}; } catch (e) {}
+    __hoqPf.prev[slug] = seen[slug] || 0;
+    seen[slug] = Date.now();
+    const keys = Object.keys(seen);
+    if (keys.length > 600) keys.sort((a, b) => seen[a] - seen[b]).slice(0, keys.length - 600).forEach((k) => delete seen[k]);
+    try { localStorage.setItem('hoqProfSeen', JSON.stringify(seen)); } catch (e) {}
+  }
+  const prev = __hoqPf.prev[slug];
+
+  if (!document.getElementById('hoq-pf-css')) {
+    const st = document.createElement('style');
+    st.id = 'hoq-pf-css';
+    st.textContent = `
+      /* on the banner's bottom-right (empty space), not in the tab bar: there it
+         pushed the tabs and SoundCloud's own buttons onto a second line */
+      .profileHeader { position:relative !important; }
+      #hoq-pf-tools { position:absolute; right:20px; bottom:20px; z-index:5; display:flex; align-items:center; gap:8px;
+        padding:6px; border-radius:14px; background:rgba(12,12,16,.55); border:1px solid rgba(255,255,255,.1);
+        box-shadow:0 8px 28px rgba(0,0,0,.35); backdrop-filter:blur(18px) saturate(1.4); -webkit-backdrop-filter:blur(18px) saturate(1.4); }
+      #hoq-pf-tools .hoq-pf-btn, #hoq-pf-tools .hoq-pf-find { height:32px; }
+      /* tabs stay on one line (scroll sideways if they ever run out of room) */
+      .userInfoBar__tabs { min-width:0 !important; overflow-x:auto !important; scrollbar-width:none !important; }
+      .userInfoBar__tabs .g-tabs { flex-wrap:nowrap !important; white-space:nowrap !important; }
+      .userInfoBar__buttons .sc-button-group { flex-wrap:nowrap !important; }
+      #hoq-pf-tools .hoq-pf-btn { display:inline-flex; align-items:center; gap:7px; height:34px; padding:0 13px; border-radius:10px;
+        border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.04); color:#e8e8ee; font:600 13px/1 Inter,-apple-system,Arial,sans-serif;
+        cursor:pointer; transition:background .12s ease, border-color .12s ease; white-space:nowrap; }
+      #hoq-pf-tools .hoq-pf-btn:hover { background:rgba(255,255,255,.09); border-color:rgba(255,255,255,.22); color:#fff; }
+      #hoq-pf-tools .hoq-pf-btn svg { width:14px; height:14px; flex:none; }
+      #hoq-pf-tools .hoq-pf-play { background:color-mix(in srgb, var(--sc-accent,#ff5500) 22%, transparent); border-color:color-mix(in srgb, var(--sc-accent,#ff5500) 40%, transparent); }
+      #hoq-pf-tools .hoq-pf-play:hover { background:color-mix(in srgb, var(--sc-accent,#ff5500) 34%, transparent); }
+      #hoq-pf-tools .hoq-pf-shuf { width:34px; padding:0; justify-content:center; }
+      .hoq-pf-find { position:relative; display:flex; align-items:center; height:34px; width:190px; padding:0 10px; box-sizing:border-box;
+        border-radius:10px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); color:#8e8e99; transition:border-color .12s ease, width .18s ease; }
+      .hoq-pf-find:focus-within { border-color:color-mix(in srgb, var(--sc-accent,#ff5500) 55%, transparent); width:240px; }
+      .hoq-pf-find svg { width:14px; height:14px; flex:none; }
+      .hoq-pf-find input { flex:1; min-width:0; height:100%; margin:0 0 0 7px; padding:0; border:0 !important; outline:0 !important; background:none !important;
+        box-shadow:none !important; color:#ececf1; font:500 13px Inter,-apple-system,Arial,sans-serif; }
+      .hoq-pf-find input::placeholder { color:#7d7d88; }
+      .hoq-pf-res { position:fixed; top:0; left:0; z-index:2147483000; width:380px; max-height:420px; overflow-y:auto; padding:6px;
+        box-sizing:border-box; border-radius:14px; border:1px solid rgba(255,255,255,.09) !important; background:#141418 !important; opacity:1 !important; backdrop-filter:none !important;
+        box-shadow:0 18px 52px rgba(0,0,0,.55); display:none; scrollbar-width:none; }
+      .hoq-pf-res.show { display:block; }
+      .hoq-pf-r { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:9px; color:#ececf1 !important; text-decoration:none !important; cursor:pointer; }
+      .hoq-pf-r:hover, .hoq-pf-r.sel { background:rgba(255,255,255,.07); }
+      .hoq-pf-r i { flex:none; width:36px; height:36px; border-radius:6px; background:#1c1c22 center/cover no-repeat; }
+      .hoq-pf-r div { flex:1; min-width:0; }
+      .hoq-pf-r b { display:block; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#ececf1; }
+      .hoq-pf-r b mark { background:none; color:color-mix(in srgb, var(--sc-accent,#ff5500) 60%, #fff); }
+      .hoq-pf-r span { display:block; margin-top:2px; font-size:11.5px; color:#8e8e99; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .hoq-pf-msg { padding:14px 10px; font-size:12.5px; color:#8e8e99; text-align:center; }
+      /* You & <artist> */
+      #hoq-pf-you { margin:0 0 18px; padding:14px; border-radius:14px; border:1px solid rgba(255,255,255,.07); background:rgba(255,255,255,.035);
+        font-family:Inter,-apple-system,Arial,sans-serif; color:#ececf1; }
+      #hoq-pf-you .hd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; font-size:13px; font-weight:600; }
+      #hoq-pf-you .hd span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #hoq-pf-you .new { flex:none; font-style:normal; padding:3px 9px; border-radius:99px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;
+        background:color-mix(in srgb, var(--sc-accent,#ff5500) 22%, transparent); color:color-mix(in srgb, var(--sc-accent,#ff5500) 55%, #fff); }
+      #hoq-pf-you .nums { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+      #hoq-pf-you .nums div { padding:9px 10px; border-radius:10px; background:rgba(255,255,255,.04); min-width:0; }
+      #hoq-pf-you .nums b { display:block; font-size:17px; font-weight:700; color:#fff; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #hoq-pf-you .nums span { display:block; margin-top:2px; font-size:10.5px; color:#8e8e99; }
+      #hoq-pf-you .lbl { margin:14px 0 6px; font-size:11px; font-weight:600; color:#8e8e99; }
+      #hoq-pf-you ol { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+      #hoq-pf-you ol .hoq-pf-r { padding:5px 6px; }
+      #hoq-pf-you ol .hoq-pf-r i { width:30px; height:30px; border-radius:5px; }
+      #hoq-pf-you .foot, #hoq-pf-you .empty { margin-top:12px; font-size:11.5px; color:#7d7d88; }
+      #hoq-pf-you .empty { margin-top:0; font-size:12.5px; color:#a6a6b0; }
+      /* New since your last visit */
+      .soundList__item .hoq-pf-newtag { display:inline-flex !important; align-items:center; height:18px; padding:0 7px !important; margin-left:8px; border-radius:99px; vertical-align:middle;
+        background:var(--sc-accent,#ff5500) !important; color:#fff !important; -webkit-text-fill-color:#fff !important; font:700 10.5px/1 Inter,-apple-system,Arial,sans-serif !important; letter-spacing:.02em; text-shadow:none !important; }
+    `;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  // --- toolbar: Find a track · Play all · Shuffle ---
+  let tools = document.getElementById('hoq-pf-tools');
+  if (tools && tools.dataset.slug !== slug) { tools.remove(); tools = null; }
+  if (!tools) {
+    tools = document.createElement('div');
+    tools.id = 'hoq-pf-tools';
+    tools.dataset.slug = slug;
+    tools.innerHTML =
+      '<label class="hoq-pf-find"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>' +
+      '<input type="text" placeholder="Find a track" spellcheck="false" autocomplete="off"></label>' +
+      '<button type="button" class="hoq-pf-btn hoq-pf-play" title="Play their tracks from the newest"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.3-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5z"/></svg>Play all</button>' +
+      '<button type="button" class="hoq-pf-btn hoq-pf-shuf" title="Shuffle their tracks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h4v4M4 20L20 4M20 16v4h-4M15 15l5 5M4 4l5 5"/></svg></button>';
+    (document.querySelector('.l-user-hero .profileHeader') || bar).appendChild(tools);
+    tools.querySelector('.hoq-pf-play').addEventListener('click', () => hoqPfPlayAll(slug, false));
+    tools.querySelector('.hoq-pf-shuf').addEventListener('click', () => hoqPfPlayAll(slug, true));
+
+    const inp = tools.querySelector('input');
+    // results live on <body>: the banner clips its children, and the tools' blur
+    // would trap a fixed-position child inside it
+    const old = document.getElementById('hoq-pf-res'); if (old) old.remove();   // one per toolbar (fresh handlers)
+    const res = document.createElement('div'); res.id = 'hoq-pf-res'; res.className = 'hoq-pf-res'; document.body.appendChild(res);
+    const place = () => { const r = inp.closest('.hoq-pf-find').getBoundingClientRect(); res.style.top = (r.bottom + 8) + 'px'; res.style.left = Math.max(8, Math.min(r.right - 380, window.innerWidth - 388)) + 'px'; };
+    window.addEventListener('scroll', () => { if (res.isConnected && res.classList.contains('show')) place(); }, { passive: true });
+    let sel = 0, hits = [];
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const mark = (t, q) => { const i = t.toLowerCase().indexOf(q); return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length)); };
+    const render = async () => {
+      const q = inp.value.trim().toLowerCase();
+      place(); res.classList.add('show');
+      let data;
+      try { data = await hoqPfData(slug); } catch (e) { res.innerHTML = '<div class="hoq-pf-msg">Couldn’t load their tracks. Try again in a moment.</div>'; return; }
+      if (inp.value.trim().toLowerCase() !== q) return;   // typed on meanwhile
+      hits = (q ? data.tracks.filter((t) => t.title.toLowerCase().includes(q)) : data.tracks).slice(0, 40);
+      sel = 0;
+      if (!hits.length) { res.innerHTML = '<div class="hoq-pf-msg">' + (q ? 'No track called “' + esc(inp.value.trim()) + '”' : 'No tracks yet') + '</div>'; return; }
+      res.innerHTML = hits.map((t, i) => '<a class="hoq-pf-r' + (i === 0 ? ' sel' : '') + '" data-i="' + i + '"><i style="background-image:url(' + esc(JSON.stringify(t.art)) + ')"></i><div><b>' + mark(t.title, q) + '</b><span>' +
+        [hoqPfDate(t.date), hoqPfDur(t.dur), t.plays ? t.plays.toLocaleString() + ' plays' : ''].filter(Boolean).join(' · ') + '</span></div></a>').join('') +
+        (q ? '' : '<div class="hoq-pf-msg">' + data.tracks.length + ' tracks · type to search them all</div>');
+    };
+    const pick = (i) => { const t = hits[i]; if (!t) return; res.classList.remove('show'); inp.value = ''; inp.blur(); hoqPfOpenAndPlay(t.path); };
+    let deb = 0;
+    inp.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(render, 90); });
+    inp.addEventListener('focus', render);
+    inp.addEventListener('keydown', (e) => {
+      const rows = res.querySelectorAll('.hoq-pf-r');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault(); if (!rows.length) return;
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+        rows.forEach((r, i) => r.classList.toggle('sel', i === sel)); rows[sel].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') { e.preventDefault(); pick(sel); }
+      else if (e.key === 'Escape') { res.classList.remove('show'); inp.blur(); }
+    });
+    res.addEventListener('mousedown', (e) => { const r = e.target.closest('.hoq-pf-r'); if (r) { e.preventDefault(); pick(+r.dataset.i); } });
+    inp.addEventListener('blur', () => setTimeout(() => res.classList.remove('show'), 120));
+  }
+
+  // --- "You & <artist>" card at the top of the sidebar ---
+  const side = document.querySelector('.userSidebar');
+  let card = document.getElementById('hoq-pf-you');
+  if (card && card.dataset.slug !== slug) { card.remove(); card = null; }
+  if (side && !card) {
+    card = document.createElement('section');
+    card.id = 'hoq-pf-you';
+    card.dataset.slug = slug;
+    side.insertBefore(card, side.querySelector('.infoStats') || side.firstChild);
+    hoqPfData(slug).then((data) => {
+      if (!card.isConnected) return;
+      const name = data.user.username || slug, nl = name.toLowerCase();
+      const s = hoqStatsShown(), local = hoqStatsRead();
+      const cnt = (o) => { let n = 0; for (const k in (o || {})) if (k.toLowerCase() === nl) n += +o[k] || 0; return n; };
+      const plays = cnt(s.artists);
+      const ym = hoqDayKey(Date.now()).slice(0, 7);
+      let month = 0, lastDay = '';
+      for (const k in (s.days || {})) { const n = cnt(s.days[k].artists); if (!n) continue; if (k.slice(0, 7) === ym) month += n; if (k > lastDay) lastDay = k; }
+      const af = (local.af || {})[nl];
+      const last = af ? af[1] : (lastDay ? new Date(+lastDay.slice(0, 4), +lastDay.slice(5, 7) - 1, +lastDay.slice(8, 10)).getTime() : 0);
+      const first = af && af[0] ? af[0] : 0;
+      // your most-played tracks of theirs: your per-title counts matched to their catalogue
+      const byTitle = {};
+      for (const k in (s.tracks || {})) byTitle[k.toLowerCase()] = (byTitle[k.toLowerCase()] || 0) + (+s.tracks[k] || 0);
+      const top = data.tracks.map((t) => ({ t, n: byTitle[t.title.toLowerCase()] || 0 })).filter((x) => x.n).sort((a, b) => b.n - a.n).slice(0, 3);
+      const fresh = prev ? data.tracks.filter((t) => t.date > prev).length : 0;
+      const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      card.innerHTML = '<div class="hd"><span>You &amp; ' + esc(name) + '</span>' +
+        (fresh ? '<em class="new" title="Posted since you last opened this page (' + esc(hoqPfDate(prev)) + ')">' + fresh + ' new</em>' : '') + '</div>' +
+        (plays ? '<div class="nums"><div><b>' + plays.toLocaleString() + '</b><span>plays</span></div><div><b>' + month + '</b><span>this month</span></div>' +
+          '<div><b>' + (last ? esc(hoqPfDate(last)) : '—') + '</b><span>last played</span></div></div>' +
+          (top.length ? '<div class="lbl">Your most played</div><ol>' + top.map(({ t, n }) => '<li class="hoq-pf-r" data-path="' + esc(t.path) + '"><i style="background-image:url(' + esc(JSON.stringify(t.art)) + ')"></i><div><b>' + esc(t.title) + '</b><span>' + n + (n === 1 ? ' play' : ' plays') + '</span></div></li>').join('') + '</ol>' : '') +
+          (first ? '<div class="foot">First played ' + esc(hoqPfDate(first)) + '</div>' : '')
+          : '<div class="empty">You haven’t played ' + esc(name) + ' in the app yet.</div>');
+      card.querySelectorAll('li.hoq-pf-r').forEach((li) => li.addEventListener('click', () => hoqPfOpenAndPlay(li.dataset.path)));
+      const nw = card.querySelector('.new');
+      if (nw) nw.addEventListener('click', () => { const a = document.querySelector('.userInfoBar__tabs a[href$="/tracks"]'); if (a) a.click(); });
+    }).catch(() => { if (card.isConnected) card.remove(); });
+  }
+
+  // --- "New" tag on their tracks posted since your last visit ---
+  if (prev) {
+    document.querySelectorAll('.soundList__item').forEach((it) => {
+      if (it.dataset.hoqNv === slug) return;
+      it.dataset.hoqNv = slug;
+      const by = it.querySelector('.soundTitle__username');
+      if (!by || (by.getAttribute('href') || '').toLowerCase() !== '/' + slug) return;
+      const tm = it.querySelector('time[datetime]');
+      if (!tm || Date.parse(tm.getAttribute('datetime')) <= prev) return;
+      const title = it.querySelector('.soundTitle__title');
+      if (title && !it.querySelector('.hoq-pf-newtag')) title.insertAdjacentHTML('afterend', '<span class="hoq-pf-newtag" title="Posted since you last opened this page">New</span>');
+    });
+  }
 }
 
 // The profile-tab bar and the library/collection nav lean toward the cursor
 // with a lit accent lift. Same resilient closest()-based pattern as setupTilt so
 // it survives SoundCloud's re-renders; gated by the "3D tab bars" toggle.
 function setupTabTilt() {
-  const SEL = '.userInfoBar__tabs .g-tabs-link, .l-nav .collectionNav.g-tabs .g-tabs-link';
+  const SEL = '.userInfoBar__tabs .g-tabs-link';
   const MAX_Y = 12, MAX_X = 7, LIFT = 12;
   let cur = null, px = 0, py = 0, raf = 0;
   const reset = (t) => { if (!t) return; t.style.transform = ''; t.style.transition = 'transform .3s ease'; t.classList.remove('hoq-tt'); };
@@ -7795,7 +9304,7 @@ if (document.readyState === 'loading') {
   //   .tileGallery                    horizontal carousels of 159px tiles
   const mob = document.createElement('style');
   mob.id = 'hoq-mobile-css';
-  mob.textContent = "/* holdonquietly — mobile layout.\n   SoundCloud only ships a desktop DOM here: we force a desktop UA upstream,\n   because otherwise it 307s phones to m.soundcloud.com, which the theme does\n   not target. Scaling that 1280px canvas to fit put it at ~29% on a phone —\n   present but unreadable. So reflow it properly.\n   Every selector below was measured against the live DOM, not guessed. */\n@media (max-width: 820px) {\n  html.hoq-mobile, html.hoq-mobile body {\n    overflow-x: hidden !important;\n    /* WebKit inflates text on wide-layout pages — nav came out ~1.7x. */\n    -webkit-text-size-adjust: 100% !important;\n    text-size-adjust: 100% !important;\n  }\n\n  /* Fixed-width containers -> fluid. These are the 1240px culprits. */\n  html.hoq-mobile .l-container,\n  html.hoq-mobile .header__inner,\n  html.hoq-mobile .l-content,\n  html.hoq-mobile .l-inner-fullwidth {\n    max-width: 100% !important; width: 100% !important;\n    padding-left: 12px !important; padding-right: 12px !important;\n    box-sizing: border-box !important;\n  }\n\n  /* Two columns -> one. The 360px right rail is pure noise on a phone. */\n  html.hoq-mobile .l-fluid-fixed { display: block !important; }\n  html.hoq-mobile .l-main {\n    width: 100% !important; float: none !important; margin: 0 !important;\n    box-sizing: border-box !important;\n  }\n  html.hoq-mobile .l-sidebar-right,\n  html.hoq-mobile .l-fluid-fixed > aside { display: none !important; }\n\n  /* The header is ~195px fixed — half the screen, and it covered the page\n     heading. Let it scroll away; a phone has no room for a persistent bar. */\n  html.hoq-mobile .header { position: static !important; height: auto !important; }\n  html.hoq-mobile body { padding-top: 0 !important; }\n  html.hoq-mobile .l-content, html.hoq-mobile #content {\n    padding-top: 0 !important; margin-top: 0 !important;\n  }\n  html.hoq-mobile .header__inner {\n    flex-wrap: wrap !important; height: auto !important; align-items: center !important;\n    padding-top: 4px !important; padding-bottom: 4px !important;\n    gap: 6px !important; row-gap: 4px !important;\n  }\n  html.hoq-mobile .header__left { flex: 1 1 100% !important; flex-wrap: wrap !important; display: flex !important; align-items: center !important; }\n  html.hoq-mobile .header__logo { flex: 0 0 auto !important; max-width: 44vw !important; overflow: hidden !important; }\n  html.hoq-mobile .header__right { flex: 0 0 auto !important; gap: 4px !important; }\n  html.hoq-mobile .header__right .sc-button,\n  html.hoq-mobile .header__right a { font-size: 12px !important; padding: 4px 10px !important; height: auto !important; }\n\n  /* Nav must never wrap — a half row of tabs reads as broken. Scroll it. */\n  html.hoq-mobile .header__navWrapper {\n    flex: 1 1 100% !important; order: 5 !important;\n    overflow-x: auto !important; overflow-y: hidden !important;\n    -webkit-overflow-scrolling: touch !important; scrollbar-width: none !important;\n  }\n  html.hoq-mobile .header__navWrapper::-webkit-scrollbar { display: none !important; }\n  html.hoq-mobile .header__navMenu {\n    display: flex !important; flex-wrap: nowrap !important;\n    white-space: nowrap !important; width: max-content !important;\n  }\n  html.hoq-mobile .header__navMenu > li { flex: 0 0 auto !important; margin-right: 0 !important; }\n  /* Zeroing the item padding also killed SoundCloud's own margin, so labels\n     ran together as 'CollectionSocial/Settings'. Flex gap rather than a\n     margin: the injected Social/Settings <li> is a clone of Library's and\n     did not pick the margin up, leaving that one pair still touching. */\n  html.hoq-mobile .header__navMenu { gap: 18px !important; }\n  html.hoq-mobile .header__navMenuItem { padding: 6px 0 !important; margin-right: 0 !important; }\n\n  html.hoq-mobile .header__middle { order: 10 !important; flex: 1 1 100% !important; }\n  /* The form carries margin-left: 24px / right: 16px from the desktop layout,\n     which pushed it 12px past the right edge of a 390px viewport. */\n  html.hoq-mobile .headerSearch {\n    width: 100% !important; height: 32px !important;\n    margin: 0 !important; box-sizing: border-box !important;\n  }\n  html.hoq-mobile .header__search { width: 100% !important; }\n  html.hoq-mobile .headerSearch__input { font-size: 13px !important; height: 30px !important; }\n  /* No room, and all desktop-shaped. */\n  html.hoq-mobile .header__soundInput,\n  html.hoq-mobile .uploadButton,\n  html.hoq-mobile .header__forArtistsButton,\n  html.hoq-mobile .header__moreButton { display: none !important; }\n  /* A full-width promo block is a lot of nothing on a phone. */\n  html.hoq-mobile .l-product-banners, html.hoq-mobile .banner { display: none !important; }\n\n  /* Tiles: a 2-up GRID, not a horizontal carousel. The carousels clipped --\n     you could only see the first row or two of each shelf and had to swipe\n     sideways. A grid shows everything and never clips. */\n  /* The gallery containers kept the carousel's fixed single-row height, so a\n     grid with multiple rows overflowed and the next section rendered over it.\n     Let every wrapper grow to its content. */\n  html.hoq-mobile .tileGallery,\n  html.hoq-mobile [class*='tileGallery'],\n  html.hoq-mobile .mixedSelectionModule,\n  html.hoq-mobile .mixedSelectionGallery { width: 100% !important; height: auto !important; }\n  html.hoq-mobile .tileGallery__slider,\n  html.hoq-mobile .tileGallery__sliderPeekContainer {\n    overflow: visible !important; width: 100% !important; height: auto !important;\n  }\n  html.hoq-mobile .tileGallery__sliderPanel {\n    display: flex !important; flex-wrap: wrap !important; align-content: flex-start !important;\n    gap: 16px 12px !important; height: auto !important; min-height: 0 !important;\n    /* THE fix: SoundCloud clamps this shelf with max-height: 208px (one carousel\n       row) via a :has() selector that outranks a plain class. That is what made\n       every wrapped row overflow onto the next section. */\n    max-height: none !important;\n    overflow: visible !important; transform: none !important;\n  }\n  html.hoq-mobile .tileGallery__sliderPanelSlide {\n    flex: 0 0 calc(50% - 6px) !important; width: calc(50% - 6px) !important;\n    max-width: calc(50% - 6px) !important; margin: 0 !important; padding: 0 !important;\n  }\n  html.hoq-mobile .playableTile {\n    width: 100% !important; min-width: 0 !important; margin: 0 !important;\n    display: flex !important; flex-direction: column !important;\n  }\n  /* Square the artwork with aspect-ratio and pin every child over it -- the\n     inner link/image otherwise kept their desktop pixel height (~2x) and blew\n     the grid rows apart. */\n  /* SoundCloud already squares the artwork with padding-bottom: 100%. Leave\n     that alone -- an aspect-ratio on top of it double-counted the height and\n     made every tile 2x too tall. Just clip and round it. */\n  html.hoq-mobile .playableTile__artwork {\n    width: 100% !important; height: auto !important; position: relative !important;\n    overflow: hidden !important; border-radius: 8px !important; margin: 0 !important;\n  }\n  html.hoq-mobile .playableTile__artwork > * {\n    position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;\n    width: auto !important; height: auto !important; margin: 0 !important;\n  }\n  /* the play + action controls inside must not be forced full-height */\n  html.hoq-mobile .playableTile__playButton,\n  html.hoq-mobile .playableTile__actions { height: auto !important; width: auto !important; }\n  html.hoq-mobile .playableTile__description { margin-top: 8px !important; }\n  /* Overlay arrows are meaningless in a grid. */\n  html.hoq-mobile .tileGallery__sliderButton,\n  html.hoq-mobile .tileGallery__sliderPeek,\n  html.hoq-mobile .tileGallery__leftButton,\n  html.hoq-mobile .tileGallery__rightButton { display: none !important; }\n\n  /* Type that survives the reflow. */\n  html.hoq-mobile .playableTile__heading, html.hoq-mobile .sc-text-h4 { font-size: 13px !important; }\n  html.hoq-mobile h1 { font-size: 20px !important; }\n  html.hoq-mobile .l-content h2, html.hoq-mobile .sectionHead__title { font-size: 17px !important; }\n\n  /* Player bar: keep transport + title, drop what a thumb cannot use anyway. */\n  html.hoq-mobile .playControls { height: 56px !important; }\n  html.hoq-mobile .playControls__inner { padding: 0 8px !important; }\n  html.hoq-mobile .playControls__elements { width: 100% !important; }\n  html.hoq-mobile .volume,\n  html.hoq-mobile .playControls__shuffle,\n  html.hoq-mobile .playControls__repeat,\n  html.hoq-mobile .playbackSoundBadge__follow { display: none !important; }\n  html.hoq-mobile .playbackTimeline { flex: 1 1 auto !important; min-width: 0 !important; }\n  html.hoq-mobile .playbackSoundBadge__titleContextContainer { min-width: 0 !important; }\n  /* The injected #hoq-playbtn / #hoq-share (Play/Share to Discord) overflowed\n     the right edge at 390px -- the bar ran to 445px. Reclaim room by hiding the\n     two desktop-only badge actions (queue, like) and trimming SoundCloud's big\n     margins. Deliberately NOT restructuring .playControls__inner: making it a\n     flex row turned the queue panel and background into flex siblings and\n     collapsed the whole bar. This keeps the native structure and just fits. */\n  html.hoq-mobile .playbackSoundBadge__showQueue,\n  html.hoq-mobile .playbackSoundBadge__like { display: none !important; }\n  html.hoq-mobile .playControls__soundBadge { margin-left: 2px !important; }\n  html.hoq-mobile .playbackSoundBadge__actions { margin-left: 4px !important; }\n  html.hoq-mobile .playControls__timeline { margin-left: 8px !important; margin-right: 4px !important; }\n  html.hoq-mobile .playbackSoundBadge__avatar { margin-right: 6px !important; }\n  html.hoq-mobile #hoq-playbtn, html.hoq-mobile #hoq-share { margin-left: 1px !important; }\n\n  /* Our own surfaces, also built for a wide window. */\n  html.hoq-mobile #hoq-discord .hoq-dc-body { display: block !important; }\n  html.hoq-mobile #hoq-discord .hoq-dc-sec { width: 100% !important; }\n  html.hoq-mobile #sc-palette .pal-grid { grid-template-columns: 1fr !important; }\n  html.hoq-mobile #sc-palette > .row,\n  html.hoq-mobile #sc-palette > .bgurl,\n  html.hoq-mobile #sc-palette > .btn-2up { max-width: 100% !important; }\n  /* ---- list + search rows ------------------------------------------------\n     A 160px artwork beside a 182px column squeezed titles to one character\n     per line and made rows 596px tall. Shrink the art, give the text the\n     rest, and drop the waveform and comment box, which are unusable here. */\n  html.hoq-mobile .sound__body,\n  html.hoq-mobile .userItem.sc-media { display: flex !important; align-items: flex-start !important; }\n  html.hoq-mobile .sound__artwork,\n  html.hoq-mobile .userItem__coverArt {\n    flex: 0 0 92px !important; width: 92px !important; height: 92px !important;\n    margin-right: 10px !important;\n  }\n  html.hoq-mobile .sound__coverArt,\n  html.hoq-mobile .userItem__coverArt .image,\n  html.hoq-mobile .userItem__coverArt .sc-artwork { width: 92px !important; height: 92px !important; }\n  html.hoq-mobile .sound__content,\n  html.hoq-mobile .userItem .sc-media-content {\n    flex: 1 1 auto !important; width: auto !important; min-width: 0 !important;\n  }\n  html.hoq-mobile .sound__header { min-width: 0 !important; }\n  html.hoq-mobile .soundTitle__title,\n  html.hoq-mobile .soundTitle__usernameText,\n  html.hoq-mobile .userItem__title {\n    white-space: normal !important; word-break: normal !important; overflow-wrap: anywhere !important;\n  }\n  html.hoq-mobile .sound__waveform, html.hoq-mobile .commentForm { display: none !important; }\n\n  /* The play button is an inline 40px block before the title; at this width it\n     crowds the text, and the accent glow makes it read as an overlay. */\n  html.hoq-mobile .soundTitle__titleContainer {\n    display: flex !important; align-items: flex-start !important; gap: 8px !important;\n  }\n  html.hoq-mobile .soundTitle__playButton { flex: 0 0 30px !important; margin: 0 !important; }\n  html.hoq-mobile .soundTitle__playButton .sc-button-play,\n  html.hoq-mobile .soundTitle__playButton > * { width: 30px !important; height: 30px !important; }\n  html.hoq-mobile .soundTitle__usernameTitleContainer,\n  html.hoq-mobile .soundTitle__additionalContainer { flex: 1 1 auto !important; min-width: 0 !important; }\n  html.hoq-mobile .sound__header .sc-button-play { box-shadow: none !important; filter: none !important; }\n  html.hoq-mobile .sound__header .sc-text-secondary,\n  html.hoq-mobile .soundTitle__uploadTime { float: none !important; display: block !important; font-size: 11px !important; }\n\n  /* Search filter tabs were stacking on top of each other. */\n  html.hoq-mobile .searchOptions__tabs,\n  html.hoq-mobile [class*='searchOptions'] ul {\n    display: flex !important; flex-wrap: nowrap !important; overflow-x: auto !important;\n    gap: 14px !important; position: static !important;\n  }\n  html.hoq-mobile [class*='searchOptions'] li { position: static !important; flex: 0 0 auto !important; }\n  /* ---- track page hero ---------------------------------------------------\n     Desktop floats a 320px artwork right and lets the title fill the rest. At\n     390px the foreground came out 606px wide, the artwork sat at x=282 off\n     screen, and the title collapsed to ZERO width -- printing the track name\n     one character per line down the page. Stack it instead. */\n  html.hoq-mobile .l-listen-hero,\n  html.hoq-mobile .fullListenHero,\n  html.hoq-mobile .fullHero { height: auto !important; }\n  html.hoq-mobile .fullHero__foreground {\n    display: flex !important; flex-direction: column !important; align-items: stretch !important;\n    width: 100% !important; max-width: 100% !important; position: static !important;\n    padding: 12px 12px 4px !important; box-sizing: border-box !important;\n  }\n  html.hoq-mobile .fullHero__artwork {\n    position: static !important; order: -1 !important; float: none !important;\n    width: 100% !important; max-width: 260px !important; height: auto !important;\n    margin: 0 auto 14px !important;\n  }\n  html.hoq-mobile .listenArtworkWrapper,\n  html.hoq-mobile .fullHero__artwork .image,\n  html.hoq-mobile .fullHero__artwork .sc-artwork {\n    width: 100% !important; max-width: 260px !important; height: auto !important; aspect-ratio: 1 !important;\n  }\n  html.hoq-mobile .fullHero__title {\n    width: 100% !important; min-width: 0 !important; height: auto !important;\n    position: static !important; float: none !important;\n  }\n  html.hoq-mobile .fullHero__title .soundTitle,\n  html.hoq-mobile .fullHero__title .soundTitle__titleContainer { width: 100% !important; min-width: 0 !important; }\n  html.hoq-mobile .fullHero__title .soundTitle__title {\n    white-space: normal !important; overflow-wrap: anywhere !important; font-size: 19px !important;\n  }\n  html.hoq-mobile .fullHero__info,\n  html.hoq-mobile .fullHero__playerArea,\n  html.hoq-mobile .fullHero__waveform {\n    width: 100% !important; position: static !important; float: none !important;\n  }\n  html.hoq-mobile .fullHero__info { text-align: left !important; margin-top: 6px !important; }\n  html.hoq-mobile .fullHero__uploadTime { display: inline-block !important; margin-right: 8px !important; }\n  html.hoq-mobile .fullHero__playerArea { margin-top: 10px !important; min-height: 0 !important; }\n  html.hoq-mobile .fullHero__waveform { height: 64px !important; min-height: 0 !important; }\n  html.hoq-mobile .backgroundGradient { width: 100% !important; }\n  html.hoq-mobile .l-listen-hero { margin-bottom: 8px !important; }\n  html.hoq-mobile .listenEngagement__actions,\n  html.hoq-mobile .soundActions { flex-wrap: wrap !important; gap: 8px !important; }\n  /* ---- Collection / Library ----------------------------------------------\n     Built from the logged-in DOM. Tiles are already handled; this fixes the\n     page furniture around them at 390px. */\n  /* The tab bar (Recently played / Likes / Playlists / …) is a wide g-tabs row\n     that overflowed. Let it scroll sideways. */\n  html.hoq-mobile .collectionNav,\n  html.hoq-mobile .collectionNav.g-tabs {\n    display: flex !important; flex-wrap: nowrap !important;\n    overflow-x: auto !important; -webkit-overflow-scrolling: touch !important;\n    scrollbar-width: none !important;\n  }\n  html.hoq-mobile .collectionNav::-webkit-scrollbar { display: none !important; }\n  html.hoq-mobile .collectionNav > li { flex: 0 0 auto !important; }\n\n  /* Each section header packs a heading + spacer + Clear-all button + a filter\n     input into one row (g-flex-row-centered-spread). At 390px that overflows,\n     so wrap it and let the filter take its own line. */\n  html.hoq-mobile .playHistory__top,\n  html.hoq-mobile .collectionSection__top,\n  html.hoq-mobile .collectionSection__header {\n    flex-wrap: wrap !important; gap: 6px 10px !important;\n  }\n  html.hoq-mobile .collectionSection__flexFill { display: none !important; }\n  html.hoq-mobile .collectionSection__filters { flex: 1 1 100% !important; }\n  html.hoq-mobile .collectionSection__filterText,\n  html.hoq-mobile .collectionSection__filters .textfield { width: 100% !important; }\n  html.hoq-mobile .collectionSection__subHeading,\n  html.hoq-mobile .playHistory__subHeading { font-size: 17px !important; }\n\n  /* The one-row horizontal shelves of the Library OVERVIEW. Likes / Playlists /\n     Albums / … use the very same markup (badgeList > lazyLoadingList__list) for\n     the whole page, so this used to catch them too and squeezed a 48-item grid\n     into one clipped sideways row. The shim tags the route on <html>. */\n  html.hoq-mobile[data-hoq-route='/you/library'] .collection .lazyLoadingList__list {\n    display: flex !important; flex-wrap: nowrap !important; gap: 12px !important;\n    overflow-x: auto !important; -webkit-overflow-scrolling: touch !important;\n    scrollbar-width: none !important; scroll-snap-type: x proximity !important;\n  }\n  html.hoq-mobile[data-hoq-route='/you/library'] .collection .lazyLoadingList__list::-webkit-scrollbar { display: none !important; }\n  html.hoq-mobile[data-hoq-route='/you/library'] .collection .lazyLoadingList__list > .badgeList__item {\n    flex: 0 0 138px !important; width: 138px !important; margin: 0 !important; padding: 0 !important;\n    float: none !important; scroll-snap-align: start !important;\n  }\n\n  /* Everywhere else in the Library it's the whole list: two columns, like\n     Discover's tiles. (List view has no badgeList__item and is left alone.) */\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list:has(> .badgeList__item) {\n    display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important;\n    gap: 18px 12px !important; width: auto !important; overflow: visible !important;\n  }\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list:has(> .badgeList__item)::before,\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list:has(> .badgeList__item)::after { display: none !important; }\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list > .badgeList__item {\n    width: auto !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; float: none !important;\n  }\n  html.hoq-mobile .l-collection .badgeList__item .audibleTile,\n  html.hoq-mobile .l-collection .badgeList__item .playableTile { width: 100% !important; min-width: 0 !important; }\n  html.hoq-mobile .l-collection .badgeList { width: auto !important; max-width: 100% !important; }\n\n  /* The theme turns the Library tabs into a 172px vertical side panel\n     (preload: .l-collection:has(.collectionNav)). At 390px that left the\n     content 170px -- the heading ran one word per line and the grid was cut\n     off. Stack it: the tabs become a scrolling pill row above the content. */\n  html.hoq-mobile .l-collection:has(.collectionNav) { display: block !important; }\n  html.hoq-mobile .l-collection:has(.collectionNav) .l-nav {\n    position: static !important; width: 100% !important; flex: none !important;\n    margin: 0 0 14px !important;\n  }\n  html.hoq-mobile .l-collection:has(.collectionNav) .l-main { width: 100% !important; }\n  html.hoq-mobile .l-nav .collectionNav.g-tabs {\n    flex-direction: row !important; gap: 4px !important; padding: 5px !important;\n    border-radius: 12px !important; box-shadow: none !important;\n  }\n  html.hoq-mobile .l-nav .collectionNav.g-tabs li,\n  html.hoq-mobile .l-nav .collectionNav.g-tabs .g-tabs-item { width: auto !important; flex: 0 0 auto !important; }\n  html.hoq-mobile .l-nav .collectionNav.g-tabs a {\n    width: auto !important; white-space: nowrap !important; transform: none !important;\n    padding: 7px 13px !important; font-size: 13px !important; border-radius: 8px !important;\n  }\n  /* The side panel's left accent bar reads wrong on a pill: a ring instead. */\n  html.hoq-mobile .l-nav .collectionNav.g-tabs .active a, html.hoq-mobile .l-nav .collectionNav.g-tabs a.active,\n  html.hoq-mobile .l-nav .collectionNav.g-tabs li.active a, html.hoq-mobile .l-nav .collectionNav.g-tabs [aria-current] a,\n  html.hoq-mobile .l-nav .collectionNav.g-tabs a[aria-current] {\n    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important;\n  }\n  html.hoq-mobile .collection { padding: 0 !important; }\n  html.hoq-mobile .collection__section { margin-bottom: 18px !important; }\n  /* ---- Track page below the hero ----------------------------------------\n     The listen page is a desktop 2-column layout (main text column + a 360px\n     right sidebar), and inside the main column another split (info left,\n     comments right ~198px). On mobile the sidebar hides but the columns keep\n     their sizing, so the main column collapsed to ~6px and comments crammed\n     into a sliver -- text wrapped one word per line. Stack every l-about-*\n     column to a full-width block. */\n  html.hoq-mobile .l-listen-wrapper { display: block !important; }\n  html.hoq-mobile .l-sidebar-right { display: none !important; }\n  html.hoq-mobile [class*='l-about-'] {\n    width: 100% !important; max-width: 100% !important; min-width: 0 !important;\n    float: none !important; display: block !important;\n    margin-left: 0 !important; padding-left: 0 !important;\n  }\n  html.hoq-mobile .l-listen__mainContent, html.hoq-mobile .l-about-row { display: block !important; }\n  html.hoq-mobile .listenDetails,\n  html.hoq-mobile .listenDetails > *,\n  html.hoq-mobile .commentsList,\n  html.hoq-mobile .commentsList__item,\n  html.hoq-mobile .listenDetails__partialInfo,\n  html.hoq-mobile .listenDetails__login {\n    position: static !important; float: none !important; display: block !important;\n    width: 100% !important; max-width: 100% !important; box-sizing: border-box !important;\n    margin-left: 0 !important;\n  }\n  html.hoq-mobile .commentsList__item { padding-left: 8px !important; padding-right: 8px !important; }\n  html.hoq-mobile .commentItem__message, html.hoq-mobile .commentItem__body {\n    white-space: normal !important; overflow-wrap: anywhere !important;\n  }\n  html.hoq-mobile .commentsList__header, html.hoq-mobile .commentsList__top {\n    flex-wrap: wrap !important; gap: 6px !important;\n  }\n  html.hoq-mobile .commentsList__sortSelect, html.hoq-mobile .select__wrapper { max-width: 100% !important; }\n  /* ---- Profile / artist header ------------------------------------------\n     Desktop lays a 198px avatar beside the name over an opaque banner. At\n     390px that squished the name into a ~90px strip, one word per line. Stack\n     it, and turn the banner into a soft frosted backdrop that blends into the\n     theme's cover wash -- name stays prominent (per request, don't ruin it). */\n  html.hoq-mobile .l-user-hero { position: relative !important; padding: 0 !important; overflow: hidden !important; }\n  html.hoq-mobile .profileHeader { position: relative !important; width: 100% !important; min-height: 0 !important; }\n  html.hoq-mobile .profileHeaderBackground { position: absolute !important; inset: 0 !important; z-index: 0 !important; }\n  html.hoq-mobile .profileHeaderBackground__visual {\n    position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important;\n    background-size: cover !important; background-position: center !important;\n    filter: blur(18px) saturate(1.2) brightness(0.55) !important; transform: scale(1.15) !important; opacity: 0.5 !important;\n  }\n  html.hoq-mobile .profileHeader::after {\n    content: '' !important; position: absolute !important; inset: 0 !important; z-index: 1 !important;\n    background: linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 55%, rgba(10,10,12,0.9) 100%) !important;\n    pointer-events: none !important;\n  }\n  html.hoq-mobile .profileHeader__info { position: relative !important; z-index: 2 !important; }\n  html.hoq-mobile .profileHeaderInfo {\n    display: flex !important; flex-direction: column !important; align-items: center !important;\n    text-align: center !important; padding: 20px 12px 16px !important; gap: 8px !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__avatar { margin: 0 !important; }\n  html.hoq-mobile .profileHeaderInfo__avatar .image,\n  html.hoq-mobile .profileHeaderInfo__avatar .sc-artwork,\n  html.hoq-mobile .profileHeaderInfo__avatar > div {\n    width: 104px !important; height: 104px !important;\n    box-shadow: 0 6px 22px rgba(0,0,0,0.5), 0 0 0 3px color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__content { width: 100% !important; min-width: 0 !important; }\n  html.hoq-mobile .profileHeaderInfo__userName {\n    font-size: 22px !important; white-space: normal !important; overflow-wrap: anywhere !important;\n    text-shadow: 0 2px 8px rgba(0,0,0,0.6) !important; margin: 0 !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__additional {\n    font-size: 13px !important; white-space: normal !important; text-shadow: 0 1px 4px rgba(0,0,0,0.6) !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__content br { display: none !important; }\n}\n\n/* Logged-out mode. The proxy cannot complete a sign-in (SoundCloud's bot\n   protection challenges it), so every account control is a dead end: tapping\n   Like or Follow opens a sign-in modal that cannot succeed. Hiding them is a\n   better experience than leaving traps. Applied only when actually signed out,\n   so this all comes back if a session is ever present. */\nhtml.hoq-anon .header__userNav,\nhtml.hoq-anon .header__soundInput,\nhtml.hoq-anon .uploadButton,\nhtml.hoq-anon .header__forArtistsButton,\nhtml.hoq-anon .header__upsellWrapper,\nhtml.hoq-anon .header__moreButton { display: none !important; }\n\n/* Sign in / Create account sit together in .header__loginMenu. Matching the\n   container is exact; matching the buttons is not, since they carry only\n   generic sc-button classes shared with controls we want to keep. */\nhtml.hoq-anon .header__loginMenu,\nhtml.hoq-anon .loginButton,\nhtml.hoq-anon .signupButton { display: none !important; }\n\n/* The auth modal and whatever backdrop carries it. */\nhtml.hoq-anon div:has(> iframe[src*='web-auth']),\nhtml.hoq-anon div:has(> iframe[src*='one-tap']),\nhtml.hoq-anon .modal, html.hoq-anon .modal__modal,\nhtml.hoq-anon [class*='authModal' i],\nhtml.hoq-anon .g-modal-overlay { display: none !important; }\nhtml.hoq-anon body { overflow: auto !important; }\n\n/* Actions that need an account. Leaving them visible means a tap that opens a\n   modal we have just hidden — nothing happens, which reads as broken. */\nhtml.hoq-anon .sc-button-like,\nhtml.hoq-anon .sc-button-follow,\nhtml.hoq-anon .sc-button-repost,\nhtml.hoq-anon .playableTile__actionButton,\nhtml.hoq-anon .playbackSoundBadge__follow,\nhtml.hoq-anon .playbackSoundBadge__like { display: none !important; }\n\n/* Promos and upsells: all of them lead to signup. */\nhtml.hoq-anon .l-product-banners,\nhtml.hoq-anon .banner,\nhtml.hoq-anon [class*='upsell' i],\nhtml.hoq-anon [class*='Upsell' i] { display: none !important; }\n\n/* With the account row gone the header is two compact rows, so give the\n   search its full width. */\nhtml.hoq-anon.hoq-mobile .header__middle { flex: 1 1 100% !important; }\nhtml.hoq-anon.hoq-mobile .headerSearch { width: 100% !important; }\n\n/* Stream and Collection are account-only: signed out they redirect straight to\n   a sign-in wall. Leaving them in the nav is a tab that always dead-ends. */\nhtml.hoq-anon .header__navMenuItem[data-menu-name='stream'],\nhtml.hoq-anon .header__navMenuItem[data-menu-name='library'] { display: none !important; }\nhtml.hoq-anon .header__navMenu > li:has(> [data-menu-name='stream']),\nhtml.hoq-anon .header__navMenu > li:has(> [data-menu-name='library']) { display: none !important; }\n\n/* Signed out on the proxy: SoundCloud's own Sign in can't complete here, so a\n   clear way in -- the desktop app hands its session over (Settings -> Phone). */\n#hoq-signin-cta {\n  display: none; align-items: center; gap: 12px; box-sizing: border-box;\n  margin: 10px 12px 4px; padding: 12px 12px 12px 14px; border-radius: 14px;\n  background: linear-gradient(135deg, color-mix(in srgb, var(--sc-accent, #ff5500) 26%, #15151a), #15151a 80%);\n  border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent);\n  box-shadow: 0 8px 26px color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent);\n  font: 13px/1.35 -apple-system, Inter, Arial, sans-serif; color: #d6d6dc;\n}\nhtml.hoq-anon #hoq-signin-cta { display: flex; }\n#hoq-signin-cta .cta-txt { flex: 1 1 auto; min-width: 0; }\n#hoq-signin-cta .cta-txt b { display: block; color: #fff; font-size: 14px; margin-bottom: 1px; }\n#hoq-signin-cta button, #hoq-signin-sheet .sh-go {\n  flex: none; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer;\n  background: var(--sc-accent, #ff5500); color: #fff; font: 700 13px -apple-system, Inter, Arial, sans-serif;\n  box-shadow: 0 0 18px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent);\n}\n#hoq-signin-sheet {\n  position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: flex-end; justify-content: center;\n  background: rgba(0,0,0,.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);\n}\n#hoq-signin-sheet[hidden] { display: none; }\n#hoq-signin-sheet .sh {\n  width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto; box-sizing: border-box;\n  background: #141418; border: 1px solid rgba(255,255,255,.1); border-bottom: 0;\n  border-radius: 20px 20px 0 0; padding: 20px 18px calc(22px + env(safe-area-inset-bottom));\n  font: 14px/1.45 -apple-system, Inter, Arial, sans-serif; color: #c9c9d2;\n}\n#hoq-signin-sheet h3 { margin: 0 0 4px; color: #fff; font-size: 19px; }\n#hoq-signin-sheet .sh-sub { margin: 0 0 14px; color: #9a9aa4; font-size: 13px; }\n#hoq-signin-sheet ol { margin: 0 0 14px; padding: 0; list-style: none; counter-reset: s; }\n#hoq-signin-sheet li { position: relative; padding: 0 0 12px 36px; counter-increment: s; }\n#hoq-signin-sheet li::before {\n  content: counter(s); position: absolute; left: 0; top: -1px; width: 24px; height: 24px; border-radius: 50%;\n  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;\n  background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent); color: var(--sc-accent, #ff5500);\n}\n#hoq-signin-sheet li b, #hoq-signin-sheet .sh-k { color: #fff; }\n#hoq-signin-sheet .sh-k { font-weight: 700; }\n#hoq-signin-sheet .sh-paste { margin-top: 4px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }\n#hoq-signin-sheet .sh-paste p { margin: 0 0 8px; font-size: 13px; color: #9a9aa4; }\n#hoq-signin-sheet .sh-row { display: flex; gap: 8px; }\n#hoq-signin-sheet input {\n  flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 10px 12px; border-radius: 10px;\n  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff;\n  font: 16px -apple-system, Inter, Arial, sans-serif;   /* 16px: iOS won't zoom the page on focus */\n}\n#hoq-signin-sheet .sh-msg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #ff8a7a; }\n#hoq-signin-sheet .sh-close {\n  display: block; width: 100%; margin-top: 14px; padding: 11px; border-radius: 10px; cursor: pointer;\n  border: 1px solid rgba(255,255,255,.12); background: transparent; color: #c9c9d2; font: 600 14px -apple-system, Inter, Arial, sans-serif;\n}\n\n\n/* ---- Floating now-playing pill (phone) ------------------------------------\n   Modelled on SoundCloud's own app: ring-progress play button, title/artist,\n   Discord + like. SoundCloud's bar stays in the DOM, invisible, doing the real\n   work (and feeding the lock screen) -- the shim builds this face for it and\n   adds html.hoq-pill-on only once it's live, so a failure leaves the old bar. */\n#hoq-pill { display: none; }\n@media (max-width: 820px) {\n  html.hoq-mobile.hoq-pill-on #hoq-pill {\n    display: flex; position: fixed; z-index: 2000; box-sizing: border-box;\n    left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom));\n    height: 66px; align-items: center; gap: 11px; padding: 0 8px 0 7px; border-radius: 33px;\n    background: rgba(28,28,31,.88);\n    -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);\n    border: 1px solid rgba(255,255,255,.12);\n    box-shadow: 0 12px 34px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);\n    font-family: -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; color: #fff;\n    touch-action: pan-y; -webkit-tap-highlight-color: transparent;\n    -webkit-user-select: none; user-select: none;\n  }\n  html.hoq-np-open #hoq-pill { display: none !important; }\n  /* The real bar: still laid out (its timeline rect drives lock-screen seeking,\n     its buttons take our clicks), just never seen or touched. opacity, not\n     visibility: the theme forces some children visible, and they showed\n     through on top of the pill. */\n  html.hoq-mobile.hoq-pill-on .playControls { opacity: 0 !important; }\n  html.hoq-mobile.hoq-pill-on .playControls,\n  html.hoq-mobile.hoq-pill-on .playControls * { pointer-events: none !important; }\n  html.hoq-mobile.hoq-pill-on body { padding-bottom: calc(92px + env(safe-area-inset-bottom)) !important; }\n\n  #hoq-pill button {\n    -webkit-appearance: none; appearance: none; border: 0; background: none; margin: 0; padding: 0;\n    color: inherit; cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center;\n  }\n  #hoq-pill .pl-play { position: relative; width: 52px; height: 52px; }\n  #hoq-pill .pl-ring { position: absolute; inset: 0; width: 52px; height: 52px; transform: rotate(-90deg); }\n  #hoq-pill .pl-ring circle { fill: none; stroke-width: 3.5; }\n  #hoq-pill .pl-track { stroke: rgba(255,255,255,.14); }\n  #hoq-pill .pl-prog {\n    stroke: var(--sc-accent, #ff5500); stroke-linecap: round;\n    stroke-dasharray: 144.51; stroke-dashoffset: 144.51; transition: stroke-dashoffset .25s linear;\n  }\n  #hoq-pill .pl-disc {\n    width: 40px; height: 40px; border-radius: 50%; background: #fff; color: #121214;\n    display: flex; align-items: center; justify-content: center;\n    box-shadow: 0 2px 8px rgba(0,0,0,.35); transition: transform .12s ease;\n  }\n  #hoq-pill .pl-disc svg { width: 19px; height: 19px; fill: currentColor; }\n  #hoq-pill .pl-play:active .pl-disc { transform: scale(.9); }\n  #hoq-pill .pl-meta {\n    flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px;\n    cursor: pointer;\n  }\n  #hoq-pill .pl-title {\n    font-size: 15px; font-weight: 700; letter-spacing: -.01em;\n    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\n  }\n  #hoq-pill .pl-artist { font-size: 13px; color: #a0a0a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n  #hoq-pill .pl-meta.sw-l { animation: hoqPillSwL .3s ease; }\n  #hoq-pill .pl-meta.sw-r { animation: hoqPillSwR .3s ease; }\n  @keyframes hoqPillSwL { 0% { transform: translateX(0); opacity: 1; } 45% { transform: translateX(-24px); opacity: 0; }\n    55% { transform: translateX(24px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }\n  @keyframes hoqPillSwR { 0% { transform: translateX(0); opacity: 1; } 45% { transform: translateX(24px); opacity: 0; }\n    55% { transform: translateX(-24px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }\n  #hoq-pill .pl-dc, #hoq-pill .pl-like { width: 42px; height: 42px; border-radius: 50%; }\n  #hoq-pill .pl-dc:active, #hoq-pill .pl-like:active { background: rgba(255,255,255,.08); }\n  #hoq-pill .pl-dc svg { width: 22px; height: 22px; fill: none; stroke: #e8e8ec; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }\n  #hoq-pill .pl-like svg { width: 25px; height: 25px; fill: none; stroke: #e8e8ec; stroke-width: 1.9; stroke-linejoin: round; }\n  #hoq-pill .pl-like.on svg { fill: var(--sc-accent, #ff5500); stroke: var(--sc-accent, #ff5500); }\n  #hoq-pill .pl-like.pop svg { animation: hoqPillPop .32s ease; }\n  @keyframes hoqPillPop { 40% { transform: scale(1.28); } }\n  #hoq-pill .pl-pop {\n    position: absolute; right: 6px; bottom: calc(100% + 8px); display: flex; flex-direction: column;\n    min-width: 196px; padding: 6px; border-radius: 16px;\n    background: rgba(28,28,31,.97); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 12px 30px rgba(0,0,0,.5);\n  }\n  #hoq-pill .pl-pop[hidden] { display: none; }\n  #hoq-pill .pl-pop button {\n    justify-content: flex-start; width: 100%; padding: 12px 14px; border-radius: 11px;\n    font: 600 15px -apple-system, Inter, Arial, sans-serif; color: #fff;\n  }\n  #hoq-pill .pl-pop button:active { background: rgba(255,255,255,.08); }\n  #hoq-pill .pl-pop .pl-note { padding: 6px 14px 8px; font-size: 12px; color: #9a9aa4; }\n\n  /* Tile play buttons. The artwork rule above (\".playableTile__artwork > *\",\n     pinned to all four edges) also caught the play button's box, so its own\n     centring transform threw it ~90px up and left -- clipped out of sight.\n     A phone has no hover to reveal it anyway: a small, always-on button in the\n     artwork's corner, like SoundCloud's app. */\n  html.hoq-mobile .playableTile__artwork > .playableTile__playButton {\n    top: auto !important; left: auto !important; right: 8px !important; bottom: 8px !important;\n    width: 38px !important; height: 38px !important; transform: none !important;\n    opacity: 1 !important; visibility: visible !important; z-index: 3 !important;\n  }\n  html.hoq-mobile .playableTile__playButton .sc-button-play {\n    width: 38px !important; height: 38px !important; min-width: 0 !important;\n    box-shadow: 0 2px 10px rgba(0,0,0,.45) !important;\n  }\n}\n";
+  mob.textContent = "/* holdonquietly — mobile layout.\n   SoundCloud only ships a desktop DOM here: we force a desktop UA upstream,\n   because otherwise it 307s phones to m.soundcloud.com, which the theme does\n   not target. Scaling that 1280px canvas to fit put it at ~29% on a phone —\n   present but unreadable. So reflow it properly.\n   Every selector below was measured against the live DOM, not guessed. */\n@media (max-width: 820px) {\n  html.hoq-mobile, html.hoq-mobile body {\n    overflow-x: hidden !important;\n    /* WebKit inflates text on wide-layout pages — nav came out ~1.7x. */\n    -webkit-text-size-adjust: 100% !important;\n    text-size-adjust: 100% !important;\n  }\n\n  /* Fixed-width containers -> fluid. These are the 1240px culprits. */\n  html.hoq-mobile .l-container,\n  html.hoq-mobile .header__inner,\n  html.hoq-mobile .l-content,\n  html.hoq-mobile .l-inner-fullwidth {\n    max-width: 100% !important; width: 100% !important;\n    padding-left: 12px !important; padding-right: 12px !important;\n    box-sizing: border-box !important;\n  }\n\n  /* Two columns -> one. The 360px right rail is pure noise on a phone. */\n  html.hoq-mobile .l-fluid-fixed { display: block !important; }\n  html.hoq-mobile .l-main {\n    width: 100% !important; float: none !important; margin: 0 !important;\n    box-sizing: border-box !important;\n  }\n  html.hoq-mobile .l-sidebar-right,\n  html.hoq-mobile .l-fluid-fixed > aside { display: none !important; }\n\n  /* The header is ~195px fixed — half the screen, and it covered the page\n     heading. Let it scroll away; a phone has no room for a persistent bar. */\n  html.hoq-mobile .header { position: static !important; height: auto !important; }\n  html.hoq-mobile body { padding-top: 0 !important; }\n  html.hoq-mobile .l-content, html.hoq-mobile #content {\n    padding-top: 0 !important; margin-top: 0 !important;\n  }\n  html.hoq-mobile .header__inner {\n    flex-wrap: wrap !important; height: auto !important; align-items: center !important;\n    padding-top: 4px !important; padding-bottom: 4px !important;\n    gap: 6px !important; row-gap: 4px !important;\n  }\n  html.hoq-mobile .header__left { flex: 1 1 100% !important; flex-wrap: wrap !important; display: flex !important; align-items: center !important; }\n  html.hoq-mobile .header__logo { flex: 0 0 auto !important; max-width: 44vw !important; overflow: hidden !important; }\n  html.hoq-mobile .header__right { flex: 0 0 auto !important; gap: 4px !important; }\n  html.hoq-mobile .header__right .sc-button,\n  html.hoq-mobile .header__right a { font-size: 12px !important; padding: 4px 10px !important; height: auto !important; }\n\n  /* Nav must never wrap — a half row of tabs reads as broken. Scroll it. */\n  html.hoq-mobile .header__navWrapper {\n    flex: 1 1 100% !important; order: 5 !important;\n    overflow-x: auto !important; overflow-y: hidden !important;\n    -webkit-overflow-scrolling: touch !important; scrollbar-width: none !important;\n  }\n  html.hoq-mobile .header__navWrapper::-webkit-scrollbar { display: none !important; }\n  html.hoq-mobile .header__navMenu {\n    display: flex !important; flex-wrap: nowrap !important;\n    white-space: nowrap !important; width: max-content !important;\n  }\n  html.hoq-mobile .header__navMenu > li { flex: 0 0 auto !important; margin-right: 0 !important; }\n  /* Zeroing the item padding also killed SoundCloud's own margin, so labels\n     ran together as 'CollectionSocial/Settings'. Flex gap rather than a\n     margin: the injected Social/Settings <li> is a clone of Library's and\n     did not pick the margin up, leaving that one pair still touching. */\n  html.hoq-mobile .header__navMenu { gap: 18px !important; }\n  html.hoq-mobile .header__navMenuItem { padding: 6px 0 !important; margin-right: 0 !important; }\n\n  html.hoq-mobile .header__middle { order: 10 !important; flex: 1 1 100% !important; }\n  /* The form carries margin-left: 24px / right: 16px from the desktop layout,\n     which pushed it 12px past the right edge of a 390px viewport. */\n  html.hoq-mobile .headerSearch {\n    width: 100% !important; height: 32px !important;\n    margin: 0 !important; box-sizing: border-box !important;\n  }\n  html.hoq-mobile .header__search { width: 100% !important; }\n  html.hoq-mobile .headerSearch__input { font-size: 13px !important; height: 30px !important; }\n  /* No room, and all desktop-shaped. */\n  html.hoq-mobile .header__soundInput,\n  html.hoq-mobile .uploadButton,\n  html.hoq-mobile .header__forArtistsButton,\n  html.hoq-mobile .header__moreButton { display: none !important; }\n  /* A full-width promo block is a lot of nothing on a phone. */\n  html.hoq-mobile .l-product-banners, html.hoq-mobile .banner { display: none !important; }\n\n  /* Tiles: a 2-up GRID, not a horizontal carousel. The carousels clipped --\n     you could only see the first row or two of each shelf and had to swipe\n     sideways. A grid shows everything and never clips. */\n  /* The gallery containers kept the carousel's fixed single-row height, so a\n     grid with multiple rows overflowed and the next section rendered over it.\n     Let every wrapper grow to its content. */\n  html.hoq-mobile .tileGallery,\n  html.hoq-mobile [class*='tileGallery'],\n  html.hoq-mobile .mixedSelectionModule,\n  html.hoq-mobile .mixedSelectionGallery { width: 100% !important; height: auto !important; }\n  html.hoq-mobile .tileGallery__slider,\n  html.hoq-mobile .tileGallery__sliderPeekContainer {\n    overflow: visible !important; width: 100% !important; height: auto !important;\n  }\n  html.hoq-mobile .tileGallery__sliderPanel {\n    display: flex !important; flex-wrap: wrap !important; align-content: flex-start !important;\n    gap: 16px 12px !important; height: auto !important; min-height: 0 !important;\n    /* THE fix: SoundCloud clamps this shelf with max-height: 208px (one carousel\n       row) via a :has() selector that outranks a plain class. That is what made\n       every wrapped row overflow onto the next section. */\n    max-height: none !important;\n    overflow: visible !important; transform: none !important;\n  }\n  html.hoq-mobile .tileGallery__sliderPanelSlide {\n    flex: 0 0 calc(50% - 6px) !important; width: calc(50% - 6px) !important;\n    max-width: calc(50% - 6px) !important; margin: 0 !important; padding: 0 !important;\n  }\n  html.hoq-mobile .playableTile {\n    width: 100% !important; min-width: 0 !important; margin: 0 !important;\n    display: flex !important; flex-direction: column !important;\n  }\n  /* Square the artwork with aspect-ratio and pin every child over it -- the\n     inner link/image otherwise kept their desktop pixel height (~2x) and blew\n     the grid rows apart. */\n  /* SoundCloud already squares the artwork with padding-bottom: 100%. Leave\n     that alone -- an aspect-ratio on top of it double-counted the height and\n     made every tile 2x too tall. Just clip and round it. */\n  html.hoq-mobile .playableTile__artwork {\n    width: 100% !important; height: auto !important; position: relative !important;\n    overflow: hidden !important; border-radius: 8px !important; margin: 0 !important;\n  }\n  html.hoq-mobile .playableTile__artwork > * {\n    position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;\n    width: auto !important; height: auto !important; margin: 0 !important;\n  }\n  /* the play + action controls inside must not be forced full-height */\n  html.hoq-mobile .playableTile__playButton,\n  html.hoq-mobile .playableTile__actions { height: auto !important; width: auto !important; }\n  html.hoq-mobile .playableTile__description { margin-top: 8px !important; }\n  /* Overlay arrows are meaningless in a grid. */\n  html.hoq-mobile .tileGallery__sliderButton,\n  html.hoq-mobile .tileGallery__sliderPeek,\n  html.hoq-mobile .tileGallery__leftButton,\n  html.hoq-mobile .tileGallery__rightButton { display: none !important; }\n\n  /* Type that survives the reflow. */\n  html.hoq-mobile .playableTile__heading, html.hoq-mobile .sc-text-h4 { font-size: 13px !important; }\n  html.hoq-mobile h1 { font-size: 20px !important; }\n  html.hoq-mobile .l-content h2, html.hoq-mobile .sectionHead__title { font-size: 17px !important; }\n\n  /* Player bar: keep transport + title, drop what a thumb cannot use anyway. */\n  html.hoq-mobile .playControls { height: 56px !important; }\n  html.hoq-mobile .playControls__inner { padding: 0 8px !important; }\n  html.hoq-mobile .playControls__elements { width: 100% !important; }\n  html.hoq-mobile .volume,\n  html.hoq-mobile .playControls__shuffle,\n  html.hoq-mobile .playControls__repeat,\n  html.hoq-mobile .playbackSoundBadge__follow { display: none !important; }\n  html.hoq-mobile .playbackTimeline { flex: 1 1 auto !important; min-width: 0 !important; }\n  html.hoq-mobile .playbackSoundBadge__titleContextContainer { min-width: 0 !important; }\n  /* The injected #hoq-playbtn / #hoq-share (Play/Share to Discord) overflowed\n     the right edge at 390px -- the bar ran to 445px. Reclaim room by hiding the\n     two desktop-only badge actions (queue, like) and trimming SoundCloud's big\n     margins. Deliberately NOT restructuring .playControls__inner: making it a\n     flex row turned the queue panel and background into flex siblings and\n     collapsed the whole bar. This keeps the native structure and just fits. */\n  html.hoq-mobile .playbackSoundBadge__showQueue,\n  html.hoq-mobile .playbackSoundBadge__like { display: none !important; }\n  html.hoq-mobile .playControls__soundBadge { margin-left: 2px !important; }\n  html.hoq-mobile .playbackSoundBadge__actions { margin-left: 4px !important; }\n  html.hoq-mobile .playControls__timeline { margin-left: 8px !important; margin-right: 4px !important; }\n  html.hoq-mobile .playbackSoundBadge__avatar { margin-right: 6px !important; }\n  html.hoq-mobile #hoq-playbtn, html.hoq-mobile #hoq-share { margin-left: 1px !important; }\n\n  /* Our own surfaces, also built for a wide window. */\n  html.hoq-mobile #hoq-discord .hoq-dc-body { display: block !important; }\n  html.hoq-mobile #hoq-discord .hoq-dc-sec { width: 100% !important; }\n  html.hoq-mobile #sc-palette .pal-grid { grid-template-columns: 1fr !important; }\n  html.hoq-mobile #sc-palette > .row,\n  html.hoq-mobile #sc-palette > .bgurl,\n  html.hoq-mobile #sc-palette > .btn-2up { max-width: 100% !important; }\n  /* ---- list + search rows ------------------------------------------------\n     A 160px artwork beside a 182px column squeezed titles to one character\n     per line and made rows 596px tall. Shrink the art, give the text the\n     rest, and drop the waveform and comment box, which are unusable here. */\n  html.hoq-mobile .sound__body,\n  html.hoq-mobile .userItem.sc-media { display: flex !important; align-items: flex-start !important; }\n  html.hoq-mobile .sound__artwork,\n  html.hoq-mobile .userItem__coverArt {\n    flex: 0 0 92px !important; width: 92px !important; height: 92px !important;\n    margin-right: 10px !important;\n  }\n  html.hoq-mobile .sound__coverArt,\n  html.hoq-mobile .userItem__coverArt .image,\n  html.hoq-mobile .userItem__coverArt .sc-artwork { width: 92px !important; height: 92px !important; }\n  html.hoq-mobile .sound__content,\n  html.hoq-mobile .userItem .sc-media-content {\n    flex: 1 1 auto !important; width: auto !important; min-width: 0 !important;\n  }\n  html.hoq-mobile .sound__header { min-width: 0 !important; }\n  html.hoq-mobile .soundTitle__title,\n  html.hoq-mobile .soundTitle__usernameText,\n  html.hoq-mobile .userItem__title {\n    white-space: normal !important; word-break: normal !important; overflow-wrap: anywhere !important;\n  }\n  html.hoq-mobile .sound__waveform, html.hoq-mobile .commentForm { display: none !important; }\n\n  /* The play button is an inline 40px block before the title; at this width it\n     crowds the text, and the accent glow makes it read as an overlay. */\n  html.hoq-mobile .soundTitle__titleContainer {\n    display: flex !important; align-items: flex-start !important; gap: 8px !important;\n  }\n  html.hoq-mobile .soundTitle__playButton { flex: 0 0 30px !important; margin: 0 !important; }\n  html.hoq-mobile .soundTitle__playButton .sc-button-play,\n  html.hoq-mobile .soundTitle__playButton > * { width: 30px !important; height: 30px !important; }\n  html.hoq-mobile .soundTitle__usernameTitleContainer,\n  html.hoq-mobile .soundTitle__additionalContainer { flex: 1 1 auto !important; min-width: 0 !important; }\n  html.hoq-mobile .sound__header .sc-button-play { box-shadow: none !important; filter: none !important; }\n  html.hoq-mobile .sound__header .sc-text-secondary,\n  html.hoq-mobile .soundTitle__uploadTime { float: none !important; display: block !important; font-size: 11px !important; }\n\n  /* Search filter tabs were stacking on top of each other. */\n  html.hoq-mobile .searchOptions__tabs,\n  html.hoq-mobile [class*='searchOptions'] ul {\n    display: flex !important; flex-wrap: nowrap !important; overflow-x: auto !important;\n    gap: 14px !important; position: static !important;\n  }\n  html.hoq-mobile [class*='searchOptions'] li { position: static !important; flex: 0 0 auto !important; }\n  /* ---- track page hero ---------------------------------------------------\n     Desktop floats a 320px artwork right and lets the title fill the rest. At\n     390px the foreground came out 606px wide, the artwork sat at x=282 off\n     screen, and the title collapsed to ZERO width -- printing the track name\n     one character per line down the page. Stack it instead. */\n  html.hoq-mobile .l-listen-hero,\n  html.hoq-mobile .fullListenHero,\n  html.hoq-mobile .fullHero { height: auto !important; }\n  html.hoq-mobile .fullHero__foreground {\n    display: flex !important; flex-direction: column !important; align-items: stretch !important;\n    width: 100% !important; max-width: 100% !important; position: static !important;\n    padding: 12px 12px 4px !important; box-sizing: border-box !important;\n  }\n  html.hoq-mobile .fullHero__artwork {\n    position: static !important; order: -1 !important; float: none !important;\n    width: 100% !important; max-width: 260px !important; height: auto !important;\n    margin: 0 auto 14px !important;\n  }\n  html.hoq-mobile .listenArtworkWrapper,\n  html.hoq-mobile .fullHero__artwork .image,\n  html.hoq-mobile .fullHero__artwork .sc-artwork {\n    width: 100% !important; max-width: 260px !important; height: auto !important; aspect-ratio: 1 !important;\n  }\n  html.hoq-mobile .fullHero__title {\n    width: 100% !important; min-width: 0 !important; height: auto !important;\n    position: static !important; float: none !important;\n  }\n  html.hoq-mobile .fullHero__title .soundTitle,\n  html.hoq-mobile .fullHero__title .soundTitle__titleContainer { width: 100% !important; min-width: 0 !important; }\n  html.hoq-mobile .fullHero__title .soundTitle__title {\n    white-space: normal !important; overflow-wrap: anywhere !important; font-size: 19px !important;\n  }\n  html.hoq-mobile .fullHero__info,\n  html.hoq-mobile .fullHero__playerArea,\n  html.hoq-mobile .fullHero__waveform {\n    width: 100% !important; position: static !important; float: none !important;\n  }\n  html.hoq-mobile .fullHero__info { text-align: left !important; margin-top: 6px !important; }\n  html.hoq-mobile .fullHero__uploadTime { display: inline-block !important; margin-right: 8px !important; }\n  html.hoq-mobile .fullHero__playerArea { margin-top: 10px !important; min-height: 0 !important; }\n  html.hoq-mobile .fullHero__waveform { height: 64px !important; min-height: 0 !important; }\n  html.hoq-mobile .backgroundGradient { width: 100% !important; }\n  html.hoq-mobile .l-listen-hero { margin-bottom: 8px !important; }\n  html.hoq-mobile .listenEngagement__actions,\n  html.hoq-mobile .soundActions { flex-wrap: wrap !important; gap: 8px !important; }\n  /* ---- Collection / Library ----------------------------------------------\n     Built from the logged-in DOM. Tiles are already handled; this fixes the\n     page furniture around them at 390px. */\n  /* The tab bar (Recently played / Likes / Playlists / …) is a wide g-tabs row\n     that overflowed. Let it scroll sideways. */\n  html.hoq-mobile .collectionNav,\n  html.hoq-mobile .collectionNav.g-tabs {\n    display: flex !important; flex-wrap: nowrap !important;\n    overflow-x: auto !important; -webkit-overflow-scrolling: touch !important;\n    scrollbar-width: none !important;\n  }\n  html.hoq-mobile .collectionNav::-webkit-scrollbar { display: none !important; }\n  html.hoq-mobile .collectionNav > li { flex: 0 0 auto !important; }\n\n  /* Each section header packs a heading + spacer + Clear-all button + a filter\n     input into one row (g-flex-row-centered-spread). At 390px that overflows,\n     so wrap it and let the filter take its own line. */\n  html.hoq-mobile .playHistory__top,\n  html.hoq-mobile .collectionSection__top,\n  html.hoq-mobile .collectionSection__header {\n    flex-wrap: wrap !important; gap: 6px 10px !important;\n  }\n  html.hoq-mobile .collectionSection__flexFill { display: none !important; }\n  html.hoq-mobile .collectionSection__filters { flex: 1 1 100% !important; }\n  html.hoq-mobile .collectionSection__filterText,\n  html.hoq-mobile .collectionSection__filters .textfield { width: 100% !important; }\n  html.hoq-mobile .collectionSection__subHeading,\n  html.hoq-mobile .playHistory__subHeading { font-size: 17px !important; }\n\n  /* The one-row horizontal shelves of the Library OVERVIEW. Likes / Playlists /\n     Albums / … use the very same markup (badgeList > lazyLoadingList__list) for\n     the whole page, so this used to catch them too and squeezed a 48-item grid\n     into one clipped sideways row. The shim tags the route on <html>. */\n  html.hoq-mobile[data-hoq-route='/you/library'] .collection .lazyLoadingList__list {\n    display: flex !important; flex-wrap: nowrap !important; gap: 12px !important;\n    overflow-x: auto !important; -webkit-overflow-scrolling: touch !important;\n    scrollbar-width: none !important; scroll-snap-type: x proximity !important;\n  }\n  html.hoq-mobile[data-hoq-route='/you/library'] .collection .lazyLoadingList__list::-webkit-scrollbar { display: none !important; }\n  html.hoq-mobile[data-hoq-route='/you/library'] .collection .lazyLoadingList__list > .badgeList__item {\n    flex: 0 0 138px !important; width: 138px !important; margin: 0 !important; padding: 0 !important;\n    float: none !important; scroll-snap-align: start !important;\n  }\n\n  /* Everywhere else in the Library it's the whole list: two columns, like\n     Discover's tiles. (List view has no badgeList__item and is left alone.) */\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list:has(> .badgeList__item) {\n    display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important;\n    gap: 18px 12px !important; width: auto !important; overflow: visible !important;\n  }\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list:has(> .badgeList__item)::before,\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list:has(> .badgeList__item)::after { display: none !important; }\n  html.hoq-mobile:not([data-hoq-route='/you/library']) .l-collection .lazyLoadingList__list > .badgeList__item {\n    width: auto !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; float: none !important;\n  }\n  html.hoq-mobile .l-collection .badgeList__item .audibleTile,\n  html.hoq-mobile .l-collection .badgeList__item .playableTile { width: 100% !important; min-width: 0 !important; }\n  html.hoq-mobile .l-collection .badgeList { width: auto !important; max-width: 100% !important; }\n\n  /* The theme turns the Library tabs into a 172px vertical side panel\n     (preload: .l-collection:has(.collectionNav)). At 390px that left the\n     content 170px -- the heading ran one word per line and the grid was cut\n     off. Stack it: the tabs become a scrolling pill row above the content. */\n  html.hoq-mobile .l-collection:has(.collectionNav) { display: block !important; }\n  html.hoq-mobile .l-collection:has(.collectionNav) .l-nav {\n    position: static !important; width: 100% !important; flex: none !important;\n    margin: 0 0 14px !important;\n  }\n  html.hoq-mobile .l-collection:has(.collectionNav) .l-main { width: 100% !important; }\n  html.hoq-mobile .l-nav .collectionNav.g-tabs {\n    flex-direction: row !important; gap: 4px !important; padding: 5px !important;\n    border-radius: 12px !important; box-shadow: none !important;\n  }\n  html.hoq-mobile .l-nav .collectionNav.g-tabs li,\n  html.hoq-mobile .l-nav .collectionNav.g-tabs .g-tabs-item { width: auto !important; flex: 0 0 auto !important; }\n  html.hoq-mobile .l-nav .collectionNav.g-tabs a {\n    width: auto !important; white-space: nowrap !important; transform: none !important;\n    padding: 7px 13px !important; font-size: 13px !important; border-radius: 8px !important;\n  }\n  /* The side panel's left accent bar reads wrong on a pill: a ring instead. */\n  html.hoq-mobile .l-nav .collectionNav.g-tabs .active a, html.hoq-mobile .l-nav .collectionNav.g-tabs a.active,\n  html.hoq-mobile .l-nav .collectionNav.g-tabs li.active a, html.hoq-mobile .l-nav .collectionNav.g-tabs [aria-current] a,\n  html.hoq-mobile .l-nav .collectionNav.g-tabs a[aria-current] {\n    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important;\n  }\n  html.hoq-mobile .collection { padding: 0 !important; }\n  html.hoq-mobile .collection__section { margin-bottom: 18px !important; }\n  /* ---- Track page below the hero ----------------------------------------\n     The listen page is a desktop 2-column layout (main text column + a 360px\n     right sidebar), and inside the main column another split (info left,\n     comments right ~198px). On mobile the sidebar hides but the columns keep\n     their sizing, so the main column collapsed to ~6px and comments crammed\n     into a sliver -- text wrapped one word per line. Stack every l-about-*\n     column to a full-width block. */\n  html.hoq-mobile .l-listen-wrapper { display: block !important; }\n  html.hoq-mobile .l-sidebar-right { display: none !important; }\n  html.hoq-mobile [class*='l-about-'] {\n    width: 100% !important; max-width: 100% !important; min-width: 0 !important;\n    float: none !important; display: block !important;\n    margin-left: 0 !important; padding-left: 0 !important;\n  }\n  html.hoq-mobile .l-listen__mainContent, html.hoq-mobile .l-about-row { display: block !important; }\n  html.hoq-mobile .listenDetails,\n  html.hoq-mobile .listenDetails > *,\n  html.hoq-mobile .commentsList,\n  html.hoq-mobile .commentsList__item,\n  html.hoq-mobile .listenDetails__partialInfo,\n  html.hoq-mobile .listenDetails__login {\n    position: static !important; float: none !important; display: block !important;\n    width: 100% !important; max-width: 100% !important; box-sizing: border-box !important;\n    margin-left: 0 !important;\n  }\n  html.hoq-mobile .commentsList__item { padding-left: 8px !important; padding-right: 8px !important; }\n  html.hoq-mobile .commentItem__message, html.hoq-mobile .commentItem__body {\n    white-space: normal !important; overflow-wrap: anywhere !important;\n  }\n  html.hoq-mobile .commentsList__header, html.hoq-mobile .commentsList__top {\n    flex-wrap: wrap !important; gap: 6px !important;\n  }\n  html.hoq-mobile .commentsList__sortSelect, html.hoq-mobile .select__wrapper { max-width: 100% !important; }\n  /* ---- Profile / artist header ------------------------------------------\n     Desktop lays a 198px avatar beside the name over an opaque banner. At\n     390px that squished the name into a ~90px strip, one word per line. Stack\n     it, and turn the banner into a soft frosted backdrop that blends into the\n     theme's cover wash -- name stays prominent (per request, don't ruin it). */\n  html.hoq-mobile .l-user-hero { position: relative !important; padding: 0 !important; overflow: hidden !important; }\n  html.hoq-mobile .profileHeader { position: relative !important; width: 100% !important; min-height: 0 !important; }\n  html.hoq-mobile .profileHeaderBackground { position: absolute !important; inset: 0 !important; z-index: 0 !important; }\n  html.hoq-mobile .profileHeaderBackground__visual {\n    position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important;\n    background-size: cover !important; background-position: center !important;\n    filter: blur(18px) saturate(1.2) brightness(0.55) !important; transform: scale(1.15) !important; opacity: 0.5 !important;\n  }\n  html.hoq-mobile .profileHeader::after {\n    content: '' !important; position: absolute !important; inset: 0 !important; z-index: 1 !important;\n    background: linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 55%, rgba(10,10,12,0.9) 100%) !important;\n    pointer-events: none !important;\n  }\n  html.hoq-mobile .profileHeader__info { position: relative !important; z-index: 2 !important; }\n  html.hoq-mobile .profileHeaderInfo {\n    display: flex !important; flex-direction: column !important; align-items: center !important;\n    text-align: center !important; padding: 20px 12px 16px !important; gap: 8px !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__avatar { margin: 0 !important; }\n  html.hoq-mobile .profileHeaderInfo__avatar .image,\n  html.hoq-mobile .profileHeaderInfo__avatar .sc-artwork,\n  html.hoq-mobile .profileHeaderInfo__avatar > div {\n    width: 104px !important; height: 104px !important;\n    box-shadow: 0 6px 22px rgba(0,0,0,0.5), 0 0 0 3px color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__content { width: 100% !important; min-width: 0 !important; }\n  html.hoq-mobile .profileHeaderInfo__userName {\n    font-size: 22px !important; white-space: normal !important; overflow-wrap: anywhere !important;\n    text-shadow: 0 2px 8px rgba(0,0,0,0.6) !important; margin: 0 !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__additional {\n    font-size: 13px !important; white-space: normal !important; text-shadow: 0 1px 4px rgba(0,0,0,0.6) !important;\n  }\n  html.hoq-mobile .profileHeaderInfo__content br { display: none !important; }\n}\n\n/* Logged-out mode. The proxy cannot complete a sign-in (SoundCloud's bot\n   protection challenges it), so every account control is a dead end: tapping\n   Like or Follow opens a sign-in modal that cannot succeed. Hiding them is a\n   better experience than leaving traps. Applied only when actually signed out,\n   so this all comes back if a session is ever present. */\nhtml.hoq-anon .header__userNav,\nhtml.hoq-anon .header__soundInput,\nhtml.hoq-anon .uploadButton,\nhtml.hoq-anon .header__forArtistsButton,\nhtml.hoq-anon .header__upsellWrapper,\nhtml.hoq-anon .header__moreButton { display: none !important; }\n\n/* Sign in / Create account sit together in .header__loginMenu. Matching the\n   container is exact; matching the buttons is not, since they carry only\n   generic sc-button classes shared with controls we want to keep. */\nhtml.hoq-anon .header__loginMenu,\nhtml.hoq-anon .loginButton,\nhtml.hoq-anon .signupButton { display: none !important; }\n\n/* The auth modal and whatever backdrop carries it. */\nhtml.hoq-anon div:has(> iframe[src*='web-auth']),\nhtml.hoq-anon div:has(> iframe[src*='one-tap']),\nhtml.hoq-anon .modal, html.hoq-anon .modal__modal,\nhtml.hoq-anon [class*='authModal' i],\nhtml.hoq-anon .g-modal-overlay { display: none !important; }\nhtml.hoq-anon body { overflow: auto !important; }\n\n/* Actions that need an account. Leaving them visible means a tap that opens a\n   modal we have just hidden — nothing happens, which reads as broken. */\nhtml.hoq-anon .sc-button-like,\nhtml.hoq-anon .sc-button-follow,\nhtml.hoq-anon .sc-button-repost,\nhtml.hoq-anon .playableTile__actionButton,\nhtml.hoq-anon .playbackSoundBadge__follow,\nhtml.hoq-anon .playbackSoundBadge__like { display: none !important; }\n\n/* Promos and upsells: all of them lead to signup. */\nhtml.hoq-anon .l-product-banners,\nhtml.hoq-anon .banner,\nhtml.hoq-anon [class*='upsell' i],\nhtml.hoq-anon [class*='Upsell' i] { display: none !important; }\n\n/* With the account row gone the header is two compact rows, so give the\n   search its full width. */\nhtml.hoq-anon.hoq-mobile .header__middle { flex: 1 1 100% !important; }\nhtml.hoq-anon.hoq-mobile .headerSearch { width: 100% !important; }\n\n/* Stream and Collection are account-only: signed out they redirect straight to\n   a sign-in wall. Leaving them in the nav is a tab that always dead-ends. */\nhtml.hoq-anon .header__navMenuItem[data-menu-name='stream'],\nhtml.hoq-anon .header__navMenuItem[data-menu-name='library'] { display: none !important; }\nhtml.hoq-anon .header__navMenu > li:has(> [data-menu-name='stream']),\nhtml.hoq-anon .header__navMenu > li:has(> [data-menu-name='library']) { display: none !important; }\n\n/* Signed out on the proxy: SoundCloud's own Sign in can't complete here, so a\n   clear way in -- the desktop app hands its session over (Settings -> Phone). */\n#hoq-signin-cta {\n  display: none; align-items: center; gap: 12px; box-sizing: border-box;\n  margin: 10px 12px 4px; padding: 12px 12px 12px 14px; border-radius: 14px;\n  background: linear-gradient(135deg, color-mix(in srgb, var(--sc-accent, #ff5500) 26%, #15151a), #15151a 80%);\n  border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent);\n  box-shadow: 0 8px 26px color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent);\n  font: 13px/1.35 -apple-system, Inter, Arial, sans-serif; color: #d6d6dc;\n}\nhtml.hoq-anon #hoq-signin-cta { display: flex; }\n#hoq-signin-cta .cta-txt { flex: 1 1 auto; min-width: 0; }\n#hoq-signin-cta .cta-txt b { display: block; color: #fff; font-size: 14px; margin-bottom: 1px; }\n#hoq-signin-cta button, #hoq-signin-sheet .sh-go {\n  flex: none; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer;\n  background: var(--sc-accent, #ff5500); color: #fff; font: 700 13px -apple-system, Inter, Arial, sans-serif;\n  box-shadow: 0 0 18px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent);\n}\n#hoq-signin-sheet {\n  position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: flex-end; justify-content: center;\n  background: rgba(0,0,0,.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);\n}\n#hoq-signin-sheet[hidden] { display: none; }\n#hoq-signin-sheet .sh {\n  width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto; box-sizing: border-box;\n  background: #141418; border: 1px solid rgba(255,255,255,.1); border-bottom: 0;\n  border-radius: 20px 20px 0 0; padding: 20px 18px calc(22px + env(safe-area-inset-bottom));\n  font: 14px/1.45 -apple-system, Inter, Arial, sans-serif; color: #c9c9d2;\n}\n#hoq-signin-sheet h3 { margin: 0 0 4px; color: #fff; font-size: 19px; }\n#hoq-signin-sheet .sh-sub { margin: 0 0 14px; color: #9a9aa4; font-size: 13px; }\n#hoq-signin-sheet ol { margin: 0 0 14px; padding: 0; list-style: none; counter-reset: s; }\n#hoq-signin-sheet li { position: relative; padding: 0 0 12px 36px; counter-increment: s; }\n#hoq-signin-sheet li::before {\n  content: counter(s); position: absolute; left: 0; top: -1px; width: 24px; height: 24px; border-radius: 50%;\n  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;\n  background: color-mix(in srgb, var(--sc-accent, #ff5500) 22%, transparent); color: var(--sc-accent, #ff5500);\n}\n#hoq-signin-sheet li b, #hoq-signin-sheet .sh-k { color: #fff; }\n#hoq-signin-sheet .sh-k { font-weight: 700; }\n#hoq-signin-sheet .sh-paste { margin-top: 4px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }\n#hoq-signin-sheet .sh-paste p { margin: 0 0 8px; font-size: 13px; color: #9a9aa4; }\n#hoq-signin-sheet .sh-row { display: flex; gap: 8px; }\n#hoq-signin-sheet input {\n  flex: 1 1 auto; min-width: 0; box-sizing: border-box; padding: 10px 12px; border-radius: 10px;\n  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff;\n  font: 16px -apple-system, Inter, Arial, sans-serif;   /* 16px: iOS won't zoom the page on focus */\n}\n#hoq-signin-sheet .sh-msg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #ff8a7a; }\n#hoq-signin-sheet .sh-close {\n  display: block; width: 100%; margin-top: 14px; padding: 11px; border-radius: 10px; cursor: pointer;\n  border: 1px solid rgba(255,255,255,.12); background: transparent; color: #c9c9d2; font: 600 14px -apple-system, Inter, Arial, sans-serif;\n}\n\n\n/* ---- Floating now-playing pill (phone) ------------------------------------\n   Modelled on SoundCloud's own app: ring-progress play button, title/artist,\n   Discord + like. SoundCloud's bar stays in the DOM, invisible, doing the real\n   work (and feeding the lock screen) -- the shim builds this face for it and\n   adds html.hoq-pill-on only once it's live, so a failure leaves the old bar. */\n#hoq-pill { display: none; }\n@media (max-width: 820px) {\n  html.hoq-mobile.hoq-pill-on #hoq-pill {\n    display: flex; position: fixed; z-index: 2000; box-sizing: border-box;\n    left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom));\n    height: 66px; align-items: center; gap: 11px; padding: 0 8px 0 7px; border-radius: 33px;\n    background: rgba(28,28,31,.88);\n    -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);\n    border: 1px solid rgba(255,255,255,.12);\n    box-shadow: 0 12px 34px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);\n    font-family: -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; color: #fff;\n    touch-action: pan-y; -webkit-tap-highlight-color: transparent;\n    -webkit-user-select: none; user-select: none;\n  }\n  html.hoq-np-open #hoq-pill { display: none !important; }\n  /* The real bar: still laid out (its timeline rect drives lock-screen seeking,\n     its buttons take our clicks), just never seen or touched. opacity, not\n     visibility: the theme forces some children visible, and they showed\n     through on top of the pill. */\n  html.hoq-mobile.hoq-pill-on .playControls { opacity: 0 !important; }\n  html.hoq-mobile.hoq-pill-on .playControls,\n  html.hoq-mobile.hoq-pill-on .playControls * { pointer-events: none !important; }\n  html.hoq-mobile.hoq-pill-on body { padding-bottom: calc(92px + env(safe-area-inset-bottom)) !important; }\n\n  #hoq-pill button {\n    -webkit-appearance: none; appearance: none; border: 0; background: none; margin: 0; padding: 0;\n    color: inherit; cursor: pointer; flex: none; display: flex; align-items: center; justify-content: center;\n  }\n  #hoq-pill .pl-play { position: relative; width: 52px; height: 52px; }\n  #hoq-pill .pl-ring { position: absolute; inset: 0; width: 52px; height: 52px; transform: rotate(-90deg); }\n  #hoq-pill .pl-ring circle { fill: none; stroke-width: 3.5; }\n  #hoq-pill .pl-track { stroke: rgba(255,255,255,.14); }\n  #hoq-pill .pl-prog {\n    stroke: var(--sc-accent, #ff5500); stroke-linecap: round;\n    stroke-dasharray: 144.51; stroke-dashoffset: 144.51; transition: stroke-dashoffset .25s linear;\n  }\n  #hoq-pill .pl-disc {\n    width: 40px; height: 40px; border-radius: 50%; background: #fff; color: #121214;\n    display: flex; align-items: center; justify-content: center;\n    box-shadow: 0 2px 8px rgba(0,0,0,.35); transition: transform .12s ease;\n  }\n  #hoq-pill .pl-disc svg { width: 19px; height: 19px; fill: currentColor; }\n  #hoq-pill .pl-play:active .pl-disc { transform: scale(.9); }\n  #hoq-pill .pl-meta {\n    flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px;\n    cursor: pointer;\n  }\n  #hoq-pill .pl-title {\n    font-size: 15px; font-weight: 700; letter-spacing: -.01em;\n    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\n  }\n  #hoq-pill .pl-artist { font-size: 13px; color: #a0a0a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n  #hoq-pill .pl-meta.sw-l { animation: hoqPillSwL .3s ease; }\n  #hoq-pill .pl-meta.sw-r { animation: hoqPillSwR .3s ease; }\n  @keyframes hoqPillSwL { 0% { transform: translateX(0); opacity: 1; } 45% { transform: translateX(-24px); opacity: 0; }\n    55% { transform: translateX(24px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }\n  @keyframes hoqPillSwR { 0% { transform: translateX(0); opacity: 1; } 45% { transform: translateX(24px); opacity: 0; }\n    55% { transform: translateX(-24px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }\n  #hoq-pill .pl-dc, #hoq-pill .pl-like { width: 42px; height: 42px; border-radius: 50%; }\n  #hoq-pill .pl-dc:active, #hoq-pill .pl-like:active { background: rgba(255,255,255,.08); }\n  #hoq-pill .pl-dc svg { width: 22px; height: 22px; fill: none; stroke: #e8e8ec; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }\n  #hoq-pill .pl-like svg { width: 25px; height: 25px; fill: none; stroke: #e8e8ec; stroke-width: 1.9; stroke-linejoin: round; }\n  #hoq-pill .pl-like.on svg { fill: var(--sc-accent, #ff5500); stroke: var(--sc-accent, #ff5500); }\n  #hoq-pill .pl-like.pop svg { animation: hoqPillPop .32s ease; }\n  @keyframes hoqPillPop { 40% { transform: scale(1.28); } }\n  #hoq-pill .pl-pop {\n    position: absolute; right: 6px; bottom: calc(100% + 8px); display: flex; flex-direction: column;\n    min-width: 196px; padding: 6px; border-radius: 16px;\n    background: rgba(28,28,31,.97); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 12px 30px rgba(0,0,0,.5);\n  }\n  #hoq-pill .pl-pop[hidden] { display: none; }\n  #hoq-pill .pl-pop button {\n    justify-content: flex-start; width: 100%; padding: 12px 14px; border-radius: 11px;\n    font: 600 15px -apple-system, Inter, Arial, sans-serif; color: #fff;\n  }\n  #hoq-pill .pl-pop button:active { background: rgba(255,255,255,.08); }\n  #hoq-pill .pl-pop .pl-note { padding: 6px 14px 8px; font-size: 12px; color: #9a9aa4; }\n\n  /* Tile play buttons. The artwork rule above (\".playableTile__artwork > *\",\n     pinned to all four edges) also caught the play button's box, so its own\n     centring transform threw it ~90px up and left -- clipped out of sight.\n     A phone has no hover to reveal it anyway: a small, always-on button in the\n     artwork's corner, like SoundCloud's app. */\n  html.hoq-mobile .playableTile__artwork > .playableTile__playButton {\n    top: auto !important; left: auto !important; right: 8px !important; bottom: 8px !important;\n    width: 38px !important; height: 38px !important; transform: none !important;\n    opacity: 1 !important; visibility: visible !important; z-index: 3 !important;\n  }\n  html.hoq-mobile .playableTile__playButton .sc-button-play {\n    width: 38px !important; height: 38px !important; min-width: 0 !important;\n    box-shadow: 0 2px 10px rgba(0,0,0,.45) !important;\n  }\n\n  /* ---- phone polish (v1.6.33): every rule here was tried on the live proxy first ---- */\n  /* the desktop scroll indicator and the landing hero's second search box */\n  html.hoq-mobile #hoq-scroll { display: none !important; }\n  html.hoq-mobile .frontContent__search { display: none !important; }\n  /* landing: \"Never stop listening\" + \"Calling all creators\" ran off the right edge */\n  html.hoq-mobile .frontMobileTeaser { display: block !important; width: auto !important; height: auto !important; min-height: 0 !important;\n    padding: 36px 18px !important; box-sizing: border-box !important; }\n  html.hoq-mobile .frontMobileTeaser .frontMobileTeaser__info { display: block !important; width: auto !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }\n  html.hoq-mobile .frontMobileTeaser .frontMobileTeaser__info .g-type-marketing-header { display: block !important; width: auto !important; max-width: none !important;\n    margin: 0 !important; padding: 0 !important; font-size: 44px !important; line-height: .95 !important; }\n  html.hoq-mobile .frontMobileTeaser__qrRow { display: block !important; width: auto !important; margin-top: 16px !important; }\n  html.hoq-mobile .frontMobileTeaser__qrCode, html.hoq-mobile .frontMobileTeaser__devices { display: none !important; }\n  html.hoq-mobile .frontMobileTeaser__qrInfo { display: block !important; width: auto !important; max-width: none !important; margin: 0 !important; font-size: 16px !important; line-height: 1.4 !important; }\n  html.hoq-mobile .onSoundCloudTeaser { display: flex !important; flex-direction: column !important; gap: 18px !important; width: auto !important;\n    padding: 28px 18px !important; box-sizing: border-box !important; }\n  html.hoq-mobile .onSoundCloudTeaser__image { width: 100% !important; height: 240px !important; margin: 0 !important; border-radius: 16px !important;\n    background-size: cover !important; background-position: center !important; }\n  html.hoq-mobile .onSoundCloudTeaser__wrapper { width: auto !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }\n  html.hoq-mobile .onSoundCloudTeaser__title { width: auto !important; font-size: 38px !important; line-height: 1 !important; }\n  html.hoq-mobile .onSoundCloudTeaser__text, html.hoq-mobile .onSoundCloudTeaser__wrapper > div { width: auto !important; max-width: none !important; }\n  /* the main column kept a 32px gutter for the (hidden) right rail */\n  html.hoq-mobile .l-main, html.hoq-mobile .l-fluid-fixed > .sc-border-light-right { padding-right: 0 !important; border-right: 0 !important; }\n  /* Discover rows: titles and tiles line up with the page title, tiles fill the width */\n  html.hoq-mobile .mixedSelectionModule__title { margin-left: 0 !important; padding-left: 0 !important; }\n  html.hoq-mobile .tileGallery__slider { margin: 0 !important; padding: 0 !important; width: auto !important; }\n  html.hoq-mobile .tileGallery__sliderPeekContainer, html.hoq-mobile .tileGallery__sliderPanel { width: auto !important; }\n  html.hoq-mobile .playableTile__playButton .sc-button-play { width: 34px !important; height: 34px !important; border-radius: 50% !important; }\n  /* track page: full-width cover, a real play button, date + genre on the left */\n  html.hoq-mobile .fullHero { margin-left: 0 !important; margin-right: 0 !important; }\n  html.hoq-mobile .fullHero__foreground { flex-direction: column !important; align-items: stretch !important; padding: 12px !important; box-sizing: border-box !important; width: auto !important; }\n  html.hoq-mobile .fullHero__artwork { order: -1 !important; width: 100% !important; max-width: none !important; height: auto !important; aspect-ratio: 1 / 1 !important; margin: 0 0 14px !important; }\n  html.hoq-mobile .fullHero__artwork .listenArtworkWrapper, html.hoq-mobile .fullHero__artwork .listenArtworkWrapper__artwork,\n  html.hoq-mobile .fullHero__artwork .image, html.hoq-mobile .fullHero__artwork .sc-artwork { width: 100% !important; height: 100% !important; max-width: none !important; border-radius: 14px !important; }\n  html.hoq-mobile .fullHero__title { width: auto !important; margin: 0 !important; }\n  html.hoq-mobile .fullHero__title .soundTitle__titleContainer { display: flex !important; align-items: center !important; gap: 14px !important; }\n  html.hoq-mobile .fullHero__title .soundTitle__playButton { margin: 0 !important; flex: none !important; }\n  html.hoq-mobile .fullHero .soundTitle__playButton .sc-button-play { width: 52px !important; height: 52px !important; border-radius: 50% !important; }\n  html.hoq-mobile .fullHero .soundTitle__playButton .sc-button-play svg { width: 22px !important; height: 22px !important; }\n  html.hoq-mobile .fullHero .soundTitle__title, html.hoq-mobile .fullHero .soundTitle__title span { font-size: 22px !important; line-height: 1.15 !important; }\n  html.hoq-mobile .fullHero .soundTitle__username, html.hoq-mobile .fullHero .soundTitle__usernameHeroLink { font-size: 15px !important; }\n  html.hoq-mobile .fullHero__info { width: auto !important; flex-direction: row !important; justify-content: flex-start !important; align-items: center !important;\n    gap: 10px !important; margin: 10px 0 0 !important; flex-wrap: wrap !important; }\n  html.hoq-mobile .fullHero__uploadTime { order: 2; text-align: left !important; }\n  html.hoq-mobile .fullHero__playerArea { width: auto !important; margin-top: 12px !important; }\n  /* floating player: the song's cover inside the play button */\n  #hoq-pill .pl-disc.has-art { position: relative; background: #222 center / cover no-repeat; color: #fff; }\n  #hoq-pill .pl-disc.has-art::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: rgba(0,0,0,.42); }\n  #hoq-pill .pl-disc.has-art svg { position: relative; z-index: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }\n}\n";
   (document.head || H).appendChild(mob);
 
   // Keep the desktop layout legible instead of letting the browser scale it
@@ -8025,7 +9534,12 @@ if (document.readyState === 'loading') {
         H.classList.toggle('hoq-pill-on', live);
         if (!live) return;
         const key = np.title + '|' + np.artist;
-        if (key !== lastKey) { lastKey = key; titleEl.textContent = np.title; artistEl.textContent = np.artist || ''; baseP = -1; }
+        if (key !== lastKey) {
+          lastKey = key; titleEl.textContent = np.title; artistEl.textContent = np.artist || ''; baseP = -1;
+          const cov = /^https:\/\/[^\s"'()]+$/.test(np.cover || '') ? np.cover : '';
+          disc.style.backgroundImage = cov ? 'url("' + cov + '")' : '';
+          disc.classList.toggle('has-art', !!cov);
+        }
         const pr = playerProgress();
         if (pr.paused !== shownPaused) showPaused(pr.paused);
         const lb = document.querySelector('.playbackSoundBadge__like');
