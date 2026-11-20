@@ -3269,13 +3269,20 @@ const MUI_CSS = `
     background: transparent !important; border: 0 !important; border-radius: 0 !important; overflow: visible !important;
   }
   html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]):hover { background: transparent !important; }
+  /* round + shadow + hover lift go on the box that holds BOTH the cover and the
+     play overlay. Lifting only the image left the overlay behind, and its bottom
+     3px stuck out under the cover as a dark strip. */
   html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]) div:has(> img[sizes*="200px"]) {
+    border-radius: 10px !important; overflow: hidden !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]) div:has(> .entity-card__play-overlay) {
     border-radius: 10px !important; overflow: hidden !important;
     box-shadow: 0 6px 18px rgba(0,0,0,0.35) !important; transition: transform .18s ease, box-shadow .18s ease !important;
   }
-  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]):hover div:has(> img[sizes*="200px"]) {
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]):hover div:has(> .entity-card__play-overlay) {
     transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,0.45) !important;
   }
+  html.hoq-webi [aria-label="Home"] .entity-card__play-overlay { border-radius: 10px !important; }
   html.hoq-webi [aria-label="Home"] img[sizes*="200px"] { border-radius: 10px !important; }
   /* tile titles take the accent (like "Buzzing Mexico" on the classic pages); captions stay grey */
   html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]) .MuiTypography-h4 {
