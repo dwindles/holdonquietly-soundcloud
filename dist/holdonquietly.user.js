@@ -3471,6 +3471,29 @@ const MUI_CSS = `
   }
   html.hoq-webi [aria-label="Home"] .MuiChip-label { color: inherit !important; font-weight: 600 !important; font-size: 12.5px !important;
     text-transform: none !important; letter-spacing: 0 !important; padding: 0 12px !important; }
+  /* hover on a tile: SoundCloud dims the whole cover and floats a big washed-out
+     play disc in the middle. Classic look instead: the art stays bright (a light
+     gradient at the bottom only) and a small solid accent play button sits in
+     the bottom-right corner. */
+  html.hoq-webi .entity-card__play-overlay {
+    background: linear-gradient(to top, rgba(0,0,0,0.42), rgba(0,0,0,0) 55%) !important;
+    display: flex !important; align-items: flex-end !important; justify-content: flex-end !important;
+    padding: 10px !important; box-sizing: border-box !important; backdrop-filter: none !important;
+  }
+  html.hoq-webi .entity-card__play-overlay > span { display: block !important; }
+  html.hoq-webi .entity-card__play-button {
+    width: 40px !important; height: 40px !important; min-width: 0 !important; margin: 0 !important;
+    border-radius: 50% !important; background: transparent !important; opacity: 1 !important;
+    transform: translateY(4px); transition: transform .16s ease !important;
+  }
+  html.hoq-webi .MuiCard-root:hover .entity-card__play-button, html.hoq-webi .entity-card__play-button:focus-within { transform: none; }
+  html.hoq-webi .entity-card__play-button button.MuiButton-root {
+    width: 40px !important; height: 40px !important; min-width: 0 !important; padding: 0 !important;
+    border-radius: 50% !important; background: var(--sc-accent, #ff5500) !important; color: #fff !important;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45) !important; opacity: 1 !important;
+  }
+  html.hoq-webi .entity-card__play-button button.MuiButton-root:hover { filter: brightness(1.12) !important; }
+  html.hoq-webi .entity-card__play-button button.MuiButton-root svg { width: 18px !important; height: 18px !important; color: #fff !important; fill: #fff !important; }
   /* "Latest from artists you follow": SoundCloud paints an orange-pink-purple brand
      gradient frame (the card's last layer); take the accent instead */
   html.hoq-webi [aria-label="Home"] li:has(img[sizes="320px"]) > div > div:last-child {
