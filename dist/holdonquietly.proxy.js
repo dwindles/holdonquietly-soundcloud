@@ -3316,17 +3316,24 @@ const MUI_CSS = `
     display: flex !important; align-items: flex-end !important; justify-content: flex-end !important;
     padding: 10px !important; box-sizing: border-box !important; backdrop-filter: none !important;
   }
-  html.hoq-webi .entity-card__play-overlay > span { display: block !important; }
-  html.hoq-webi .entity-card__play-button {
-    width: 40px !important; height: 40px !important; min-width: 0 !important; margin: 0 !important;
-    border-radius: 50% !important; background: transparent !important; opacity: 1 !important;
-    transform: translateY(4px); transition: transform .16s ease !important;
+  /* pinned to the cover's bottom-right corner; SoundCloud's own hover motion on
+     these wrappers (it slides the button in) is cancelled, or the button ended
+     up half below the cover's edge */
+  html.hoq-webi .entity-card__play-overlay { transform: none !important; }
+  html.hoq-webi .entity-card__play-overlay > span {
+    display: block !important; position: absolute !important; right: 10px !important; bottom: 10px !important;
+    top: auto !important; left: auto !important; margin: 0 !important; transform: none !important; translate: none !important;
   }
-  html.hoq-webi .MuiCard-root:hover .entity-card__play-button, html.hoq-webi .entity-card__play-button:focus-within { transform: none; }
+  html.hoq-webi .entity-card__play-button {
+    position: static !important; width: 40px !important; height: 40px !important; min-width: 0 !important; margin: 0 !important;
+    border-radius: 50% !important; background: transparent !important; opacity: 1 !important;
+    transform: none !important; translate: none !important;
+  }
+  html.hoq-webi .entity-card__play-button > span { display: block !important; transform: none !important; translate: none !important; }
   html.hoq-webi .entity-card__play-button button.MuiButton-root {
     width: 40px !important; height: 40px !important; min-width: 0 !important; padding: 0 !important;
-    border-radius: 50% !important; background: var(--sc-accent, #ff5500) !important; color: #fff !important;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.45) !important; opacity: 1 !important;
+    border-radius: 50% !important; background: var(--sc-accent-bg, var(--sc-accent, #ff5500)) !important; color: #fff !important;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45) !important; opacity: 1 !important;   /* same gradient as the classic tiles' play buttons */
   }
   html.hoq-webi .entity-card__play-button button.MuiButton-root:hover { filter: brightness(1.12) !important; }
   html.hoq-webi .entity-card__play-button button.MuiButton-root svg { width: 18px !important; height: 18px !important; color: #fff !important; fill: #fff !important; }
