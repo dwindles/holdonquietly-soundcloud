@@ -3279,6 +3279,10 @@ const MUI_CSS = `
   html.hoq-webi [aria-label="Home"] .MuiCard-root a.MuiLink-root:hover { color: #fff !important; }
   /* "Your likes" and other card headings: white, not the accent */
   html.hoq-webi [aria-label="Home"] p.MuiTypography-h3 { color: #fff !important; }
+  /* compact track rows (Trending by genre, Liked by people you follow): SoundCloud
+     lays them out as a 3-row grid with 16px between columns but 0 between rows,
+     so the cards touched. Same breathing room both ways. */
+  html.hoq-webi [aria-label="Home"] ul:has(> li > .MuiCard-root img[sizes="48px"]) { row-gap: 10px !important; }
   /* compact rows + feature cards: round art */
   html.hoq-webi [aria-label="Home"] img[sizes="48px"], html.hoq-webi [aria-label="Home"] img[sizes="64px"],
   html.hoq-webi [aria-label="Home"] img[sizes="104px"], html.hoq-webi [aria-label="Home"] img[sizes="120px"],
