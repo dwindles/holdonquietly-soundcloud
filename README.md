@@ -25,6 +25,10 @@ it needs the [webview2 runtime](https://developer.microsoft.com/microsoft-edge/w
 - **updates itself:** checks releases when it opens n swaps itself on restart
 - **ad block:** optional n local, see below
 
+## everything
+
+the whole app in 1 doc (every feature, how its built, how to ship it, the traps): [GUIDE.md](GUIDE.md)
+
 ## how its built
 
 nearly the whole app is 2 files
