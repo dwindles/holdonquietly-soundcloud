@@ -785,6 +785,10 @@ const BASE_CSS = `
       radial-gradient(140% 100% at 50% 30%, rgba(10,10,12,0) 48%, rgba(10,10,12,0.34) 100%),
       linear-gradient(180deg, rgba(10,10,12,0.10), rgba(10,10,12,0.26));
   }
+  /* ...but only once. Frames from SoundCloud's new app (Home, the new track page)
+     get our classes mirrored in, so they drew this scrim AGAIN over the page's
+     own: a darker rectangle exactly the size of the frame. */
+  html.hoq-webi.sc-coverbg body::before { content: none !important; display: none !important; }
   /* Frosted translucent bars so the top + bottom blend with the cover bg.
      (Titlebar is a transparent overlay merged into the header now — keep it
      see-through; the header itself carries the frosted bg below.) */
@@ -3074,6 +3078,15 @@ const MUI_CSS = `
   /* Top-frame side of the same fix: the <iframe> element itself must not paint
      an opaque box over #sc-bg either. */
   .webiIframe, .webiIframeV2Layout { background: transparent !important; }
+  /* SoundCloud's new Home (and other pages) now render inside these frames too;
+     whatever wraps one in the main column must not lay its own grey shade over
+     the cover background (it read as a lighter panel behind the whole Home page). */
+  html:not(.hoq-webi) .l-main :has(> iframe[class*="webi"]),
+  html:not(.hoq-webi) .l-main :has(iframe[class*="webiIframe"]):not(.l-main) {
+    background: transparent !important; background-image: none !important; box-shadow: none !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-color: transparent !important;
+  }
+  html:not(.hoq-webi) iframe[class*="webi"] { background: transparent !important; color-scheme: normal !important; }
 
   /* --- buttons ------------------------------------------------------------- */
   .MuiButton-contained.MuiButton-colorPrimary {
@@ -3204,6 +3217,74 @@ const MUI_CSS = `
      form controls and scrollbars dark, since that only needs an ancestor. */
   html.hoq-webi { color-scheme: normal !important; }
   html.hoq-webi body { color-scheme: dark; }
+
+
+  /* ===== New Home page (SoundCloud's MUI rewrite) — matched to the classic theme =====
+     SoundCloud moved Home onto the new app; the generic card rule above boxed
+     every tile in a tinted border. Here: shelf tiles are bare rounded artwork
+     (like the classic tiles), the rest are soft panels, headings and tile titles
+     take the accent the classic pages use, genre chips use the tag style. */
+  html.hoq-webi [aria-label="Home"] h2.MuiTypography-root {
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 60%, #fff) !important;
+    font-size: 20px !important; font-weight: 700 !important; letter-spacing: -0.01em !important;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--sc-accent, #ff5500) 45%, transparent) !important;
+  }
+  /* every Home card: a soft panel (no accent border, no frost) */
+  html.hoq-webi [aria-label="Home"] .MuiCard-root {
+    background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important; box-shadow: none !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    transition: background .14s ease, border-color .14s ease !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:hover { background: rgba(255,255,255,0.075) !important; border-color: rgba(255,255,255,0.1) !important; }
+  /* shelf tiles (big artwork): no box at all, rounded art that lifts on hover */
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]) {
+    background: transparent !important; border: 0 !important; border-radius: 0 !important; overflow: visible !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]):hover { background: transparent !important; }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]) div:has(> img[sizes*="200px"]) {
+    border-radius: 10px !important; overflow: hidden !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35) !important; transition: transform .18s ease, box-shadow .18s ease !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]):hover div:has(> img[sizes*="200px"]) {
+    transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,0.45) !important;
+  }
+  html.hoq-webi [aria-label="Home"] img[sizes*="200px"] { border-radius: 10px !important; }
+  /* tile titles take the accent (like "Buzzing Mexico" on the classic pages); captions stay grey */
+  html.hoq-webi [aria-label="Home"] .MuiCard-root:has(img[sizes*="200px"]) .MuiTypography-h4 {
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 65%, #fff) !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root .MuiTypography-body,
+  html.hoq-webi [aria-label="Home"] .MuiCard-root a.MuiLink-root { color: #a6a6b0 !important; }
+  html.hoq-webi [aria-label="Home"] .MuiCard-root a.MuiLink-root:hover { color: #fff !important; }
+  /* "Your likes" and other card headings: white, not the accent */
+  html.hoq-webi [aria-label="Home"] p.MuiTypography-h3 { color: #fff !important; }
+  /* compact rows + feature cards: round art */
+  html.hoq-webi [aria-label="Home"] img[sizes="48px"], html.hoq-webi [aria-label="Home"] img[sizes="64px"],
+  html.hoq-webi [aria-label="Home"] img[sizes="104px"], html.hoq-webi [aria-label="Home"] img[sizes="120px"],
+  html.hoq-webi [aria-label="Home"] img[sizes="128px"] { border-radius: 8px !important; }
+  /* genre chips: the tag look ("# Trap"), solid accent when picked */
+  html.hoq-webi [aria-label="Home"] .MuiChip-root {
+    height: 30px !important; border-radius: 8px !important;
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 35%, transparent) !important;
+    color: color-mix(in srgb, var(--sc-accent, #ff5500) 45%, #fff) !important;
+    transition: background .12s ease, border-color .12s ease, color .12s ease !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiChip-root:hover {
+    background: color-mix(in srgb, var(--sc-accent, #ff5500) 24%, transparent) !important;
+    border-color: color-mix(in srgb, var(--sc-accent, #ff5500) 55%, transparent) !important; color: #fff !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiChip-filled {
+    background: var(--sc-accent, #ff5500) !important; border-color: transparent !important; color: #fff !important;
+  }
+  html.hoq-webi [aria-label="Home"] .MuiChip-label { color: inherit !important; font-weight: 600 !important; font-size: 12.5px !important;
+    text-transform: none !important; letter-spacing: 0 !important; padding: 0 12px !important; }
+  /* "Latest from artists you follow": SoundCloud paints an orange-pink-purple brand
+     gradient frame (the card's last layer); take the accent instead */
+  html.hoq-webi [aria-label="Home"] li:has(img[sizes="320px"]) > div > div:last-child {
+    background: linear-gradient(135deg, var(--sc-accent, #ff5500), color-mix(in srgb, var(--sc-accent, #ff5500) 55%, #fff)) !important;
+  }
 
   /* Panels pick up the same acrylic as the rest of the app. */
   html.hoq-webi.sc-coverbg section[aria-label="Track header"],
