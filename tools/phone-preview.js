@@ -109,10 +109,17 @@ async function boot() {
   if (HEADED) { await send('Page.navigate', { url: 'https://sc.holdonquietly.com/discover' }); }
 }
 
+// Every request waits for the browser: answering before it was connected
+// dropped the first page load.
+const ready = boot();
+ready.then(() => console.log('phone preview on http://127.0.0.1:' + CTL + ' (hoq.js: ' + mode + ', shots: ' + SHOTS + ')'))
+  .catch((e) => { console.error(e.message); try { chrome.kill(); } catch (er) {} process.exit(1); });
+
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x'), q = Object.fromEntries(u.searchParams);
   const out = (v) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(v, null, 1)); };
   try {
+    await ready;
     if (u.pathname === '/nav') {
       const l = loaded();
       await send('Page.navigate', { url: q.u });
@@ -152,8 +159,5 @@ http.createServer(async (req, res) => {
       setTimeout(() => process.exit(0), 300);
     } else { res.writeHead(404); res.end(); }
   } catch (e) { res.writeHead(500); res.end(String((e && e.stack) || e)); }
-}).listen(CTL, '127.0.0.1', () => {
-  boot().then(() => console.log('phone preview on http://127.0.0.1:' + CTL + ' (hoq.js: ' + mode + ', shots: ' + SHOTS + ')'))
-    .catch((e) => { console.error(e.message); try { chrome.kill(); } catch (er) {} process.exit(1); });
-});
+}).listen(CTL, '127.0.0.1');
 process.on('SIGINT', () => { try { chrome.kill(); } catch (e) {} process.exit(0); });
