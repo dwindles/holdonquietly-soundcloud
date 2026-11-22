@@ -1,0 +1,44 @@
+/* holdonquietly — phone rules inside SoundCloud's newer-app frames.
+   Signed in, SoundCloud shows Home's modules and the track page from its newer
+   app, in same-origin frames (/n/...). That app has its own phone layout; this
+   only fixes what the floating player and the theme get in the way of. The
+   phone UI (tools/mobile-ui.js) puts it in each frame as
+   <style id="hoq-mobile-frame-css">; the frame's <html> carries our classes
+   (preload's themeFrames copies them across). */
+@media (max-width: 820px) {
+  /* The track page scrolls inside this box: leave room under the last comment
+     for the floating player. */
+  html.hoq-webi #navigation-shell-right-side-container { padding-bottom: 104px !important; box-sizing: border-box !important; }
+
+  /* The title was cut to one line ("SZA - SNOOZE (YO-ZU EDIT"). */
+  html.hoq-webi section[aria-label="Track header"] h1 {
+    display: -webkit-box !important; -webkit-box-orient: vertical !important; -webkit-line-clamp: 3 !important;
+    white-space: normal !important; overflow: hidden !important; text-overflow: clip !important;
+    overflow-wrap: anywhere !important; text-align: center !important; line-height: 1.2 !important;
+    color: #fff !important;
+  }
+  html.hoq-webi section[aria-label="Track header"] h1 + * { justify-content: center !important; }
+  html.hoq-webi section[aria-label="Track header"] [aria-label*=" by "] {
+    width: auto !important; max-width: calc(100vw - 40px) !important; align-items: center !important;
+  }
+
+  /* Like, share, copy link, repost, add to playlist, buy, more: seven buttons
+     in a row that ran off the right edge. Tighter, they all fit. */
+  html.hoq-webi section[aria-label="Track header"] div:has(> button[aria-label="Share"]) {
+    gap: 2px !important; justify-content: space-between !important; flex: 1 1 auto !important;
+    min-width: 0 !important; margin-left: 10px !important; padding-left: 0 !important; overflow: visible !important;
+  }
+  /* (not Like: it carries the like count and keeps its own width) */
+  html.hoq-webi section[aria-label="Track header"] div:has(> button[aria-label="Share"]) .MuiIconButton-root:not([aria-label="Like"]) {
+    width: 37px !important; height: 37px !important; min-width: 37px !important; padding: 7px !important;
+  }
+  html.hoq-webi section[aria-label="Track header"] div:has(> button[aria-label="Share"]) .MuiIconButton-root:not([aria-label="Like"]) svg {
+    width: 21px !important; height: 21px !important;
+  }
+  html.hoq-webi section[aria-label="Track header"] button[aria-label="Like"].MuiIconButton-root { height: 37px !important; }
+  /* The page starts with a 16px dark band above the cover's colour block. */
+  html.hoq-webi section[aria-label="Track header"] { margin-top: -16px !important; }
+
+  /* Text you type in here would zoom the page in on iOS under 16px. */
+  html.hoq-webi input, html.hoq-webi textarea { font-size: 16px !important; }
+}

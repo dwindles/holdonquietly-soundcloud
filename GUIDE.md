@@ -209,9 +209,21 @@ Three ways to get the theme on a phone, all built from the same `preload.js` by
 `tools/build-userscript.js`. Details in MOBILE.md.
 
 - **sc.holdonquietly.com (proxy):** SoundCloud served through your own domain with
-  the theme injected. No install. It has its own phone layout and a floating
-  now-playing pill (cover in the play button, progress ring, swipe to skip). Your
-  PC can pair to sign it in.
+  the theme injected. No install. Your PC can pair to sign it in. It has its own
+  phone layout, laid out like a phone app:
+  - **Top bar:** logo, search, and (signed in) notifications, messages and you.
+  - **Tab bar at the bottom:** Home, Feed, Library, Social (signed out: Home,
+    Search, Social). Social opens the Social/Settings page.
+  - **Floating player** above the tabs: cover in the play button with a progress
+    ring, title and artist, previous, next, like and Discord. Swipe it to skip.
+  - **Full-screen player** (tap the floating player): big cover, a seek bar you can
+    drag, shuffle, previous, play, next, repeat, like, Discord, Share (the phone's
+    share sheet) and Queue. The queue is SoundCloud's own "Next up" as a sheet.
+    Title and artist take you to their pages. Swipe down to close.
+  - Track rows are compact (cover with the play button on it, one row of actions),
+    search filters are a row of chips, and artist pages, the classic track page and
+    signed-in pages from SoundCloud's newer app (Home modules, track pages) are
+    reflowed for the width. Mouse-only settings are hidden.
 - **Userscript** (iPhone *Userscripts* app / Tampermonkey), **Shortcuts** action,
   and a **bookmarklet**.
 
@@ -230,7 +242,11 @@ Three ways to get the theme on a phone, all built from the same `preload.js` by
 | `HoqAccount.cs` | holdonquietly.com account (login, stats/settings sync) |
 | `LastFm.cs` | Last.fm auth + scrobbling |
 | `ShortcutHelper.cs` | Start-menu shortcut / app identity |
-| `tools/build-userscript.js` | builds the phone versions into `dist/` (`MOBILE_CSS`, the pill) |
+| `tools/build-userscript.js` | builds the phone versions into `dist/` from `preload.js` and the three files below |
+| `tools/mobile.css` | the phone layout (top bar, tab bar, players, every page at phone width) |
+| `tools/mobile-ui.js` | the phone UI: tab bar, floating player, full-screen player, queue |
+| `tools/mobile-frame.css` | phone rules inside SoundCloud's newer-app frames (signed-in Home modules, track pages) |
+| `tools/phone-preview.js` | headless Chrome at iPhone size on sc.holdonquietly.com with your local build swapped in (§6) |
 | `tools/cdp.js`, `tools/shot.js` | inspect / screenshot a running app over the debug port |
 | `proxy/` | nginx config + the friends server (`friends-server.js`) for sc.holdonquietly.com |
 
@@ -399,6 +415,14 @@ as a script file (PowerShell mangles quotes on the way to ssh).
   and the player's state.
 - **Live app inspection:** start the real app with `--remote-debugging-port=9222`,
   then `node tools/cdp.js -e "<js>"` / `node tools/shot.js out.png`.
+- **Phone layout:** `node tools/build-userscript.js`, then `node tools/phone-preview.js`
+  (headless Chrome at 390x844 with an iPhone user agent, its own profile in the temp
+  folder). It serves `dist/holdonquietly.proxy.js` in place of the live `/hoq.js`
+  (`/mode?m=live` for the live one), so nothing is uploaded. Drive it over HTTP:
+  `/nav?u=<url>`, `/shot?f=<name>` (PNGs next to its profile), `/tap?x=&y=`,
+  `/size?w=&h=`, `POST /eval`, `/logs`. Signed out it can't play; to test signed
+  in, start it once headed (`--headed`) and sign it in with a link from the
+  app's Settings → Phone yourself, then run it headless on the same profile.
 - **Sign-in by hand:** `HOQ_ACCOUNTS_NO_BROWSER=1` logs the holdonquietly.com sign-in
   link instead of opening a browser, so a test can call the loopback callback itself.
 - **Saved pages:** copy a frame's outerHTML from DevTools and render it in headless
@@ -423,6 +447,18 @@ as a script file (PowerShell mangles quotes on the way to ssh).
   Before that it's a flat placeholder.
 - **Window-edge resize handler** eats synthetic mousedowns at (0,0). Give test
   events real coordinates.
+- **Phone: the hidden player bar still has to be laid out.** `hoqSeek()` presses
+  SoundCloud's timeline, and squeezed to 0px wide every seek (and every lock-screen
+  seek) landed on 0:00. `tools/mobile.css` keeps it at least 100px wide.
+- **Phone: `.playControls__inner` has a (do-nothing) transform**, which makes it the
+  box `position: fixed` is measured from. The queue sheet came out 12px tall
+  inside the bar until the transform is dropped while the queue is open.
+- **Phone: an iframe ignores top + bottom** and falls back to 150px tall. The newer
+  app's track-page frame gets an explicit `100dvh` height minus the bars.
+- **Phone: `recolorOrange()` repaints anything SoundCloud-orange inline**, our own
+  accent-coloured elements included, and the inline colour sticks (a tab stayed
+  lit, a heart stayed filled). The phone UI's elements are on its skip list.
+- **Phone: inputs under 16px make iOS zoom the page** when you tap them.
 - **Frames inherit our classes**, including `sc-coverbg`. Any `body::before` effect
   draws twice unless it's turned off under `html.hoq-webi`.
 - **Hashed class names** (`mui-xxxx`) change every SoundCloud deploy. Target `Mui*`

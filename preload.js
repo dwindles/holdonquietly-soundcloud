@@ -1501,20 +1501,8 @@ const BASE_CSS = `
   html.hoq-mobile #hoq-discord .hoq-dc-card { max-width: 100% !important; padding: 16px 12px !important; }
   html.hoq-mobile #hoq-discord .hoq-dc-quick { flex-wrap: wrap !important; }
 
-  /* Next-up queue: on desktop this is a ~360px panel pinned to the right edge
-     (a child of .playControls, anchored above the bar). At 390px it hangs off
-     the right and gets clipped. Make it a full-width bottom sheet that keeps
-     its frost, capped so it never swallows the whole screen — the inner list
-     scrolls. Swap the left-edge border/shadow for a top-edge one to match. */
-  html.hoq-mobile .playControls__queue {
-    left: 0 !important; right: 0 !important; width: 100% !important; max-width: 100% !important;
-    max-height: 72vh !important;
-    border-left: 0 !important; border-top: 1px solid rgba(255,255,255,0.08) !important;
-    box-shadow: 0 -18px 52px rgba(0,0,0,0.5) !important;
-  }
-  html.hoq-mobile .playControls__queue .queue,
-  html.hoq-mobile .playControls__queue .queue__panel,
-  html.hoq-mobile .playControls__queue .queue__scrollable { max-height: 72vh !important; }
+  /* Next-up queue on a phone: a full-height sheet opened from the phone player,
+     styled in tools/mobile.css with the rest of the phone layout. */
 
   /* Search autocomplete: the input is full-width on mobile (above), so the
      dropdown has to be too — the desktop popup is a narrow fixed column that
@@ -3755,7 +3743,9 @@ function recolorOrange() {
   const els = document.querySelectorAll('*');
   for (let i = 0; i < els.length; i++) {
     const el = els[i];
-    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you, #hoq-out-btn, .hoq-hdr-icon, .notificationIcon__badge, .playbackTimeline__timePassed, .playbackTimeline__duration, .volume__button, .playControls__play, .playbackSoundBadge, .hoq-vol-pop')) {
+    // The phone UI's own elements (#hoq-tabs ...) are painted from the accent
+    // already; repainting them inline froze their on/off states (a tab stayed lit).
+    if (_seenOrange.has(el) || el.id === 'sc-titlebar' || el.closest('#sc-titlebar, #sc-palette, .header__upsellWrapper, .header__forArtistsButton, .hoq-q, #hoq-pf-tools, #hoq-pf-you, #hoq-out-btn, .hoq-hdr-icon, .notificationIcon__badge, .playbackTimeline__timePassed, .playbackTimeline__duration, .volume__button, .playControls__play, .playbackSoundBadge, .hoq-vol-pop, #hoq-tabs, #hoq-pill, #hoq-mnp, #hoq-acts, #hoq-mtoast, #hoq-signin-cta, #hoq-signin-sheet')) {
       continue;
     }
     _seenOrange.add(el);

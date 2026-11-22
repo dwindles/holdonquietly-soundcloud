@@ -15,6 +15,18 @@ That writes `dist/holdonquietly.user.js`. **Do not edit that file** — it is
 overwritten on every build. Change `preload.js` (or the shim inside
 `tools/build-userscript.js`) and rebuild, so desktop and mobile never drift.
 
+The phone layout itself lives in three files the build reads:
+
+| File | What it is |
+|---|---|
+| `tools/mobile.css` | the layout: a 56px top bar, a tab bar at the bottom, the floating and full-screen players, and every page reflowed for a phone |
+| `tools/mobile-ui.js` | the phone UI: tab bar (Home / Feed / Library / Social), floating player (play with a progress ring, previous, next, like, Discord, swipe to skip), full-screen player (seek, shuffle, repeat, like, Discord, Share, Queue) |
+| `tools/mobile-frame.css` | the same inside SoundCloud's newer-app frames (signed-in Home modules, track pages) |
+
+Every button in the phone UI presses SoundCloud's own control, which stays in the
+page, invisible, so playback state is always SoundCloud's. `node tools/phone-preview.js`
+shows the result at iPhone size with your local build (GUIDE §6).
+
 ## Install — iPhone
 
 Userscripts has no "install from URL" prompt like Tampermonkey. It watches a
@@ -165,7 +177,8 @@ the payload string `Function.toString()` produces at runtime), with the transpor
 and storage fallbacks unit-tested with no `GM_*` defined at all. Its GM bridge
 specifically has not been exercised, since that needs a real manager.
 
-**Neither has been run on a phone.** The desktop Chromium run proves the code
-executes and binds; it says nothing about how a 1280px layout feels at 390px.
-Expect the first real problem to be layout, not logic — and that needs a mobile
-stylesheet, not more porting.
+The **proxy build** (sc.holdonquietly.com) is the one in daily use on an iPhone.
+Its phone layout was rebuilt and checked at 375x667, 390x844 and 430x932 with an
+iPhone user agent (`tools/phone-preview.js`), signed in and signed out: Home,
+Feed, Library, Likes, search, artist pages, both track pages, Social/Settings,
+the full-screen player (play, seek, shuffle, repeat) and the queue.
