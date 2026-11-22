@@ -461,7 +461,13 @@ class Program
     static readonly HttpClient http = new HttpClient();
     // Same friends/feed service as before, now over https through the proxy
     // (builds up to v1.4.0 still use the plain-http :8790 directly).
-    const string BACKEND = "https://sc.holdonquietly.com/__hoq/fb";
+    // HOQ_BACKEND points a test copy at a local proxy/friends-server.js (e.g.
+    // http://127.0.0.1:18790, run with PORT=18790), so friends, feed and jams can
+    // be tried without touching the real server.
+    static readonly string TestBackend = (Environment.GetEnvironmentVariable("HOQ_BACKEND") ?? "").Trim().TrimEnd('/');
+    static readonly string BACKEND = TestBackend.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? TestBackend : "https://sc.holdonquietly.com/__hoq/fb";
+    // A test copy stays off the shared backend unless it has its own.
+    static bool BackendSilent => IsTestCopy && BACKEND != TestBackend;
 
     // The data folder (HOQ_DATADIR for a test copy, else %LocalAppData%\SoundCloudApp).
     // Saved accounts and webhook.txt live here so a test copy never touches the real ones.
@@ -512,15 +518,180 @@ class Program
     static bool IsTestCopy => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HOQ_DATADIR"));
 
     static async Task PostPresence(string id, string name, string sc, string title, string artist, string cover,
-        string url = "", int pos = 0, int dur = 0, bool paused = false, double rate = 1)
+        string url = "", int pos = 0, int dur = 0, bool paused = false, double rate = 1, string jam = "")
     {
-        if (string.IsNullOrEmpty(id) || IsTestCopy) return;
+        if (string.IsNullOrEmpty(id) || BackendSilent) return;
         try
         {
-            string payload = JsonSerializer.Serialize(new { id, name, sc, title, artist, cover, url, pos, dur, paused, rate });
+            string payload = JsonSerializer.Serialize(new { id, name, sc, title, artist, cover, url, pos, dur, paused, rate, jam });
             await http.PostAsync(BACKEND + "/presence", new StringContent(payload, Encoding.UTF8, "application/json"));
         }
         catch { }
+    }
+
+    // GET through WebView2's own network stack (DevTools' Network.loadNetworkResource),
+    // no cookies sent. Genius's bot screen turns away .NET's HTTPS client by its
+    // handshake alone (403 whatever the headers) but lets the browser engine
+    // through. CoreWebView2 calls: UI thread only.
+    static async Task<(int status, string body)> BrowserGet(string url)
+    {
+        var core = wv.CoreWebView2;
+        string frameId;
+        using (var tree = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("Page.getFrameTree", "{}")))
+            frameId = tree.RootElement.GetProperty("frameTree").GetProperty("frame").GetProperty("id").GetString();
+        var load = core.CallDevToolsProtocolMethodAsync("Network.loadNetworkResource",
+            JsonSerializer.Serialize(new { frameId, url, options = new { disableCache = true, includeCredentials = false } }));
+        if (await Task.WhenAny(load, Task.Delay(12000)) != load) throw new TimeoutException("no answer in 12 s");
+        using var res = JsonDocument.Parse(await load);
+        var r = res.RootElement.GetProperty("resource");
+        int status = r.TryGetProperty("httpStatusCode", out var sc) && sc.ValueKind == JsonValueKind.Number ? sc.GetInt32() : 0;
+        if (!r.TryGetProperty("stream", out var st) || st.ValueKind != JsonValueKind.String) return (status, "");
+        string handle = st.GetString();
+        using var bytes = new MemoryStream();
+        try
+        {
+            for (int i = 0; i < 64; i++)   // 4 MB at most
+            {
+                using var chunk = JsonDocument.Parse(await core.CallDevToolsProtocolMethodAsync("IO.read", JsonSerializer.Serialize(new { handle, size = 65536 })));
+                var c = chunk.RootElement;
+                string data = Prop(c, "data");
+                byte[] b = c.TryGetProperty("base64Encoded", out var b64) && b64.ValueKind == JsonValueKind.True ? Convert.FromBase64String(data) : Encoding.UTF8.GetBytes(data);
+                bytes.Write(b, 0, b.Length);
+                if (c.TryGetProperty("eof", out var eof) && eof.ValueKind == JsonValueKind.True) break;
+            }
+        }
+        finally { try { await core.CallDevToolsProtocolMethodAsync("IO.close", JsonSerializer.Serialize(new { handle })); } catch { } }
+        return (status, Encoding.UTF8.GetString(bytes.ToArray()));
+    }
+
+    // Search → Lyrics: which songs have this line in them, from Genius's own site
+    // search (no key). Only titles and artists go back: the page finds each song
+    // on SoundCloud.
+    static async Task LyricsSearch(string json)
+    {
+        string rid = "", list = "null";
+        try
+        {
+            using var d = JsonDocument.Parse(json);
+            rid = Prop(d.RootElement, "rid");
+            string q = Prop(d.RootElement, "q").Trim();
+            if (q.Length > 0 && q.Length <= 300)
+            {
+                var (status, body) = await BrowserGet("https://genius.com/api/search/multi?per_page=5&q=" + Uri.EscapeDataString(q));
+                if (status != 200) Log("lyrics search: genius answered " + status);
+                else
+                {
+                    using var g = JsonDocument.Parse(body);
+                    var songs = new List<Dictionary<string, string>>();
+                    var seen = new HashSet<string>();
+                    var sections = g.RootElement.GetProperty("response").GetProperty("sections");
+                    foreach (string want in new[] { "lyric", "song" })   // lines in the lyrics first, then titles
+                        foreach (var sec in sections.EnumerateArray())
+                        {
+                            if (Prop(sec, "type") != want || !sec.TryGetProperty("hits", out var hits) || hits.ValueKind != JsonValueKind.Array) continue;
+                            foreach (var h in hits.EnumerateArray())
+                            {
+                                if (songs.Count >= 6 || !h.TryGetProperty("result", out var r) || r.ValueKind != JsonValueKind.Object) continue;
+                                string title = Prop(r, "title").Trim(), artist = Prop(r, "artist_names").Trim();
+                                if (artist.Length == 0 && r.TryGetProperty("primary_artist", out var pa) && pa.ValueKind == JsonValueKind.Object) artist = Prop(pa, "name").Trim();
+                                // skip Genius's own translation pages
+                                if (title.Length == 0 || artist.StartsWith("Genius ", StringComparison.OrdinalIgnoreCase)) continue;
+                                if (seen.Add((title + "|" + artist).ToLowerInvariant())) songs.Add(new Dictionary<string, string> { ["title"] = title, ["artist"] = artist });
+                            }
+                        }
+                    list = JsonSerializer.Serialize(songs);
+                }
+            }
+        }
+        catch (Exception ex) { Log("lyrics search failed: " + ex.GetType().Name); }
+        string js = "window.__hoqLyricsRes && window.__hoqLyricsRes(" + JsonSerializer.Serialize(rid) + "," + list + ")";
+        await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
+    }
+
+    // ===== Jam (a shared listening session, proxy/friends-server.js /jam/*) =====
+    // Host-side like friends and feed (no CORS from the page). The page asks with
+    // jam:req:{rid,op,body} and hears back window.__hoqJamRes(rid, status, json).
+    // jam:watch keeps one long-poll open on the jam and hands each change to
+    // window.__hoqJam(state); {"ended":true,...} when it's over for this app.
+    static readonly string[] JAM_OPS = { "start", "join", "add", "remove", "now", "leave", "end" };
+    static System.Threading.CancellationTokenSource jamWatch;
+
+    static async Task JamRequest(string json)
+    {
+        string rid = "", op = "", result = "null";
+        int status = 0;
+        try
+        {
+            using var d = JsonDocument.Parse(json);
+            var r = d.RootElement;
+            rid = Prop(r, "rid"); op = Prop(r, "op");
+            if (BackendSilent || Array.IndexOf(JAM_OPS, op) < 0 || !r.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.Object) status = 400;
+            else
+            {
+                using var resp = await http.PostAsync(BACKEND + "/jam/" + op, new StringContent(body.GetRawText(), Encoding.UTF8, "application/json"));
+                status = (int)resp.StatusCode;
+                result = JsonOrNull(await resp.Content.ReadAsStringAsync());
+            }
+        }
+        catch (Exception ex) { Log("jam " + op + " failed: " + ex.GetType().Name); }
+        string js = "window.__hoqJamRes && window.__hoqJamRes(" + JsonSerializer.Serialize(rid) + "," + status + "," + result + ")";
+        await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
+    }
+
+    // Watch one jam (null: stop watching).
+    static void JamWatch(string json)
+    {
+        jamWatch?.Cancel();
+        jamWatch = null;
+        if (json == null || BackendSilent) return;
+        string code, id, key;
+        try { using var d = JsonDocument.Parse(json); var r = d.RootElement; code = Prop(r, "code"); id = Prop(r, "id"); key = Prop(r, "key"); }
+        catch { return; }
+        if (code.Length == 0 || id.Length == 0 || key.Length == 0) return;
+        var cts = new System.Threading.CancellationTokenSource();
+        jamWatch = cts;
+        _ = JamWatchLoop(code, id, key, cts.Token);
+    }
+
+    static async Task JamWatchLoop(string code, string id, string key, System.Threading.CancellationToken ct)
+    {
+        long v = -1;
+        int fails = 0;
+        string q = BACKEND + "/jam/state?code=" + Uri.EscapeDataString(code) + "&id=" + Uri.EscapeDataString(id) + "&key=" + Uri.EscapeDataString(key) + "&v=";
+        while (!ct.IsCancellationRequested)
+        {
+            string push = null;
+            try
+            {
+                using var t = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
+                t.CancelAfter(TimeSpan.FromSeconds(40));   // the server answers within ~20 s
+                using var resp = await http.GetAsync(q + v, t.Token);
+                string body = await resp.Content.ReadAsStringAsync(t.Token);
+                int st = (int)resp.StatusCode;
+                if (st == 404 || st == 403) push = "{\"ended\":true,\"why\":\"" + (st == 403 ? "removed" : "ended") + "\"}";
+                else if (resp.IsSuccessStatusCode)
+                {
+                    push = JsonOrNull(body);
+                    using var d = JsonDocument.Parse(push);
+                    if (d.RootElement.ValueKind != JsonValueKind.Object || !d.RootElement.TryGetProperty("v", out var vv) || vv.ValueKind != JsonValueKind.Number)
+                        throw new InvalidDataException("jam state wasn't a jam");
+                    v = vv.GetInt64();
+                    fails = 0;
+                }
+                else throw new HttpRequestException("jam state answered " + st);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception ex)
+            {
+                if (++fails == 3) Log("jam watch: " + ex.GetType().Name + ", retrying");
+                try { await Task.Delay(Math.Min(15000, 1500 * fails), ct); } catch { return; }
+                continue;
+            }
+            if (ct.IsCancellationRequested) return;
+            string js = "window.__hoqJam && window.__hoqJam(" + push + ")";
+            await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
+            if (push.StartsWith("{\"ended\"", StringComparison.Ordinal)) return;
+        }
     }
 
     // Post the current track to a Discord webhook. The URL is read from a LOCAL
@@ -1066,8 +1237,10 @@ class Program
     // straight back so the poster sees their message land immediately.
     static async Task PostFeed(string json, bool refresh)
     {
-        try { await http.PostAsync(BACKEND + "/feed", new StringContent(json, Encoding.UTF8, "application/json")); }
-        catch { }
+        // A test copy's posts went to the real community feed.
+        if (!BackendSilent)
+            try { await http.PostAsync(BACKEND + "/feed", new StringContent(json, Encoding.UTF8, "application/json")); }
+            catch { }
         if (refresh) await PushFeed();
     }
     static async Task PushFeed()
@@ -1356,7 +1529,7 @@ class Program
                 if (string.IsNullOrEmpty(who)) who = Prop(r, "scName").Trim();
                 double rate = r.TryGetProperty("rate", out var rv) && rv.ValueKind == JsonValueKind.Number ? rv.GetDouble() : 1;
                 _ = PostPresence(Prop(r, "id"), who, Prop(r, "sc"), title, artist, cover,
-                    Prop(r, "url"), PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"), rate);
+                    Prop(r, "url"), PropI(r, "pos"), PropI(r, "dur"), PropB(r, "paused"), rate, Prop(r, "jam"));
                 bool toastOn = r.TryGetProperty("rp", out var rp2) && rp2.ValueKind == JsonValueKind.Object && PropBool(rp2, "toast", false);
                 SongToast.MaybeShow(title, artist, cover, toastOn, PropB(r, "paused"));
                 ThumbBar.SetPlaying(!string.IsNullOrEmpty(title) && !PropB(r, "paused"));
@@ -1389,6 +1562,10 @@ class Program
         if (m == "dcwidget") { _ = DcWidget(); return; }
         if (m == "update:apply") { Updater.ApplyAndRestart?.Invoke(); return; }
         if (m == "update:status") { Updater.PageReady(); return; }   // the page has loaded: its update toasts can show now
+        if (m != null && m.StartsWith("jam:req:")) { _ = JamRequest(m.Substring(8)); return; }
+        if (m != null && m.StartsWith("jam:watch:")) { JamWatch(m.Substring(10)); return; }
+        if (m == "jam:unwatch") { JamWatch(null); return; }
+        if (m != null && m.StartsWith("lyrics:search:")) { _ = LyricsSearch(m.Substring(14)); return; }
         // Compact player: mini:on[:WxH[:pin]] | mini:off | mini:size:WxH | mini:pin:0/1 | mini:alpha:0-100
         if (m != null && m.StartsWith("mini:"))
         {

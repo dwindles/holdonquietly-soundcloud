@@ -22,7 +22,9 @@ u need the [webview2 runtime](https://developer.microsoft.com/microsoft-edge/web
 - **visualizer:** the seek bar turns into a waveform that moves w the actual audio, n custom waveform bars draw over the track
 - **drm tracks:** monetized n major label songs actually play
 - **discord rich presence:** whats playing shows on ur discord profile w the progress n cover
-- **friends feed:** see what other people using the app are listening to, live
+- **friends feed:** see what other people using the app are listening to, live, n listen along w them
+- **jam:** like spotify jam. start one n ur friends join w the code (or right from the friends list), everybody hears what ur playing n anyone in it can add songs to the queue
+- **better search:** a best match option so the song u actually typed comes up first, n a lyrics option, type a line u remember n it finds the song
 - **last.fm scrobbling:** the app does it itself so ur login never touches the page
 - **more than 1 account:** save soundcloud logins n switch between them without logging out (theyre saved encrypted)
 - **share to discord:** send the song ur on to a webhook, once per song

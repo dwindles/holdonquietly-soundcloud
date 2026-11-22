@@ -3205,6 +3205,29 @@ const MUI_CSS = `
   .hoq-q.hoq-q-in:hover { color: #7d86ff !important; -webkit-text-fill-color: currentColor !important; }
   .hoq-q.hoq-q-in.done { color: var(--sc-accent, #ff5500) !important; cursor: default; }
   .hoq-q.hoq-q-in.done svg { fill: none; }
+  /* --- per-row "Add to Jam" while in a jam (addJamButtons): same shapes,
+     floating one sits left of the Discord one, accent instead of blurple */
+  .hoq-jq:not(.hoq-jq-in) {
+    position: absolute; top: 8px; right: 40px; z-index: 20;
+    height: 26px; min-width: 26px; padding: 0 6px; box-sizing: border-box; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(255,255,255,0.12) !important; background: rgba(14,14,18,0.86) !important;
+    color: #c9c9d2 !important; -webkit-text-fill-color: currentColor !important; cursor: pointer;
+    font: 600 11.5px/1 Inter,-apple-system,Arial,sans-serif; white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    opacity: 0; transform: translateY(-2px);
+    transition: opacity .15s ease, transform .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  *:hover > .hoq-jq:not(.hoq-jq-in), .hoq-jq:not(.hoq-jq-in):focus-visible, .hoq-jq:not(.hoq-jq-in).done { opacity: 1; transform: none; }
+  .hoq-jq:not(.hoq-jq-in) svg { width: 13px; height: 13px; flex: none; }
+  .hoq-jq:not(.hoq-jq-in) span { max-width: 0; overflow: hidden; transition: max-width .2s ease, margin .2s ease; }
+  .hoq-jq:not(.hoq-jq-in):hover { background: var(--sc-accent, #ff5500) !important; border-color: transparent !important; color: #fff !important; }
+  .hoq-jq:not(.hoq-jq-in):hover span, .hoq-jq:not(.hoq-jq-in).done span { max-width: 110px; margin-left: 6px; }
+  .hoq-jq:not(.hoq-jq-in).done { background: var(--sc-accent, #ff5500) !important; color: #fff !important; border-color: transparent !important; cursor: default; }
+  .hoq-jq.hoq-jq-in svg { width: 16px; height: 16px; }
+  .hoq-jq.hoq-jq-in span { display: none !important; }
+  .hoq-jq.hoq-jq-in:hover { color: var(--sc-accent, #ff5500) !important; -webkit-text-fill-color: currentColor !important; }
+  .hoq-jq.hoq-jq-in.done { color: var(--sc-accent, #ff5500) !important; cursor: default; }
 
   /* --- webi V2 frame only --------------------------------------------------
      themeFrames() tags the iframe's document with .hoq-webi so these can't leak
@@ -3657,6 +3680,7 @@ function themeFrames() {
       attachWaveRipple(d);
       attachCoverTilt(d);
       addQueueButtons(d);
+      addJamButtons(d);
       attachFrameContextMenu(d, f);
       // only while that frame is actually on screen (it stays loaded, hidden, on other pages)
       const fr = f.getBoundingClientRect();
@@ -5338,6 +5362,39 @@ function ensureDiscordPanel() {
       #hoq-discord[data-pane="settings"] .hoq-dc-sec:not(.hoq-pane-set) { display: none !important; }
       #hoq-discord[data-pane="feed"] .hoq-dc-sec:not(.hoq-pane-feed) { display: none !important; }
       #hoq-discord .hoq-acct-new:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 22%, rgba(12,12,14,0.6)); }
+      #hoq-discord .hoq-jam-pitch { color: #b9b9bd; font-size: 12.5px; line-height: 1.45; margin-bottom: 10px; }
+      #hoq-discord .hoq-jam-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      #hoq-discord .hoq-jam-or { color: #8d8d94; font-size: 12px; margin: 0 2px 0 6px; }
+      #hoq-discord .hoq-jam-input { width: 96px; height: 34px; box-sizing: border-box; padding: 0 10px; border-radius: 9px;
+        border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); color: #fff; outline: none;
+        text-transform: uppercase; letter-spacing: 2px; font: 700 13px/1 ui-monospace, Consolas, monospace; }
+      #hoq-discord .hoq-jam-input:focus { border-color: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-jam-head { display: flex; align-items: center; gap: 12px; }
+      #hoq-discord .hoq-jam-code { flex: none; padding: 9px 12px; border-radius: 10px; color: #fff; user-select: all; cursor: text;
+        font: 800 18px/1 ui-monospace, Consolas, monospace; letter-spacing: 3px;
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 24%, rgba(255,255,255,0.03));
+        border: 1px solid color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent); }
+      #hoq-discord .hoq-jam-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+      #hoq-discord .hoq-jam-meta b { color: #fff; font-size: 13.5px; }
+      #hoq-discord .hoq-jam-meta span { color: #b7b7ba; font-size: 12px; }
+      #hoq-discord .hoq-jam-btns { display: flex; gap: 6px; flex: none; }
+      #hoq-discord .hoq-jam-back { border: 0; padding: 0; margin-left: 4px; background: none; cursor: pointer;
+        color: var(--sc-accent,#ff5500); font: 700 12px system-ui, sans-serif; text-decoration: underline; }
+      #hoq-discord .hoq-jam-people { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 6px; }
+      #hoq-discord .hoq-jam-chip { padding: 4px 10px; border-radius: 99px; font-size: 12px; color: #ddd;
+        background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08); }
+      #hoq-discord .hoq-jam-chip em { font-style: normal; color: var(--sc-accent,#ff5500); margin-left: 5px; font-weight: 700; font-size: 11px; }
+      #hoq-discord .hoq-jam-tag { flex: none; font-size: 11px; font-weight: 700; color: var(--sc-accent,#ff5500); }
+      #hoq-discord .hoq-jam-sub { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 4px;
+        font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: #9a9aa2; }
+      #hoq-discord .hoq-jam-skip { border: 0; background: none; cursor: pointer; color: var(--sc-accent,#ff5500);
+        font: 700 11px system-ui, sans-serif; text-transform: none; letter-spacing: 0; }
+      #hoq-discord .hoq-jam-q { display: flex; flex-direction: column; gap: 2px; max-height: 330px; overflow-y: auto; }
+      #hoq-discord .hoq-jam-x { flex: none; width: 28px; height: 28px; border-radius: 99px; border: 0; background: transparent;
+        color: #9a9aa2; cursor: pointer; font-size: 18px; line-height: 1; }
+      #hoq-discord .hoq-jam-x:hover { background: rgba(255,255,255,0.1); color: #fff; }
+      #hoq-discord .hoq-jam-add { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      #hoq-discord .hoq-jam-open { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12px; color: #b9b9bd; cursor: pointer; }
     </style>
     <div class="hoq-dc-card">
       <div class="hoq-dc-top">
@@ -5369,6 +5426,10 @@ function ensureDiscordPanel() {
           <button data-act="copy">Copy track link</button>
           <button data-act="server">Open server</button>
         </div>
+      </div>
+      <div class="hoq-dc-sec hoq-wide hoq-jam-sec">
+        <div class="hoq-dc-label">Jam</div>
+        <div class="hoq-jam"></div>
       </div>
       <div class="hoq-dc-sec hoq-wide hoq-feed-sec">
         <div class="hoq-dc-label">Feed</div>
@@ -5567,6 +5628,9 @@ function ensureDiscordPanel() {
       setupRpSettings(rpSec);
     }
   }
+  // Jam goes through the desktop host; the phone builds have none.
+  const jamSec = p.querySelector('.hoq-jam-sec');
+  if (jamSec) { if (!hoqHasHost()) jamSec.remove(); else hoqJamRender(p); }
   // Desktop-only switches (the host draws the pop-up), sent along with presence.
   const deskSec = p.querySelector('.hoq-desk-sec');
   if (deskSec) {
@@ -6722,8 +6786,9 @@ function rpcTick() {
   const pr = playerProgress();
   const rp = rpPrefs();
   const url = npPublicUrl('.playbackSoundBadge__titleLink');
+  const jam = hoqJamAdvert();
   const key = [np.title, url, pr.paused, Math.round(pr.pos / 8),
-    rp.on, rp.status, rp.buttons, rp.pauseHide, rp.toast].join('|');
+    rp.on, rp.status, rp.buttons, rp.pauseHide, rp.toast, jam].join('|');
   if (key === _lastRpc) return;
   _lastRpc = key;
   const me = hoqMe(); // SoundCloud name/profile: the fallback when Discord isn't running
@@ -6735,7 +6800,7 @@ function rpcTick() {
     title: np.title, artist: np.artist, cover: np.cover,
     url, artistUrl: npPublicUrl('.playbackSoundBadge__lightLink'),
     pos: pr.pos, dur: pr.dur, paused: pr.paused, rate: (() => { try { return hoqFxState().speed; } catch (e) { return 1; } })(),
-    rp,
+    rp, jam,
   }));
   hoqNowPush(np.title, np.artist, url, np.cover, pr.paused);
 }
@@ -7023,10 +7088,12 @@ function queueTrack(info) {
 // Drop a hover-reveal queue button on every track row, in whichever document we
 // are handed — the new track page's related tracks live in the webi iframe, the
 // feed/search/legacy rows live in the top frame.
+// Track rows that get the per-row buttons. Search results are their own kind
+// (.searchItem__trackItem): left out, they never had a Play in Discord button.
+const HOQ_TRACK_ROWS = '[role="listitem"], .soundBadge, .trackItem, .soundList__item, .compactTrackListItem, .searchItem__trackItem';
 function addQueueButtons(d) {
-  const ROWS = '[role="listitem"], .soundBadge, .trackItem, .soundList__item, .compactTrackListItem';
   let rows;
-  try { rows = d.querySelectorAll(ROWS); } catch (e) { return; }
+  try { rows = d.querySelectorAll(HOQ_TRACK_ROWS); } catch (e) { return; }
   rows.forEach((row) => {
     if (row.querySelector('.hoq-q')) return;
     let info = null;
@@ -7203,7 +7270,7 @@ window.__hoqFriends = function (list) {
   // Rebuilt from scratch every poll. This used to `+=` onto whatever was there,
   // so with anyone else listening the whole list stacked up again every 15 s.
   hoqFollowTick(others);
-  const fol = window.__hoqFollow;
+  const fol = window.__hoqFollow, jamS = hoqJamSess();
   el.innerHTML = (mine.length && !mine[0].name ? '<div class="hoq-dc-hint">Your name isn’t reaching friends: log in to SoundCloud, open Discord, or set a name in Settings.</div>' : '') + (fol ? '<div class="hoq-dc-follow"><span>Listening along with <b>' + hoqEsc(fol.name) + '</b></span><button type="button" class="hoq-dc-unfollow">Stop</button></div>' : '') +
     (others.length ? '' : '<div class="hoq-dc-hint">Only you are on right now.</div>') + rows.map((f) => '<div class="hoq-dc-friend' + (f.id === me ? ' is-me' : '') + '">' +
     '<img class="hoq-dc-fcover" src="' + (hoqEsc(hoqSafeUrl(f.cover)) || HOQ_LOGO) + '">' +
@@ -7212,11 +7279,17 @@ window.__hoqFriends = function (list) {
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +
     (hoqSafeUrl(f.sc) ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(hoqSafeUrl(f.sc)) + '">' + hoqEsc(hoqSafeUrl(f.sc).replace(/^https?:\/\//, '')) + '</a>' : '') +
     '</div>' +
-    // Listen along: needs their track link from the server (newer friends server)
-    (f.id !== me && hoqTrackPath(f.url) ? '<button type="button" class="hoq-dc-along' + (fol && fol.id === f.id ? ' on' : '') + '" data-id="' + hoqEsc(f.id) + '" data-name="' + hoqEsc(f.name || 'Someone') + '">' + (fol && fol.id === f.id ? 'Listening' : 'Listen along') + '</button>' : '') +
+    // Hosting a jam: join it. Otherwise listen along (needs their track link from
+    // the server; not while you're in a jam, which already decides what plays).
+    (f.id !== me && f.jam ? '<button type="button" class="hoq-dc-along hoq-dc-jamjoin' + (jamS && jamS.code === f.jam ? ' on' : '') + '" data-code="' + hoqEsc(f.jam) + '">' + (jamS && jamS.code === f.jam ? 'In their jam' : 'Join jam') + '</button>'
+      : f.id !== me && !jamS && hoqTrackPath(f.url) ? '<button type="button" class="hoq-dc-along' + (fol && fol.id === f.id ? ' on' : '') + '" data-id="' + hoqEsc(f.id) + '" data-name="' + hoqEsc(f.name || 'Someone') + '">' + (fol && fol.id === f.id ? 'Listening' : 'Listen along') + '</button>' : '') +
     '</div>').join('');
   el.querySelectorAll('.hoq-dc-sclink').forEach((a) => a.addEventListener('click', () => scPost('open:' + a.dataset.url)));
-  el.querySelectorAll('.hoq-dc-along').forEach((b) => b.addEventListener('click', () => {
+  el.querySelectorAll('.hoq-dc-jamjoin').forEach((b) => b.addEventListener('click', () => {
+    const s = hoqJamSess();
+    if (!s || s.code !== b.dataset.code) hoqJamJoin(b.dataset.code);
+  }));
+  el.querySelectorAll('.hoq-dc-along:not(.hoq-dc-jamjoin)').forEach((b) => b.addEventListener('click', () => {
     const f = others.find((x) => x.id === b.dataset.id);
     if (!f) return;
     if (window.__hoqFollow && window.__hoqFollow.id === f.id) hoqFollowStop(''); else hoqFollowStart(f);
@@ -7276,6 +7349,348 @@ function hoqFollowTick(list) {
   if (el && !el.paused && typeof f.pos === 'number' && Math.abs(el.currentTime - want) > 6 && isFinite(el.duration) && want < el.duration - 3) {
     hoqSeek(want);
   }
+}
+
+// ---- Jam ---------------------------------------------------------------------
+// A shared listening session, like Spotify's Jam (server: proxy/friends-server.js
+// /jam/*, reached through the host app, so desktop only). The host's app plays;
+// everyone who joined follows its track, play/pause and seeks. Anyone in the jam
+// adds songs to a shared queue, which the host's app plays in order as songs end.
+// Joined with a 6-character code, or from Friends listening.
+const HOQ_JQ_ADD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>Add to Jam</span>';
+const HOQ_JQ_DONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>In the jam</span>';
+let _jam = null, _jamAt = 0;                  // the jam's latest state, and when it arrived
+let _jamRid = 0, _jamMsg = null;
+const _jamWait = new Map();
+let _jamHost = { sent: '', sentAt: 0, adv: '', playingAt: 0, pending: null };
+let _jamGuest = { applied: null, following: true, at: 0, fixAt: 0 };
+
+function hoqJamSess() { try { const s = JSON.parse(localStorage.getItem('hoqJam')); return s && s.code && s.key ? s : null; } catch (e) { return null; } }
+function hoqJamSave(s) { try { if (s) localStorage.setItem('hoqJam', JSON.stringify(s)); else localStorage.removeItem('hoqJam'); } catch (e) {} }
+const hoqJamAuth = (s) => ({ code: s.code, id: s.id, key: s.key });
+function hoqJamMe() {
+  const me = hoqMe();
+  return { id: myId(), name: (localStorage.getItem('hoqDiscord') || '').trim() || me.name || 'Someone', sc: hoqSafeUrl(localStorage.getItem('hoqSC') || me.url || '') };
+}
+// What friends see on your row: the jam you host, unless you've closed it to the list.
+function hoqJamAdvert() { const s = hoqJamSess(); return s && s.host && localStorage.getItem('hoqJamOpen') !== '0' ? s.code : ''; }
+const hoqSamePath = (a, b) => { try { return decodeURIComponent(a || '').toLowerCase() === decodeURIComponent(b || '').toLowerCase(); } catch (e) { return a === b; } };
+function hoqJamMyUrl() { try { const h = npPublicUrl('.playbackSoundBadge__titleLink'); return h ? h.split(/[?#]/)[0] : ''; } catch (e) { return ''; } }
+// Where the host is in the song right now: their report, plus how old it is.
+function hoqJamWant(n) {
+  if (!n || typeof n.pos !== 'number') return 0;
+  return n.paused ? n.pos : n.pos + ((+n.age || 0) + (Date.now() - _jamAt)) / 1000 * (+n.rate || 1);
+}
+
+function hoqJamCall(op, body) {
+  return new Promise((resolve) => {
+    if (!hoqHasHost()) return resolve({ status: 0, body: null });
+    const rid = 'j' + (++_jamRid);
+    _jamWait.set(rid, resolve);
+    setTimeout(() => { if (_jamWait.delete(rid)) resolve({ status: 0, body: null }); }, 15000);
+    scPost('jam:req:' + JSON.stringify({ rid, op, body }));
+  });
+}
+window.__hoqJamRes = function (rid, status, body) {
+  const done = _jamWait.get(rid);
+  if (done) { _jamWait.delete(rid); done({ status, body }); }
+};
+
+function hoqJamNote(msg, toast) {
+  _jamMsg = msg ? { text: msg, until: Date.now() + 7000 } : null;
+  const el = document.querySelector('#hoq-discord .hoq-jam-msg');
+  if (el) el.textContent = msg || '';
+  if (toast && msg) { try { window.__hoqUpdate && window.__hoqUpdate('notice', msg, typeof toast === 'string' ? toast : ''); } catch (e) {} }
+}
+
+async function hoqJamStart() {
+  const old = hoqJamSess();
+  if (old) await hoqJamLeave();
+  const r = await hoqJamCall('start', hoqJamMe());
+  if (r.status !== 200 || !r.body || !r.body.code) {
+    return hoqJamNote(r.status === 429 ? 'Too many jams started just now. Try again in a few minutes.' : 'Couldn’t start a jam. Check your connection.');
+  }
+  hoqJamBegin({ code: r.body.code, key: r.body.key, id: myId(), host: true }, r.body.state);
+}
+async function hoqJamJoin(code, quiet) {
+  code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 6) { if (!quiet) hoqJamNote('A jam code is 6 letters and numbers.'); return; }
+  const old = hoqJamSess();
+  if (old && old.code !== code) await hoqJamLeave();
+  const r = await hoqJamCall('join', Object.assign({ code }, hoqJamMe()));
+  if (r.status !== 200 || !r.body || !r.body.key) {
+    if (quiet) return hoqJamClear('The jam ended.', true);
+    return hoqJamNote(r.status === 404 ? 'No jam with that code. It may have ended.' : r.status === 409 ? 'That jam is full.' : r.status === 429 ? 'Slow down a sec, then try again.' : 'Couldn’t join. Check your connection.');
+  }
+  const st = r.body.state;
+  hoqJamBegin({ code: r.body.code, key: r.body.key, id: myId(), host: !!(st && st.host === myId()) }, st);
+}
+function hoqJamBegin(sess, state) {
+  if (window.__hoqFollow) hoqFollowStop('');   // a jam takes over from listening along
+  hoqJamSave(sess);
+  _jam = state || null; _jamAt = Date.now();
+  _jamHost = { sent: '', sentAt: 0, adv: '', playingAt: 0, pending: null };
+  _jamGuest = { applied: null, following: true, at: 0, fixAt: 0 };
+  scPost('jam:watch:' + JSON.stringify(hoqJamAuth(sess)));
+  _lastRpc = '';   // friends see the jam on your row with the next presence update
+  hoqJamRender();
+  if (!sess.host) hoqJamFollow(true);
+}
+async function hoqJamLeave() {
+  const s = hoqJamSess();
+  if (!s) return;
+  hoqJamClear('');
+  await hoqJamCall(s.host ? 'end' : 'leave', hoqJamAuth(s));
+}
+function hoqJamClear(msg, toast) {
+  hoqJamSave(null);
+  _jam = null;
+  scPost('jam:unwatch');
+  _lastRpc = '';
+  hoqJamRender();
+  if (msg) hoqJamNote(msg, toast);
+}
+
+// The host app's long-poll hands every change here.
+window.__hoqJam = function (st) {
+  const s = hoqJamSess();
+  if (!s || !st || typeof st !== 'object') return;
+  if (st.ended) {
+    // dropped while the PC slept past the guest timeout: try to get back in, once
+    if (st.why === 'removed' && !s.rejoin) { s.rejoin = 1; hoqJamSave(s); hoqJamJoin(s.code, true); return; }
+    return hoqJamClear(s.host ? 'Your jam ended.' : 'The jam ended.', true);
+  }
+  if (st.code !== s.code) return;
+  if (s.rejoin) { delete s.rejoin; hoqJamSave(s); }
+  _jam = st; _jamAt = Date.now();
+  hoqJamRender();
+  hoqJamFollow(false);
+};
+
+async function hoqJamAdd(info) {
+  const s = hoqJamSess();
+  if (!s || !info || !info.url) return false;
+  const r = await hoqJamCall('add', Object.assign(hoqJamAuth(s), {
+    track: { url: info.url, title: info.title, artist: info.artist, cover: info.cover, dur: info.dur || 0 },
+  }));
+  if (r.status === 200 && r.body && r.body.code) {
+    _jam = r.body; _jamAt = Date.now();
+    hoqJamNote('Added “' + info.title + '” to the jam.');
+    hoqJamRender();
+    return true;
+  }
+  hoqJamNote(r.status === 409 ? 'The jam’s queue is full.' : r.status === 400 ? 'That one can’t go in the jam (only public SoundCloud tracks).' : 'Couldn’t add that one. Check your connection.', true);
+  return false;
+}
+async function hoqJamRemove(qid) {
+  const s = hoqJamSess();
+  if (!s) return;
+  const r = await hoqJamCall('remove', Object.assign(hoqJamAuth(s), { qid }));
+  if (r.status === 200 && r.body && r.body.code) { _jam = r.body; _jamAt = Date.now(); hoqJamRender(); }
+}
+function hoqJamNowInfo() {
+  const np = currentNowPlaying(), url = hoqJamMyUrl();
+  return np.title && url ? { url, title: np.title, artist: np.artist, cover: np.cover, dur: playerProgress().dur } : null;
+}
+
+// Host: start a song from the jam's queue for everyone.
+function hoqJamPlay(item) {
+  const s = hoqJamSess(), path = item && hoqTrackPath(item.url);
+  if (!s || !s.host || !path) return;
+  _jamHost.pending = { url: item.url, until: Date.now() + 15000 };
+  _jamHost.sent = ''; _jamHost.adv = '';
+  hoqPfOpenAndPlay(path, 0);
+  hoqJamCall('now', Object.assign(hoqJamAuth(s), {
+    qid: item.qid, now: { url: item.url, title: item.title, artist: item.artist, cover: item.cover, pos: 0, dur: item.dur || 0, paused: false, rate: 1 },
+  }));
+}
+
+// Host, every second: tell the jam what's playing (on any change, and every 8 s),
+// and as a song ends, start the next one from the queue.
+function hoqJamHostTick(s) {
+  const H = _jamHost, now = Date.now();
+  const np = currentNowPlaying(), pr = playerProgress(), url = hoqJamMyUrl();
+  if (!pr.paused) H.playingAt = now;
+  if (pr.pos < 5) H.adv = '';
+  // a queued song we just started: wait for it, or the old one would be reported back
+  if (H.pending) {
+    if (url && hoqSamePath(hoqTrackPath(url), hoqTrackPath(H.pending.url))) H.pending = null;
+    else if (now < H.pending.until) return;
+    else H.pending = null;
+  }
+  const q = (_jam && _jam.queue) || [];
+  if (q.length && url && pr.dur > 0 && pr.pos >= pr.dur - 3 && now - H.playingAt < 5000 && H.adv !== url) {
+    H.adv = url;
+    return hoqJamPlay(q[0]);
+  }
+  let rate = 1;
+  try { rate = hoqFxState().speed || 1; } catch (e) {}
+  const sig = url && np.title ? [url, pr.paused, rate].join('|') : 'none';
+  if (sig === H.sent && now - H.sentAt < 8000) return;
+  H.sent = sig; H.sentAt = now;
+  hoqJamCall('now', Object.assign(hoqJamAuth(s), {
+    now: sig === 'none' ? null : { url, title: np.title, artist: np.artist, cover: np.cover, pos: pr.pos, dur: pr.dur, paused: pr.paused, rate },
+  }));
+}
+
+// Guest: act on what the host changed (another song, play/pause, a seek), once
+// per change, so pausing or adjusting on your side isn't fought every second.
+function hoqJamFollow(force) {
+  const s = hoqJamSess();
+  if (!s || s.host || !_jam) return;
+  const G = _jamGuest, n = _jam.now;
+  if (force) { G.following = true; G.applied = null; }
+  if (!G.following || !n || !n.url) return;
+  const path = hoqTrackPath(n.url);
+  if (!path) return;
+  const want = hoqJamWant(n), anchor = Date.now() - want * 1000 / (+n.rate || 1);
+  const mine = hoqJamMyUrl(), onIt = !!mine && hoqSamePath(hoqTrackPath(mine), path);
+  const pr = playerProgress();
+  let A = G.applied;
+  if (!A || A.url !== n.url || (!A.open && !n.paused)) {
+    if (!onIt) {
+      if (n.paused) { G.applied = { url: n.url, paused: true, anchor, open: false }; return; }   // starts when they press play
+      hoqPfOpenAndPlay(path, want); G.at = Date.now();
+      G.applied = { url: n.url, paused: false, anchor, open: true };
+      return;
+    }
+    // already on that song (joining, or back to the jam): line up play/pause and position
+    A = { url: n.url, paused: pr.paused, anchor: Infinity, open: true };
+  }
+  if (!onIt) return;
+  if (n.paused !== A.paused) {
+    if (pr.paused !== n.paused) { const b = document.querySelector('.playControls__play'); if (b) b.click(); }
+  } else if (!n.paused && Math.abs(anchor - A.anchor) > 5000) {
+    const el = window.__hoqMediaEl;   // the host jumped within the song
+    if (el && !el.paused && isFinite(el.duration) && want < el.duration - 3) hoqSeek(want);
+  }
+  G.applied = { url: n.url, paused: n.paused, anchor, open: true };
+}
+
+// Guest, every second: notice when you've gone off on your own, and pull a
+// drifting position back in line now and then.
+function hoqJamGuestTick() {
+  const G = _jamGuest, A = G.applied;
+  if (!G.following || !A || !A.open || !_jam || !_jam.now) return;
+  if (Date.now() - G.at < 20000) return;   // we only just put this song on
+  const mine = hoqJamMyUrl();
+  // Off on your own for 8 s straight. Shorter, and your own autoplay at the end
+  // of a song (before the host's next one lands) looked like leaving.
+  if (mine && !hoqSamePath(hoqTrackPath(mine), hoqTrackPath(A.url))) {
+    if (!G.offSince) G.offSince = Date.now();
+    if (Date.now() - G.offSince > 8000) { G.following = false; G.offSince = 0; hoqJamRender(); }
+    return;
+  }
+  G.offSince = 0;
+  const n = _jam.now, el = window.__hoqMediaEl;
+  if (!mine || n.paused || !el || el.paused || Date.now() - G.fixAt < 30000) return;
+  const want = hoqJamWant(n);
+  if (Math.abs(el.currentTime - want) > 8 && isFinite(el.duration) && want < el.duration - 3) { G.fixAt = Date.now(); hoqSeek(want); }
+}
+
+function hoqJamTick() {
+  const s = hoqJamSess();
+  if (!s || !_jam) return;
+  if (s.host) hoqJamHostTick(s); else hoqJamGuestTick();
+}
+
+// The Jam card in Social. `root`: the panel while it's still being built (not in
+// the page yet, so a page-wide lookup finds nothing).
+function hoqJamRender(root) {
+  const box = (root || document).querySelector('.hoq-jam-sec .hoq-jam');
+  if (!box) return;
+  const s = hoqJamSess();
+  const msg = _jamMsg && Date.now() < _jamMsg.until ? _jamMsg.text : '';
+  if (!s) {
+    if (!box.querySelector('.hoq-jam-idle')) {
+      box.innerHTML = '<div class="hoq-jam-idle">' +
+        '<div class="hoq-jam-pitch">Listen together, like Spotify’s Jam. Everyone who joins hears what you play, and anyone in it can add songs to the queue.</div>' +
+        '<div class="hoq-jam-row"><button type="button" class="hoq-pair-btn hoq-jam-start">Start a jam</button>' +
+        '<span class="hoq-jam-or">or join one</span><input class="hoq-jam-input" maxlength="7" placeholder="CODE" spellcheck="false" autocomplete="off">' +
+        '<button type="button" class="hoq-pair-linkbtn hoq-jam-join">Join</button></div>' +
+        '<div class="hoq-dc-hint hoq-jam-msg"></div></div>';
+      const inp = box.querySelector('.hoq-jam-input');
+      box.querySelector('.hoq-jam-start').addEventListener('click', () => hoqJamStart());
+      box.querySelector('.hoq-jam-join').addEventListener('click', () => hoqJamJoin(inp.value));
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') hoqJamJoin(inp.value); });
+    }
+    box.querySelector('.hoq-jam-msg').textContent = msg;
+    return;
+  }
+  if (!_jam) {
+    box.innerHTML = '<div class="hoq-jam-head"><div class="hoq-jam-code">' + hoqEsc(s.code) + '</div><div class="hoq-jam-meta"><b>Jam</b><span>Connecting…</span></div>' +
+      '<div class="hoq-jam-btns"><button type="button" class="hoq-pair-linkbtn hoq-jam-leave">' + (s.host ? 'End jam' : 'Leave') + '</button></div></div>';
+    box.querySelector('.hoq-jam-leave').addEventListener('click', () => hoqJamLeave());
+    return;
+  }
+  const me = myId(), J = _jam, members = J.members || [], queue = J.queue || [], n = J.now;
+  const hostM = members.find((m) => m.host) || { name: 'Someone' };
+  const others = members.length - 1;
+  let status;
+  if (s.host) status = others ? (others === 1 ? '1 person is listening with you' : others + ' people are listening with you') : 'Share the code, friends join with it';
+  else if ((+J.hostAge || 0) > 45000) status = hoqEsc(hostM.name) + ' hasn’t been heard from in a bit…';
+  else if (!_jamGuest.following) status = 'You’re playing something else. <button type="button" class="hoq-jam-back">Back to the jam</button>';
+  else status = n ? (n.paused ? hoqEsc(hostM.name) + ' paused' : 'Listening with ' + hoqEsc(hostM.name)) : 'Waiting for ' + hoqEsc(hostM.name) + ' to play something';
+  const cover = (u) => hoqEsc(hoqSafeUrl(u)) || HOQ_LOGO;
+  const nowRow = n ? '<div class="hoq-dc-friend hoq-jam-now"><img class="hoq-dc-fcover" src="' + cover(n.cover) + '"><div class="hoq-dc-ftext"><b>' + hoqEsc(n.title) + '</b><span>' +
+    hoqEsc(n.artist) + '</span></div><span class="hoq-jam-tag">' + (n.paused ? 'Paused' : 'Now playing') + '</span></div>' : '';
+  const qRow = (q) => '<div class="hoq-dc-friend hoq-jam-item"><img class="hoq-dc-fcover" src="' + cover(q.cover) + '"><div class="hoq-dc-ftext"><b>' + hoqEsc(q.title) + '</b><span>' +
+    hoqEsc(q.artist) + ' · added by ' + (q.byId === me ? 'you' : hoqEsc(q.by)) + '</span></div>' +
+    (s.host ? '<button type="button" class="hoq-dc-along hoq-jam-playq" data-qid="' + (+q.qid) + '">Play now</button>' : '') +
+    (s.host || q.byId === me ? '<button type="button" class="hoq-jam-x" data-qid="' + (+q.qid) + '" title="Take it out">×</button>' : '') + '</div>';
+  const page = pageTrackInfo(), mineNow = hoqJamNowInfo();
+  box.innerHTML =
+    '<div class="hoq-jam-head"><div class="hoq-jam-code" title="Friends join with this code">' + hoqEsc(J.code) + '</div>' +
+    '<div class="hoq-jam-meta"><b>' + (s.host ? 'Your jam' : hoqEsc(hostM.name) + '’s jam') + '</b><span>' + status + '</span></div>' +
+    '<div class="hoq-jam-btns"><button type="button" class="hoq-pair-linkbtn hoq-jam-copy">Copy invite</button>' +
+    '<button type="button" class="hoq-pair-linkbtn hoq-jam-leave">' + (s.host ? 'End jam' : 'Leave') + '</button></div></div>' +
+    '<div class="hoq-jam-people">' + members.map((m) => '<span class="hoq-jam-chip">' + hoqEsc(m.id === me ? 'You' : m.name) + (m.host ? '<em>host</em>' : '') + '</span>').join('') + '</div>' +
+    nowRow +
+    '<div class="hoq-jam-sub"><span>Up next</span>' + (s.host && queue.length ? '<button type="button" class="hoq-jam-skip">Play next now</button>' : '') + '</div>' +
+    '<div class="hoq-jam-q">' + (queue.length ? queue.map(qRow).join('') : '<div class="hoq-dc-hint">Nothing queued yet. Hit + on any track, or right-click it, to add it here.</div>') + '</div>' +
+    '<div class="hoq-jam-add">' + (mineNow ? '<button type="button" class="hoq-pair-linkbtn hoq-jam-addnow">+ Add what’s playing</button>' : '') +
+    (page && (!mineNow || page.url !== mineNow.url) ? '<button type="button" class="hoq-pair-linkbtn hoq-jam-addpage">+ Add this page’s track</button>' : '') + '</div>' +
+    (s.host ? '<label class="hoq-jam-open"><input type="checkbox"' + (localStorage.getItem('hoqJamOpen') !== '0' ? ' checked' : '') + '>Friends can join from Friends listening</label>' : '') +
+    '<div class="hoq-dc-hint hoq-jam-msg">' + hoqEsc(msg) + '</div>';
+  const on = (sel, fn) => box.querySelectorAll(sel).forEach((b) => b.addEventListener('click', fn));
+  on('.hoq-jam-copy', () => { hoqCopy('Join my jam on holdonquietly: Social, then Jam, code ' + J.code); hoqJamNote('Invite copied. Send it to your friends.'); });
+  on('.hoq-jam-leave', () => hoqJamLeave());
+  on('.hoq-jam-skip', () => { if (queue[0]) hoqJamPlay(queue[0]); });
+  on('.hoq-jam-playq', (e) => { const q = queue.find((x) => x.qid === +e.currentTarget.dataset.qid); if (q) hoqJamPlay(q); });
+  on('.hoq-jam-x', (e) => hoqJamRemove(+e.currentTarget.dataset.qid));
+  on('.hoq-jam-addnow', () => hoqJamAdd(hoqJamNowInfo()));
+  on('.hoq-jam-addpage', () => hoqJamAdd(pageTrackInfo()));
+  on('.hoq-jam-back', () => { hoqJamFollow(true); hoqJamRender(); });
+  const open = box.querySelector('.hoq-jam-open input');
+  if (open) open.addEventListener('change', () => { try { localStorage.setItem('hoqJamOpen', open.checked ? '1' : '0'); } catch (e) {} _lastRpc = ''; });
+}
+
+// "+" on every track row while you're in a jam (gone again when you aren't).
+function addJamButtons(d) {
+  if (!hoqJamSess()) { d.querySelectorAll('.hoq-jq').forEach((b) => b.remove()); return; }
+  let rows;
+  try { rows = d.querySelectorAll(HOQ_TRACK_ROWS); } catch (e) { return; }
+  rows.forEach((row) => {
+    if (row.querySelector('.hoq-jq')) return;
+    let info = null;
+    for (const a of row.querySelectorAll('a[href]')) { info = trackLinkInfo(a); if (info) break; }
+    if (!info) return;
+    const b = d.createElement('button');
+    const group = row.querySelector('.soundActions .sc-button-group');
+    b.className = group ? 'hoq-jq hoq-jq-in sc-button sc-button-secondary sc-button-small sc-button-icon sc-button-responsive' : 'hoq-jq';
+    b.type = 'button';
+    b.title = 'Add to Jam';
+    b.innerHTML = HOQ_JQ_ADD;
+    b.addEventListener('click', async (e) => {
+      e.preventDefault(); e.stopPropagation();   // don't let the row navigate or start playing
+      if (b.classList.contains('done')) return;
+      b.classList.add('done');
+      if (await hoqJamAdd(info)) { b.innerHTML = HOQ_JQ_DONE; b.title = 'In the jam'; } else b.classList.remove('done');
+    });
+    if (group) { group.insertBefore(b, group.querySelector('.hoq-q') || group.querySelector('.sc-button-more') || null); return; }
+    try { if (d.defaultView.getComputedStyle(row).position === 'static') row.style.position = 'relative'; } catch (e) {}
+    row.appendChild(b);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -8464,6 +8879,219 @@ async function hoqPfPlayAll(slug, shuffle) {
   if (shuffle) { await hoqPfSleep(400); if (sh && !shOn()) sh.click(); }
 }
 
+// ---- Search: Best match + Lyrics ----------------------------------------------
+// SoundCloud's ranking often puts a stranger's upload or a profile above the song
+// you typed. Two switches in the search sidebar put a ranked block on top of its
+// results. Its own list stays below: a hidden lazy list keeps loading forever.
+//   Best match: its tracks for what you typed, re-ranked so the title you typed
+//     comes first (the exact title, then the whole phrase, then all the words;
+//     plays break ties).
+//   Lyrics: type a line you remember. Genius names the song (through the host
+//     app), and its best SoundCloud upload is found the same way.
+// A switch stays on for later searches until it's turned off.
+const hoqNorm = (s) => String(s == null ? '' : s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const HOQ_OTHER_VERSION = /\b(remix|sped up|speed up|slowed|reverb|nightcore|cover|bootleg|instrumental|8d|mashup|type beat)\b/;
+function hoqMatchScore(t, q) {
+  const title = hoqNorm(t.title);
+  const bare = String(t.title || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ');   // without (feat …) and [tags]
+  const full = hoqNorm(bare);                                                 // "Artist - Song" kept
+  const core = hoqNorm(bare.replace(/^[^-–—]*\s[-–—]\s/, ''));                // and without the "Artist - "
+  const user = hoqNorm(t.user && t.user.username);
+  const who = user + ' ' + hoqNorm(t.publisher_metadata && t.publisher_metadata.artist);
+  const words = q.split(' ').filter(Boolean), hay = ' ' + title + ' ' + who + ' ';
+  let s = 0;
+  if (q && (core === q || full === q || title === q || (user && user + ' ' + core === q))) s += 160;
+  else if (q && (' ' + full + ' ').includes(' ' + q + ' ')) s += 120;
+  else if (q && (' ' + title + ' ').includes(' ' + q + ' ')) s += 100;
+  const found = words.filter((w) => hay.includes(' ' + w + ' ')).length;
+  if (words.length) s += 60 * found / words.length + (found === words.length ? 20 : 0);
+  // a remix, sped-up, cover… of it, unless that's what was typed
+  if (HOQ_OTHER_VERSION.test(String(t.title || '').toLowerCase()) && !HOQ_OTHER_VERSION.test(q)) s -= 30;
+  return s + Math.log10((t.playback_count || 0) + 1) * 4;
+}
+const _hoqSrchCache = new Map();
+function hoqScTracks(q, limit) {
+  const key = limit + '|' + q;
+  if (_hoqSrchCache.has(key)) return _hoqSrchCache.get(key);
+  const cid = hoqPfClientId();
+  if (!cid) return Promise.reject(new Error('no client id yet'));
+  const p = fetch('https://api-v2.soundcloud.com/search/tracks?q=' + encodeURIComponent(q) + '&limit=' + limit + '&client_id=' + cid)
+    .then((r) => { if (!r.ok) throw new Error('search answered ' + r.status); return r.json(); })
+    .then((j) => (j.collection || []).filter((t) => t && t.kind === 'track' && t.permalink_url));
+  _hoqSrchCache.set(key, p);
+  p.catch(() => _hoqSrchCache.delete(key));
+  if (_hoqSrchCache.size > 80) _hoqSrchCache.delete(_hoqSrchCache.keys().next().value);
+  return p;
+}
+let _lyrRid = 0;
+const _lyrWait = new Map();
+function hoqLyricsSongs(q) {
+  return new Promise((resolve) => {
+    if (!hoqHasHost()) return resolve(null);
+    const rid = 'l' + (++_lyrRid);
+    _lyrWait.set(rid, resolve);
+    setTimeout(() => { if (_lyrWait.delete(rid)) resolve(null); }, 15000);
+    scPost('lyrics:search:' + JSON.stringify({ rid, q }));
+  });
+}
+window.__hoqLyricsRes = function (rid, list) {
+  const done = _lyrWait.get(rid);
+  if (done) { _lyrWait.delete(rid); done(Array.isArray(list) ? list : null); }
+};
+const hoqPlays = (n) => !n ? '' : n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M plays' : n >= 1e3 ? Math.round(n / 1e3) + 'K plays' : n + ' plays';
+// One result. `extra` is HTML the caller has already escaped.
+function hoqSrchRow(t, extra) {
+  const path = String(t.permalink_url || '').replace(/^https?:\/\/[^/]+/, '');
+  const art = hoqSafeUrl(String(t.artwork_url || (t.user && t.user.avatar_url) || '').replace('-large.', '-t200x200.'));
+  const meta = [hoqPlays(t.playback_count), t.duration ? hoqPfDur(t.duration) : ''].filter(Boolean).join(' · ');
+  return '<div class="hoq-srch-row" data-path="' + hoqEsc(path) + '" title="Play">' +
+    '<span class="hoq-srch-art"' + (art ? ' style="background-image:url(' + hoqEsc(JSON.stringify(art)) + ')"' : '') + '><i>▶</i></span>' +
+    '<span class="hoq-srch-t"><b>' + hoqEsc(t.title) + '</b><span>' + hoqEsc((t.user && t.user.username) || '') + (extra ? ' · ' + extra : '') + '</span></span>' +
+    (t.policy === 'SNIP' ? '<em class="hoq-srch-go">Go+ preview</em>' : '') +
+    '<span class="hoq-srch-meta">' + hoqEsc(meta) + '</span></div>';
+}
+function hoqSrchBind(box) {
+  box.querySelectorAll('.hoq-srch-row[data-path]').forEach((r) => r.addEventListener('click', () => { if (r.dataset.path) hoqPfOpenAndPlay(r.dataset.path, 0); }));
+  box.querySelectorAll('.hoq-srch-find').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const a = document.createElement('a');
+    a.href = '/search/sounds?q=' + encodeURIComponent(b.dataset.q);
+    document.body.appendChild(a); a.click(); a.remove();
+  }));
+  const off = box.querySelector('.hoq-srch-off');
+  if (off) off.addEventListener('click', () => { try { localStorage.removeItem('hoqSearchMode'); } catch (e) {} hoqSearchTick(); });
+  const more = box.querySelector('.hoq-srch-more');
+  if (more) more.addEventListener('click', () => { box.classList.add('all'); more.remove(); });
+}
+// A failed search is tried again on a later tick, not every 0.7 s.
+function hoqSrchFailed(box, key, head, msg) {
+  box.innerHTML = head + '<div class="hoq-srch-msg">' + msg + '</div>';
+  hoqSrchBind(box);
+  box.dataset.key = key + '|failed';
+  setTimeout(() => { if (box.dataset.key === key + '|failed') box.dataset.key = ''; }, 6000);
+}
+const hoqSrchHead = (title, sub) => '<div class="hoq-srch-head"><b>' + title + '</b><span>' + sub + '</span><button type="button" class="hoq-srch-off" title="Turn off">×</button></div>';
+async function hoqRenderBest(box, q, key) {
+  const head = hoqSrchHead('Best match', 'The track called what you typed comes first');
+  box.innerHTML = head + '<div class="hoq-srch-msg">Looking…</div>';
+  let list = null;
+  try { list = await hoqScTracks(q, 50); } catch (e) {}
+  if (box.dataset.key !== key) return;   // the search changed meanwhile
+  if (!list) return hoqSrchFailed(box, key, head, 'Couldn’t search right now. Trying again in a moment…');
+  const nq = hoqNorm(q);
+  const ranked = list.map((t) => ({ t, s: hoqMatchScore(t, nq) })).sort((a, b) => b.s - a.s).slice(0, 20);
+  box.innerHTML = head + (ranked.length
+    ? '<div class="hoq-srch-list">' + ranked.map((r, i) => hoqSrchRow(r.t, i === 0 && r.s >= 100 ? '<em class="hoq-srch-top">Top match</em>' : '')).join('') + '</div>' +
+      (ranked.length > 5 ? '<button type="button" class="hoq-srch-more">Show more</button>' : '')
+    : '<div class="hoq-srch-msg">No tracks called that.</div>');
+  hoqSrchBind(box);
+}
+async function hoqRenderLyrics(box, q, key) {
+  const head = hoqSrchHead('Lyrics', 'Songs with that line in them (found on Genius), on SoundCloud');
+  box.innerHTML = head + '<div class="hoq-srch-msg">Looking…</div>';
+  const songs = await hoqLyricsSongs(q);
+  if (box.dataset.key !== key) return;
+  if (!songs) return hoqSrchFailed(box, key, head, 'Couldn’t reach the lyrics search right now. Trying again in a moment…');
+  if (!songs.length) { box.innerHTML = head + '<div class="hoq-srch-msg">No song with that line.</div>'; return hoqSrchBind(box); }
+  const rows = await Promise.all(songs.slice(0, 5).map(async (g) => {
+    let list = [];
+    try { list = await hoqScTracks(g.title + ' ' + g.artist, 15); } catch (e) {}
+    const nt = hoqNorm(g.title), aw = hoqNorm(g.artist).split(' ').filter((w) => w.length >= 3);
+    const best = list.map((t) => {
+      const hay = ' ' + hoqNorm((t.user && t.user.username) + ' ' + t.title + ' ' + ((t.publisher_metadata && t.publisher_metadata.artist) || '')) + ' ';
+      return { t, s: hoqMatchScore(t, nt) + (aw.some((w) => hay.includes(' ' + w + ' ')) ? 40 : 0) };
+    }).sort((a, b) => b.s - a.s)[0];
+    return { g, t: best && best.s >= 100 ? best.t : null };
+  }));
+  if (box.dataset.key !== key) return;
+  box.innerHTML = head + '<div class="hoq-srch-list">' + rows.map((r) => r.t
+    ? hoqSrchRow(r.t, '<em class="hoq-srch-lyr">“' + hoqEsc(r.g.title) + '” by ' + hoqEsc(r.g.artist) + '</em>')
+    : '<div class="hoq-srch-row off"><span class="hoq-srch-art"></span><span class="hoq-srch-t"><b>' + hoqEsc(r.g.title) + '</b><span>' + hoqEsc(r.g.artist) +
+      ' · not found on SoundCloud</span></span><button type="button" class="hoq-srch-find" data-q="' + hoqEsc(r.g.title + ' ' + r.g.artist) + '">Search for it</button></div>').join('') + '</div>';
+  hoqSrchBind(box);
+}
+
+const HOQ_SRCH_ROUTES = /^\/search(\/sounds|\/go)?\/?$/;   // Everything, Tracks, Go+ (not people, albums, playlists)
+const _srchNavs = new WeakSet();
+function hoqSearchTick() {
+  // Desktop only: the phone builds run on the proxy's domain, which SoundCloud's
+  // API doesn't answer cross-origin, and Lyrics needs the host app anyway.
+  if (!hoqHasHost()) return;
+  const nav = /^\/search/.test(location.pathname) && document.querySelector('.searchOptions__navigation');
+  const box0 = document.getElementById('hoq-srch');
+  if (!nav) { if (box0) box0.remove(); return; }
+  if (!document.getElementById('hoq-srch-css')) {
+    const icon = (svg) => 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+    const st = document.createElement('style');
+    st.id = 'hoq-srch-css';
+    st.textContent =
+      '.hoq-snav.hoq-snav-best { --hoq-ni: ' + icon("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'><circle cx='12' cy='12' r='8'/><circle cx='12' cy='12' r='4'/><circle cx='12' cy='12' r='1' fill='black'/></svg>") + '; }' +
+      '.hoq-snav.hoq-snav-lyrics { --hoq-ni: ' + icon("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6h10M4 11h10M4 16h6'/><path d='M17.5 17.5V8l3.5-1'/><circle cx='15.5' cy='17.5' r='2'/></svg>") + '; }' +
+      '.hoq-snav .searchOptions__navigationLink { cursor: pointer; }' +
+      '.hoq-snav.active .searchOptions__navigationLink::after { content: "On"; margin-left: auto; padding: 3px 7px; border-radius: 99px; font-size: 10.5px; font-weight: 700; line-height: 1; background: var(--sc-accent, #ff5500); color: #fff; -webkit-text-fill-color: #fff; }' +
+      '#hoq-srch { margin: 0 0 18px; padding: 14px; border-radius: 14px; background: rgba(20,20,24,0.55); border: 1px solid rgba(255,255,255,0.08); }' +
+      '#hoq-srch .hoq-srch-head { display: flex; align-items: baseline; gap: 10px; margin: 0 4px 8px; }' +
+      '#hoq-srch .hoq-srch-head b { color: #fff; font-size: 15px; }' +
+      '#hoq-srch .hoq-srch-head span { color: #9a9aa2; font-size: 12px; flex: 1 1 auto; }' +
+      '#hoq-srch .hoq-srch-off { border: 0; background: none; color: #9a9aa2; font-size: 18px; line-height: 1; cursor: pointer; }' +
+      '#hoq-srch .hoq-srch-off:hover { color: #fff; }' +
+      '#hoq-srch .hoq-srch-row { display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: 10px; cursor: pointer; }' +
+      '#hoq-srch .hoq-srch-row:hover { background: rgba(255,255,255,0.06); }' +
+      '#hoq-srch:not(.all) .hoq-srch-row:nth-child(n+6) { display: none; }' +
+      '#hoq-srch .hoq-srch-art { position: relative; flex: none; width: 44px; height: 44px; border-radius: 8px; background: rgba(255,255,255,0.08) center / cover no-repeat; }' +
+      '#hoq-srch .hoq-srch-art i { position: absolute; inset: 0; display: grid; place-items: center; font-style: normal; color: #fff; background: rgba(0,0,0,0.45); border-radius: 8px; opacity: 0; transition: opacity .12s; }' +
+      '#hoq-srch .hoq-srch-row:not(.off):hover .hoq-srch-art i { opacity: 1; }' +
+      '#hoq-srch .hoq-srch-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }' +
+      '#hoq-srch .hoq-srch-t b { color: #fff; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +
+      '#hoq-srch .hoq-srch-t span { color: #a8a8b0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +
+      '#hoq-srch .hoq-srch-meta { flex: none; color: #8d8d94; font-size: 12px; }' +
+      '#hoq-srch .hoq-srch-top, #hoq-srch .hoq-srch-lyr { font-style: normal; color: var(--sc-accent, #ff5500); font-weight: 600; }' +
+      '#hoq-srch .hoq-srch-go { flex: none; font-style: normal; font-size: 11px; color: #d6b04a; }' +
+      '#hoq-srch .hoq-srch-msg { color: #a8a8b0; font-size: 13px; padding: 8px; }' +
+      '#hoq-srch .hoq-srch-more, #hoq-srch .hoq-srch-find { flex: none; margin-top: 6px; border: 1px solid rgba(255,255,255,0.14); background: transparent; color: #ddd; border-radius: 9px; padding: 6px 12px; cursor: pointer; font: 600 12px system-ui, sans-serif; }' +
+      '#hoq-srch .hoq-srch-find { margin-top: 0; }' +
+      '#hoq-srch .hoq-srch-row.off { cursor: default; }';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  let mode = '';
+  try { mode = localStorage.getItem('hoqSearchMode') || ''; } catch (e) {}
+  if (!nav.querySelector('.hoq-snav')) {
+    const mk = (m, label, tip) => '<li class="g-nav-item searchOptions__navigationItem hoq-snav hoq-snav-' + m + '" data-mode="' + m + '" title="' + tip + '">' +
+      '<a class="g-nav-link sc-link-primary searchOptions__navigationLink sc-text-h4" role="button" tabindex="0">' + label + '</a></li>';
+    const html = mk('best', 'Best match', 'Put the track called what you typed on top') + mk('lyrics', 'Lyrics', 'Find a song from a line of its lyrics');
+    const first = nav.firstElementChild;
+    if (first) first.insertAdjacentHTML('afterend', html); else nav.insertAdjacentHTML('afterbegin', html);
+  }
+  if (!_srchNavs.has(nav)) {
+    _srchNavs.add(nav);
+    nav.addEventListener('click', (e) => {
+      const li = e.target.closest && e.target.closest('.hoq-snav');
+      if (!li) return;
+      e.preventDefault(); e.stopPropagation();
+      let cur = '';
+      try { cur = localStorage.getItem('hoqSearchMode') || ''; } catch (e2) {}
+      try { if (cur === li.dataset.mode) localStorage.removeItem('hoqSearchMode'); else localStorage.setItem('hoqSearchMode', li.dataset.mode); } catch (e2) {}
+      hoqSearchTick();
+    }, true);
+  }
+  nav.querySelectorAll('.hoq-snav').forEach((li) => li.classList.toggle('active', li.dataset.mode === mode));
+  const q = (new URLSearchParams(location.search).get('q') || '').trim();
+  const wrap = document.querySelector('.search__listWrapper');
+  if (!mode || !q || !wrap || !HOQ_SRCH_ROUTES.test(location.pathname)) { if (box0) box0.remove(); return; }
+  let box = box0;
+  if (!box || box.parentElement !== wrap) {
+    if (box) box.remove();
+    box = document.createElement('div');
+    box.id = 'hoq-srch';
+    wrap.insertBefore(box, wrap.firstChild);
+  }
+  const key = mode + '|' + q;
+  if (box.dataset.key === key || box.dataset.key === key + '|failed') return;
+  box.dataset.key = key;
+  box.classList.remove('all');
+  (mode === 'lyrics' ? hoqRenderLyrics : hoqRenderBest)(box, q, key);
+}
+
 function setupProfileExtras() {
   hoqPfAutoPlay();
   const bar = document.querySelector('.l-user-hero') && document.querySelector('.userInfoBar__buttons');
@@ -8493,6 +9121,9 @@ function setupProfileExtras() {
       #hoq-pf-tools { position:absolute; right:20px; bottom:20px; z-index:5; display:flex; align-items:center; gap:8px;
         padding:6px; border-radius:14px; background:rgba(12,12,16,.55); border:1px solid rgba(255,255,255,.1);
         box-shadow:0 8px 28px rgba(0,0,0,.35); backdrop-filter:blur(18px) saturate(1.4); -webkit-backdrop-filter:blur(18px) saturate(1.4); }
+      /* some artists have SoundCloud's "Featured profiles" down there, and the bar
+         sat on top of it: top-right on those banners */
+      .profileHeader:has(.featuredProfiles) #hoq-pf-tools { bottom:auto; top:20px; }
       #hoq-pf-tools .hoq-pf-btn, #hoq-pf-tools .hoq-pf-find { height:32px; }
       /* tabs stay on one line (scroll sideways if they ever run out of room) */
       .userInfoBar__tabs { min-width:0 !important; overflow-x:auto !important; scrollbar-width:none !important; }
@@ -9114,6 +9745,7 @@ function buildContextMenu() {
       if (sel) items.push({ ico: '❝', label: 'Copy', act: () => hoqCopy(sel) });
       const qInfo = trackLinkInfo(link);
       if (qInfo) items.push({ ico: '▶', label: 'Play in Discord', act: () => queueTrack(qInfo) });
+      if (qInfo && hoqJamSess()) items.push({ ico: '+', label: 'Add to Jam', act: () => hoqJamAdd(qInfo) });
       if (link) items.push({ ico: '🔗', label: 'Copy link', act: () => hoqCopy(link.href) });
       if (imgUrl) items.push({ ico: '🖼', label: 'Save image', act: () => scPost('saveimg:' + imgUrl) });
     }
@@ -9369,13 +10001,18 @@ function boot() {
   setInterval(() => { try { themeFrames(); } catch (e) {} }, 1000);
   // Same cadence for the top frame's own rows (feed, search, library, legacy pages).
   addQueueButtons(document);
-  setInterval(() => { try { addQueueButtons(document); } catch (e) {} }, 1200);
+  setInterval(() => { try { addQueueButtons(document); addJamButtons(document); } catch (e) {} }, 1200);
   setInterval(() => { try { tuneNowPlayingMarquee(); } catch (e) {} }, 1500);
   setInterval(() => { try { hoqStatsTick(); } catch (e) {} }, 4000);
   // ask who's signed in to the hoq account at boot (the Settings bar may never open)
   if (hoqHasHost()) setTimeout(() => scPost('hoqacct:status'), 1200);
   // and for any update toast: the host can't show one before this page exists
   if (hoqHasHost()) setTimeout(() => scPost('update:status'), 1500);
+  // Back into the jam this app was in (a reload or restart): the first state
+  // either picks it up or says it ended.
+  if (hoqHasHost()) setTimeout(() => { const s = hoqJamSess(); if (s) scPost('jam:watch:' + JSON.stringify(hoqJamAuth(s))); }, 1400);
+  setInterval(() => { try { hoqJamTick(); } catch (e) {} }, 1000);
+  setInterval(() => { try { hoqSearchTick(); } catch (e) {} }, 700);   // Best match / Lyrics in search
   // The player bar appears/disappears with playback, so keep the tab's bottom
   // edge honest while it's open.
   setInterval(() => {

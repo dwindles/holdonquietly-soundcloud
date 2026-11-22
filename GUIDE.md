@@ -102,7 +102,17 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   stats (plays, this month, last played, your most-played tracks of theirs), "New"
   tags on tracks posted since your last visit, and a cleaner header. The tools sit
   on the banner, not in the tab bar.
-- **Search:** filters as an icon list like the Library nav.
+- **Search:** filters as an icon list like the Library nav, plus two switches of
+  the app's own (desktop only; each stays on for later searches until turned off).
+  Both put a ranked block on top of SoundCloud's results, whose own list stays
+  below (§7: a hidden lazy list loads forever).
+  - **Best match:** SoundCloud's tracks for the query, re-ranked: the exact title
+    first ("Artist - Title" and "artist title" count), then the whole phrase, then
+    all the words; plays break ties; remixes, sped-up, covers and the like drop
+    back unless the query asks for them.
+  - **Lyrics:** a line you remember → Genius's site search names the song (fetched
+    by the host through the WebView's own network stack, see §7) → its best
+    SoundCloud upload is found the same way.
 - **Notifications / messages / "…" menu:** same card style as the other menus.
   The "…" menu scrolls instead of running off small windows.
 
@@ -112,7 +122,18 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   loaded, live (polled every 15 s from the friends server). Names come from the
   name set in Settings, else Discord, else the SoundCloud account.
 - **Listen along:** follow someone's playback (same track, same spot, keeps
-  following). The app side is built. It needs the updated friends server (see §8).
+  following). Not while you're in a jam.
+- **Jam** (Social, desktop only): a shared session like Spotify's Jam. One person
+  starts it and gets a 6-character code; friends join with the code, or with
+  **Join jam** on the host's row in Friends listening (a host can switch that off).
+  The host's app plays: guests follow its song, play/pause and seeks, each change
+  applied once so a guest pausing on their side isn't fought. Anyone in the jam
+  adds songs to a shared queue (the **+** on any track row, right-click → Add to
+  Jam, or "Add what's playing"), and the host's app plays the queue in order as
+  songs end (or **Play now** / **Play next now**). A guest who plays something
+  else for 8 s straight drops out of following and gets **Back to the jam**. The
+  server side is `/jam/*` in `proxy/friends-server.js`: a key per person, 50
+  people, 100 queued songs, ends 10 min after the host's app goes quiet.
 - **Discord Rich Presence:** what you're playing, progress and cover on your
   Discord profile. The status line can show the artist, the song, or
   "holdonquietlySC". Optional buttons, and it hides after 5 min paused.
@@ -230,9 +251,14 @@ the sum, so nothing is counted twice.
 
 ### Friends server
 
-A tiny Node server (`proxy/friends-server.js`, port 8790, behind nginx at
-`sc.holdonquietly.com/__hoq/fb`). The app POSTs `/presence` and GETs `/friends`.
-People drop off after 5 min of silence. Test copies never post.
+A tiny Node server (`proxy/friends-server.js`, pm2 `hoq-friends` at
+`/opt/hoq/server.js`, port 8790, behind nginx at `sc.holdonquietly.com/__hoq/fb`).
+The app POSTs `/presence` and GETs `/friends` and `/feed`. People drop off after
+5 min of silence. Jams live at `/jam/*`: POST `start`, `join`, `add`, `remove`,
+`now` (host only), `leave`, `end`, and GET `/jam/state?code&id&key&v`, which holds
+the request up to 20 s until something changes. The host app makes every call
+(page → `jam:req:` / `jam:watch:`), like presence and the feed. Test copies never
+post, unless `HOQ_BACKEND` points them at a local copy (§6).
 
 ---
 
@@ -257,7 +283,14 @@ nginx serves it as `/hoq.js` with revalidation, so reloading the page picks it u
 
 ### Friends server
 
-Copy `proxy/friends-server.js` to the box and restart its pm2 process (DEPLOY.md).
+pm2 `hoq-friends` runs `/opt/hoq/server.js` (DEPLOY.md is out of date on the name).
+Back up the old file as `server.js.bak-<date>`, check the new one with
+`node --check` (it must end in `.js`: Node won't check another extension), put it
+in place, `pm2 restart hoq-friends --update-env`, `pm2 save`, then
+`curl http://127.0.0.1:8790/health`. Its feed lives in `/opt/hoq/feed.json`.
+From Windows use `C:\Windows\System32\OpenSSH\ssh.exe` / `scp.exe` with
+`-i ~/.ssh/root_155_138_222_253_ballerina -p 2222`, and send multi-line commands
+as a script file (PowerShell mangles quotes on the way to ssh).
 
 ---
 
@@ -269,6 +302,15 @@ Copy `proxy/friends-server.js` to the box and restart its pm2 process (DEPLOY.md
   A test copy is silent toward the outside world: no Discord status, no friends
   list, no phone relay, no Last.fm, and it leaves the shared Discord webhook in the
   registry alone. It logs to `<folder>\scwv2.log`; the real app logs to `%TEMP%\scwv2.log`.
+- **Friends, feed and jams on a test copy:** run a local friends server
+  (`PORT=18790 node proxy/friends-server.js`) and start the copy with
+  `HOQ_BACKEND=http://127.0.0.1:18790` too. Two copies (own `HOQ_DATADIR` and
+  debug port each) make a host and a guest.
+- **Logged-out copies can't play audio**: not even a real click on SoundCloud's own
+  play button starts anything. To test playback logic (a jam's follow, pause and
+  queue), put a stand-in player first in `<body>`: a `.playbackSoundBadge__titleLink`,
+  a `.playControls__play` (class `playing` and title "Pause current" / "Play
+  current") and the two `.playbackTimeline__*` times. The app reads the first match.
 - **Live app inspection:** start the real app with `--remote-debugging-port=9222`,
   then `node tools/cdp.js -e "<js>"` / `node tools/shot.js out.png`.
 - **Sign-in by hand:** `HOQ_ACCOUNTS_NO_BROWSER=1` logs the holdonquietly.com sign-in
@@ -325,13 +367,22 @@ Copy `proxy/friends-server.js` to the box and restart its pm2 process (DEPLOY.md
 - **A `catch { }` around P/Invoke hides a missing export forever.** The Start Menu
   shortcut called `InitPropVariantFromString`, an inline header helper rather than a
   propsys.dll export, so no shortcut was ever saved, and nothing said so.
+- **Some sites refuse .NET's HTTPS client by its handshake.** Genius answers 403
+  to `HttpClient` whatever the headers, and 200 to the browser. `BrowserGet` in
+  Program.cs fetches through the WebView itself (`Network.loadNetworkResource`).
+- **Build panel parts against the panel, not the page.** The Social panel is
+  filled in before it's attached, so `document.querySelector` finds nothing then:
+  the Jam card stayed empty until it rendered into the panel it was given.
+- **Never hide SoundCloud's own result lists.** A hidden lazy list counts as
+  scrolled to the bottom and loads page after page. Add above them instead.
 
 ---
 
 ## 8. Open items
 
-- **Listen along** needs `proxy/friends-server.js` deployed (it keeps track link,
-  position, paused and speed). Until then the button doesn't appear.
+- **Jam, Best match and Lyrics are desktop only.** The phone builds have no host
+  app for the jam server or Genius, and SoundCloud's API doesn't answer the
+  proxy's origin for the search.
 - **Pick up where you left off** is switched off: jumping back the moment a song
   starts stalled playback on signed-in accounts. The position is still saved.
 - **holdonquietlySC bot** shows offline in Discord because nothing signs in as it.
