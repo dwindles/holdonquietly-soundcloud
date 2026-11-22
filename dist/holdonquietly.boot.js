@@ -509,6 +509,7 @@ window.__hoqFX = {
 // Setting the audio element's currentTime directly bypasses SoundCloud's HLS
 // loader (it fetches the chunks itself), so playback sat 'buffering' forever.
 function hoqSeek(sec) {
+  if (hoqYtSeek(sec)) return true;   // a Go+ song playing from YouTube: its player seeks
   try {
     const w = document.querySelector('.playControls .playbackTimeline__progressWrapper');
     if (!w) return false;
@@ -643,6 +644,7 @@ window.__hoqEQ = {
 // game is focused) and calls this to drive SoundCloud's transport.
 window.__hoqMedia = function (action) {
   try {
+    if (hoqYtMedia(action)) return;   // a Go+ song playing from YouTube: play/pause/stop go to its player
     const q = (s) => document.querySelector(s);
     if (action === 'next') { const b = q('.playControls__next') || q('.skipControl__next'); if (b) b.click(); }
     else if (action === 'prev') { const b = q('.playControls__prev') || q('.skipControl__previous'); if (b) b.click(); }
@@ -3695,6 +3697,7 @@ function themeFrames() {
       addQueueButtons(d);
       addJamButtons(d);
       attachFrameContextMenu(d, f);
+      attachGoPress(d);   // a play press in the new app's pages that opens the Go+ page
       // only while that frame is actually on screen (it stays loaded, hidden, on other pages)
       const fr = f.getBoundingClientRect();
       if (tagFullPage(d) && fr.width > 0 && fr.height > 0 && getComputedStyle(f).visibility !== 'hidden' && getComputedStyle(f).opacity !== '0') fullPage = true;
@@ -4012,7 +4015,8 @@ function startPlayerViz() {
       const pr = playerProgress();
       const an = ensureAnalyser();
       let live = false;
-      if (an && !pr.paused) { an.getByteTimeDomainData(td); live = true; }
+      // (a Go+ song from YouTube isn't in SoundCloud's audio: the stand-in wave then)
+      if (an && !pr.paused && !_yt) { an.getByteTimeDomainData(td); live = true; }
       amp += ((pr.paused ? 0.04 : 1) - amp) * 0.08; // ease in/out (flat when paused)
 
       const pad = 3, IW = Math.max(1, W - pad * 2), midY = H / 2, maxA = H * 0.40;
@@ -4828,7 +4832,18 @@ function cleanNP(s) {
   return s.trim();
 }
 
+// The current song's link: the player bar's, or a Go+ song YouTube plays on its own.
+function hoqNowHref() {
+  const s = hoqYtSolo();
+  if (s) return s.url;
+  const a = document.querySelector('.playbackSoundBadge__titleLink');
+  return (a && a.getAttribute('href')) || '';
+}
+
 function currentNowPlaying() {
+  // a Go+ song SoundCloud wouldn't play at all, on YouTube: SoundCloud's bar doesn't have it
+  const s = hoqYtSolo();
+  if (s) return { title: s.title, artist: s.artist, cover: s.cover };
   const t = document.querySelector('.playbackSoundBadge__titleLink');
   const a = document.querySelector('.playbackSoundBadge__lightLink, .playbackSoundBadge__usernameLink');
   return {
@@ -4855,7 +4870,7 @@ function setupFeed(p) {
 
   const esc = hoqEsc; // reuse the shared HTML-escape helper
   const rel = (ts) => { const d = (Date.now() - ts) / 1000; if (d < 60) return 'now'; if (d < 3600) return Math.floor(d / 60) + 'm'; if (d < 86400) return Math.floor(d / 3600) + 'h'; return Math.floor(d / 86400) + 'd'; };
-  const curTrack = () => { const np = currentNowPlaying(); if (!np.title) return null; const l = document.querySelector('.playbackSoundBadge__titleLink'); const href = l && l.getAttribute('href'); return { title: np.title, artist: np.artist, cover: np.cover, url: href ? (href.startsWith('http') ? href : 'https://soundcloud.com' + href) : '' }; };
+  const curTrack = () => { const np = currentNowPlaying(); if (!np.title) return null; const href = hoqNowHref(); return { title: np.title, artist: np.artist, cover: np.cover, url: href ? (href.startsWith('http') ? href : 'https://soundcloud.com' + href) : '' }; };
   const setMeAvatar = () => { const me = hoqMe(); if (me.avatar && avatarImg) avatarImg.src = me.avatar; };
   setMeAvatar(); setTimeout(setMeAvatar, 1500);
 
@@ -5527,6 +5542,10 @@ function ensureDiscordPanel() {
             <span><b>Song pop-up <button type="button" class="hoq-toast-test">Preview</button></b><em>A small card with the cover and title in the corner of your screen when the song changes, while you're in another app or game.</em></span>
             <input type="checkbox" class="hoq-rp-sw hoq-desk-sw" data-k="hoqToast">
           </label>
+          <label class="hoq-rp-row">
+            <span><b>Full Go+ songs</b><em>When a song would only play SoundCloud's 30-second Go+ preview, the full song plays in a small player instead.</em></span>
+            <input type="checkbox" class="hoq-rp-sw hoq-desk-sw" data-k="hoqGoYT" data-def="1">
+          </label>
         </div>
       </div>
       <div class="hoq-dc-sec hoq-hook-sec">
@@ -5649,8 +5668,13 @@ function ensureDiscordPanel() {
   if (deskSec) {
     if (!hoqHasHost()) deskSec.remove();
     else deskSec.querySelectorAll('.hoq-desk-sw').forEach((sw) => {
-      try { sw.checked = localStorage.getItem(sw.dataset.k) === '1'; } catch (e) {}
-      sw.addEventListener('change', () => { try { localStorage.setItem(sw.dataset.k, sw.checked ? '1' : '0'); } catch (e) {} _lastRpc = ''; try { rpcTick(); } catch (e) {} });
+      // data-def="1": on until switched off
+      try { const v = localStorage.getItem(sw.dataset.k); sw.checked = v === null ? sw.dataset.def === '1' : v === '1'; } catch (e) {}
+      sw.addEventListener('change', () => {
+        try { localStorage.setItem(sw.dataset.k, sw.checked ? '1' : '0'); } catch (e) {}
+        if (sw.dataset.k === 'hoqGoYT' && !sw.checked && _yt) { _goSkip = _yt.path; hoqYtStop(); }
+        _lastRpc = ''; try { rpcTick(); } catch (e) {}
+      });
     });
     const tt = deskSec.querySelector('.hoq-toast-test');
     if (tt) tt.addEventListener('click', (e) => {
@@ -5697,8 +5721,7 @@ function ensureDiscordPanel() {
       else if (act === 'play') { const el = document.getElementById('hoq-playbtn'); if (el) el.click(); flash('Queued'); }
       else if (act === 'server') { const el = p.querySelector('.hoq-dc-open'); if (el) el.click(); }
       else if (act === 'copy') {
-        const link = document.querySelector('.playbackSoundBadge__titleLink');
-        const href = link && link.getAttribute('href');
+        const href = hoqNowHref();
         if (href) { hoqCopy(href.startsWith('http') ? href : location.origin + href); flash('Copied'); }
         else flash('Nothing playing');
       }
@@ -5994,7 +6017,7 @@ setInterval(() => { try { hoqCloudPush(false); } catch (e) {} }, 120000);
 // local: volume, the output device, and custom background pictures over 150 KB.
 const HOQ_SYNC_KEYS = ['scAccent', 'scMatchCover', 'scCoverBg', 'scCustomBg', 'scZoom', 'hoqEQ', 'hoqEQOn',
   'hoqStatsRange', 'hoqStatsPublic', 'hoqNowPublic', 'hoqBoost', 'hoqLevel', 'hoqSpace', 'hoqSpaceAmt',
-  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade', 'hoqSpeed', 'hoqXfade', 'hoqToast'];
+  'hoqMiniLayout', 'hoqMiniPin', 'hoqMiniFade', 'hoqSpeed', 'hoqXfade', 'hoqToast', 'hoqGoYT'];
 function hoqSettingsSnap() {
   const o = {};
   for (const k of HOQ_SYNC_KEYS) {
@@ -6408,8 +6431,15 @@ function hoqMe() {
   return { id, name, avatar: av, url };
 }
 
-// Real song position / duration / play-state from the player UI.
+// Real song position / duration / play-state. A Go+ song playing from YouTube
+// reports the YouTube player's (SoundCloud's own sits paused on the preview), so
+// Discord, Last.fm, stats, jams and the seek bar all follow the music you hear.
 function playerProgress() {
+  return hoqYtProgress() || hoqScProgress();
+}
+
+// SoundCloud's own player, from the player UI.
+function hoqScProgress() {
   const parseT = (sel) => {
     const el = document.querySelector(sel);
     // h:mm:ss for anything an hour or longer — a bare /(\d+):(\d+)/ read
@@ -6468,7 +6498,18 @@ function rpPrefs() {
 // profile. The query is dropped ("?in=user/sets/…" names the playlist you're
 // playing from, which can be private), and a secret link (…/s-XXXX) is never
 // published at all.
+// A Go+ song YouTube plays on its own (SoundCloud wouldn't start it, so its bar
+// doesn't have it) answers for the bar's title and artist links.
 function npPublicUrl(sel) {
+  const s = hoqYtSolo();
+  if (s) {
+    if (sel === '.playbackSoundBadge__titleLink') return s.url;
+    if (sel === '.playbackSoundBadge__lightLink') return s.userUrl;
+  }
+  return hoqBarHref(sel);
+}
+// The link as it is in SoundCloud's own player bar.
+function hoqBarHref(sel) {
   const a = document.querySelector(sel);
   const h = ((a && a.getAttribute('href')) || '').split(/[?#]/)[0];
   if (!h) return '';
@@ -6894,9 +6935,8 @@ function accentInt() {
 
 function shareCurrentSong() {
   const np = currentNowPlaying();
-  const linkEl = document.querySelector('.playbackSoundBadge__titleLink');
-  let url = '';
-  if (linkEl) { const h = linkEl.getAttribute('href') || ''; url = h ? (h.startsWith('http') ? h : location.origin + h) : ''; }
+  const h = hoqNowHref();
+  const url = h ? (h.startsWith('http') ? h : location.origin + h) : '';
   const s = senderInfo();
   const dur = playerProgress().dur;
   const length = dur > 0 ? (Math.floor(dur / 60) + ':' + String(dur % 60).padStart(2, '0')) : '';
@@ -6936,8 +6976,7 @@ function startShareButton() {
 
   // Unique-per-track key: the track link, else title|artist.
   const songKey = () => {
-    const linkEl = document.querySelector('.playbackSoundBadge__titleLink');
-    const h = linkEl ? (linkEl.getAttribute('href') || '') : '';
+    const h = hoqNowHref();
     if (h) return h;
     const np = currentNowPlaying();
     return np.title ? (np.title + '|' + np.artist) : '';
@@ -7205,8 +7244,7 @@ function startPlayButton() {
   const songKey = () => {
     const pt = pageTrackInfo();
     if (pt) return pt.url;
-    const linkEl = document.querySelector('.playbackSoundBadge__titleLink');
-    const h = linkEl ? (linkEl.getAttribute('href') || '') : '';
+    const h = hoqNowHref();
     if (h) return h;
     const np = currentNowPlaying();
     return np.title ? (np.title + '|' + np.artist) : '';
@@ -7358,8 +7396,8 @@ function hoqFollowTick(list) {
   }
   fol.path = path;
   // same song: pull our position back in line if it drifted
-  const el = window.__hoqMediaEl, want = hoqFriendPos(f);
-  if (el && !el.paused && typeof f.pos === 'number' && Math.abs(el.currentTime - want) > 6 && isFinite(el.duration) && want < el.duration - 3) {
+  const m = hoqMediaNow(), want = hoqFriendPos(f);
+  if (m && m.playing && typeof f.pos === 'number' && Math.abs(m.pos - want) > 6 && m.dur > 0 && want < m.dur - 3) {
     hoqSeek(want);
   }
 }
@@ -7373,7 +7411,7 @@ function hoqFollowTick(list) {
 const HOQ_JQ_ADD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>Add to Jam</span>';
 const HOQ_JQ_DONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>In the jam</span>';
 let _jam = null, _jamAt = 0;                  // the jam's latest state, and when it arrived
-let _jamRid = 0, _jamMsg = null;
+let _jamRid = 0, _jamMsg = null, _jamRejoinAt = 0;
 const _jamWait = new Map();
 let _jamHost = { sent: '', sentAt: 0, adv: '', playingAt: 0, pending: null };
 let _jamGuest = { applied: null, following: true, at: 0, fixAt: 0 };
@@ -7469,12 +7507,13 @@ window.__hoqJam = function (st) {
   const s = hoqJamSess();
   if (!s || !st || typeof st !== 'object') return;
   if (st.ended) {
-    // dropped while the PC slept past the guest timeout: try to get back in, once
-    if (st.why === 'removed' && !s.rejoin) { s.rejoin = 1; hoqJamSave(s); hoqJamJoin(s.code, true); return; }
-    return hoqJamClear(s.host ? 'Your jam ended.' : 'The jam ended.', true);
+    // Dropped while the PC slept past the guest timeout: try to get back in. At most
+    // once in 5 minutes: the same account in the jam on two PCs knocks the other
+    // out with every join, and a rejoin each time kept them at it forever.
+    if (st.why === 'removed' && Date.now() - _jamRejoinAt > 5 * 60 * 1000) { _jamRejoinAt = Date.now(); hoqJamJoin(s.code, true); return; }
+    return hoqJamClear(st.why === 'removed' ? 'You were dropped from the jam.' : s.host ? 'Your jam ended.' : 'The jam ended.', true);
   }
   if (st.code !== s.code) return;
-  if (s.rejoin) { delete s.rejoin; hoqJamSave(s); }
   _jam = st; _jamAt = Date.now();
   hoqJamRender();
   hoqJamFollow(false);
@@ -7574,8 +7613,8 @@ function hoqJamFollow(force) {
   if (n.paused !== A.paused) {
     if (pr.paused !== n.paused) { const b = document.querySelector('.playControls__play'); if (b) b.click(); }
   } else if (!n.paused && Math.abs(anchor - A.anchor) > 5000) {
-    const el = window.__hoqMediaEl;   // the host jumped within the song
-    if (el && !el.paused && isFinite(el.duration) && want < el.duration - 3) hoqSeek(want);
+    const m = hoqMediaNow();   // the host jumped within the song
+    if (m && m.playing && m.dur > 0 && want < m.dur - 3) hoqSeek(want);
   }
   G.applied = { url: n.url, paused: n.paused, anchor, open: true };
 }
@@ -7595,10 +7634,10 @@ function hoqJamGuestTick() {
     return;
   }
   G.offSince = 0;
-  const n = _jam.now, el = window.__hoqMediaEl;
-  if (!mine || n.paused || !el || el.paused || Date.now() - G.fixAt < 30000) return;
+  const n = _jam.now, m = hoqMediaNow();
+  if (!mine || n.paused || !m || !m.playing || Date.now() - G.fixAt < 30000) return;
   const want = hoqJamWant(n);
-  if (Math.abs(el.currentTime - want) > 8 && isFinite(el.duration) && want < el.duration - 3) { G.fixAt = Date.now(); hoqSeek(want); }
+  if (Math.abs(m.pos - want) > 8 && m.dur > 0 && want < m.dur - 3) { G.fixAt = Date.now(); hoqSeek(want); }
 }
 
 function hoqJamTick() {
@@ -8684,8 +8723,9 @@ function setupMiniMode() {
     document.documentElement.addEventListener('mouseleave', () => { if (miniOn() && fade() < 100) scPost('mini:alpha:' + fade()); });
     document.documentElement.addEventListener('mouseenter', () => { if (miniOn()) scPost('mini:alpha:100'); });
     const prog = widget.querySelector('.mn-prog');
-    prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * el.duration); });
-    prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) hoqSeek(prog.value / 1000 * el.duration); scrubbing = false; });
+    const durNow = () => { const m = hoqMediaNow(); return m && m.dur > 0 ? m.dur : 0; };   // SoundCloud's audio, or a Go+ song's YouTube player
+    prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const d = durNow(); if (d) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * d); });
+    prog.addEventListener('change', () => { const d = durNow(); if (d) hoqSeek(prog.value / 1000 * d); scrubbing = false; });
     const vol = widget.querySelector('.mn-volrange');
     // Through the app's own volume, like the main slider: setting the element
     // alone was undone by the next play() (which re-applies the saved level) and
@@ -8729,7 +8769,8 @@ function setupMiniMode() {
     const playBtn = g('.playControls__play');
     // aria-label is the real play state ("Pause current" = playing); the class is
     // a permanent style hook, not a state flag.
-    const paused = playBtn ? (playBtn.getAttribute('aria-label') || '').toLowerCase().indexOf('play') === 0 : true;
+    const yt = hoqYtProgress();   // a Go+ song playing from YouTube
+    const paused = yt ? yt.paused : playBtn ? (playBtn.getAttribute('aria-label') || '').toLowerCase().indexOf('play') === 0 : true;
     // The link's text has a visually-hidden "Current track: …" duplicate; its
     // title attribute is the clean value.
     let title = '';
@@ -8737,7 +8778,10 @@ function setupMiniMode() {
       title = t.getAttribute('title') || '';
       if (!title) { const vis = [...t.children].find((c) => !c.classList.contains('sc-visuallyhidden')); title = vis ? vis.textContent.trim() : t.textContent.replace(/^\s*Current track:\s*/i, '').trim(); }
     }
-    const artist = a ? (a.getAttribute('title') || a.textContent.trim()) : '';
+    let artist = a ? (a.getAttribute('title') || a.textContent.trim()) : '';
+    // a Go+ song YouTube plays on its own isn't in SoundCloud's bar
+    const solo = hoqYtSolo();
+    if (solo) { title = solo.title; artist = solo.artist; cover = solo.cover ? 'url("' + solo.cover + '")' : cover; }
     const like = g('.playbackSoundBadge__like');
     const liked = like ? (like.getAttribute('aria-label') || '').toLowerCase() === 'unlike' : false;
     const sh = g('.shuffleControl'); const rp = g('.repeatControl');
@@ -8765,10 +8809,10 @@ function setupMiniMode() {
     rpBtn.classList.toggle('on', s.repeat !== 'none');
     rpBtn.classList.toggle('one', s.repeat === 'one');
     // progress + time + volume from the actual audio element
-    const el = window.__hoqMediaEl;
+    const el = window.__hoqMediaEl, m = hoqMediaNow();
     const prog = widget.querySelector('.mn-prog'); const vol = widget.querySelector('.mn-volrange');
-    const dur = el && isFinite(el.duration) ? el.duration : 0;
-    const cur = el ? el.currentTime : 0;
+    const dur = m ? m.dur : 0;
+    const cur = m ? m.pos : 0;
     prog.disabled = !dur;
     if (!scrubbing) { prog.value = dur ? Math.round(cur / dur * 1000) : 0; fillR(prog); set('.mn-t0', fmt(cur)); set('.mn-t1', fmt(dur)); }
     if (!adjustingVol && el) { vol.value = Math.round((el.muted ? 0 : el.volume) * 100); fillR(vol); }
@@ -8844,6 +8888,8 @@ const hoqPfSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // then press its play button once it shows up.
 function hoqPfOpenAndPlay(path, seek) {
   try { sessionStorage.setItem('hoqPfAuto', JSON.stringify({ path, t: Date.now(), seek: seek > 0 ? seek : 0 })); } catch (e) {}
+  // a Go+ song that ends up playing from YouTube starts there too (listen along, jams)
+  window.__hoqWantPos = seek > 0 ? { path, sec: seek, t: Date.now() } : null;
   const a = document.createElement('a');
   a.href = path; a.style.display = 'none';
   document.body.appendChild(a); a.click(); a.remove();
@@ -9104,6 +9150,770 @@ function hoqSearchTick() {
   box.classList.remove('all');
   (mode === 'lyrics' ? hoqRenderLyrics : hoqRenderBest)(box, q, key);
 }
+
+// ---- Go+ songs from YouTube -------------------------------------------------------
+// Without Go+, SoundCloud plays only a 30-second preview of a Go+ track. When one
+// starts, the app finds the same recording on YouTube (the host fetches YouTube's
+// results page with a plain HTTPS request: through the WebView, as Lyrics does it,
+// YouTube answers "No results found") and plays it in YouTube's embedded
+// player, in a small card while it plays: YouTube's rules want its player on screen,
+// at least 200x200, never a hidden background one. SoundCloud keeps the track and
+// the queue. Its play button, Space, the media keys, the seek bar and the compact
+// player work the YouTube player; Discord, Last.fm, stats and jams read its progress
+// (playerProgress); when the video ends SoundCloud moves on. Nothing is pulled out
+// of either site: SoundCloud's preview sits paused, YouTube's player plays YouTube's
+// video. A Go+ subscriber gets full streams and never sees any of it.
+// Desktop only (the search needs the host). Switch: Social → Settings → Desktop.
+// `var`, not `let`: playerProgress() and the media keys reach these from code above.
+var _yt = null;          // the YouTube stand-in for the current Go+ track (hoqYtStart)
+var _ytBypass = false;   // our own presses on SoundCloud's play button go through
+var _goSkip = '';        // a track whose YouTube card was closed: SoundCloud's preview it is
+var _goNoAuth = false;   // SoundCloud refused the signed-in ask once: ask anonymously
+var _goNoPathSince = 0;  // when the player bar last lost its song link
+var _scPressAt = 0, _ytRid = 0, _ytVarRule = null;
+const HOQ_YT_HOST = 'https://www.youtube-nocookie.com';
+const _goInfo = new Map();   // track path → { snip, want } | null (not a track) | 'wait'
+const _ytWait = new Map();
+
+function hoqGoOn() { try { return localStorage.getItem('hoqGoYT') !== '0'; } catch (e) { return true; } }
+// The song in SoundCloud's own bar (npPublicUrl would answer with a refused Go+ song
+// playing from YouTube, and then a song you start yourself would go unnoticed).
+function hoqGoPath() { try { const h = hoqBarHref('.playbackSoundBadge__titleLink'); return h ? hoqTrackPath(h.split(/[?#]/)[0]) : ''; } catch (e) { return ''; } }
+function hoqScAuth() {
+  if (_goNoAuth) return '';
+  try { const m = document.cookie.match(/(?:^|;\s*)oauth_token=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; } catch (e) { return ''; }
+}
+
+// Is this track only a preview for whoever is signed in? Its streams say so: all of
+// them "snipped" (a Go+ subscriber gets full ones for the same track). Asked with the
+// page's own sign-in, the way SoundCloud's page asks. undefined: not known yet.
+function hoqGoLookup(path) {
+  const v = _goInfo.get(path);
+  if (v !== undefined) return v === 'wait' ? undefined : v;
+  const cid = hoqPfClientId();
+  if (!cid) return undefined;
+  _goInfo.set(path, 'wait');
+  const tok = hoqScAuth();
+  const opts = tok ? { headers: { Authorization: 'OAuth ' + tok } } : {};
+  // a stalled request would leave this song on 'wait' for the whole session
+  try { opts.signal = AbortSignal.timeout(10000); } catch (e) {}
+  fetch('https://api-v2.soundcloud.com/resolve?url=' + encodeURIComponent('https://soundcloud.com' + path) + '&client_id=' + cid, opts)
+    .then((r) => {
+      if (r.status === 401 && tok) { _goNoAuth = true; _goInfo.delete(path); throw new Error('sign-in refused'); }
+      if (!r.ok) throw new Error('resolve answered ' + r.status);
+      return r.json();
+    })
+    .then((t) => {
+      let res = null;
+      if (t && t.kind === 'track') {
+        const tc = (t.media && t.media.transcodings) || [];
+        res = { snip: tc.length ? tc.every((x) => x && x.snipped) : t.policy === 'SNIP', want: hoqGoWant(t) };
+      }
+      _goInfo.set(path, res);
+      if (_goInfo.size > 300) _goInfo.delete(_goInfo.keys().next().value);
+    })
+    .catch(() => setTimeout(() => { if (_goInfo.get(path) === 'wait') _goInfo.delete(path); }, 15000));
+  return undefined;
+}
+
+// "Snooze (Acoustic) [feat. Justin Bieber]" by SZA → what to search YouTube for, the
+// song's own name, which version it is, and how long the full song runs.
+const HOQ_YT_VERS = /\b(acoustic|remix|live|sped up|speed up|slowed|reverb|nightcore|instrumental|acapella|a cappella|demo|unplugged|reprise|extended|remaster|remastered|cover|clean|8d|bass boosted|karaoke|mashup|bootleg|radio edit|version|session)\b/g;
+const hoqYtVers = (s) => new Set((hoqNorm(s).match(HOQ_YT_VERS) || []).map((w) => w === 'remastered' ? 'remaster' : w === 'speed up' ? 'sped up' : w === 'a cappella' ? 'acapella' : w));
+function hoqGoWant(t) {
+  const pm = t.publisher_metadata || {};
+  const artist = String(pm.artist || (t.user && t.user.username) || '').trim();
+  const title = String(t.title || '').trim();
+  const an = hoqNorm(artist);
+  // what to type into YouTube: no producer tags, the artist in front unless it's there already
+  const clean = title.replace(/[(\[]\s*(prod|produced)\b[^)\]]*[)\]]/ig, ' ').replace(/\s+/g, ' ').trim();
+  const q = (an && !(' ' + hoqNorm(clean) + ' ').includes(' ' + an + ' ') ? artist + ' ' : '') + clean;
+  // the song's own name: no (feat …) or [tags], and no "Artist - " in front
+  let core = title.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ');
+  const dash = core.match(/^\s*(.+?)\s[-–—]\s(.+)$/);
+  if (dash) { const pre = hoqNorm(dash[1]); core = !an || !pre || pre.includes(an) || an.includes(pre) ? dash[2] : dash[1]; }
+  // and no "feat. X" outside brackets: YouTube writes it ft., (feat. …) or not at all.
+  // ("with" stays: it's in too many real titles, like "Stay With Me".)
+  const coreN = (hoqNorm(core) || hoqNorm(title)).replace(/ (feat|ft|featuring) .*$/, '').trim();
+  const artRaw = String(t.artwork_url || (t.user && t.user.avatar_url) || '').replace('-large.', '-t300x300.');
+  const art = hoqSafeUrl(artRaw);   // plain https only (it goes into a CSS url())
+  const userUrl = hoqSafeUrl(String((t.user && t.user.permalink_url) || ''));   // the uploader, for Discord's artist link
+  return { q: q.slice(0, 150), title, artist, an, art, userUrl, core: coreN || hoqNorm(title), vers: hoqYtVers(title),
+    sec: Math.round((t.full_duration || t.duration || 0) / 1000) };
+}
+
+// How surely a YouTube result is this recording. The length counts most (a music
+// video with a long intro drops back behind the plain audio); then the title, the
+// artist's own channel, and no remix / live take / sped-up… unless that's the track.
+function hoqYtScore(v, w) {
+  const vt = hoqNorm(v.t), ch = hoqNorm(v.ch), hay = ' ' + vt + ' ' + ch + ' ';
+  const words = w.core.split(' ').filter(Boolean);
+  const found = words.filter((x) => hay.includes(' ' + x + ' ')).length;
+  if (words.length && found / words.length < 0.75) return -1;   // another song
+  let s = words.length ? 50 * found / words.length : 0;
+  if (w.core && (' ' + vt + ' ').includes(' ' + w.core + ' ')) s += 25;
+  const a = w.an, aw = a.split(' ').filter((x) => x.length > 1);
+  if (a && (ch === a || ch === a + ' topic' || ch.replace(/ (vevo|official|music|records)$/, '') === a || ch.replace(/vevo$/, '') === a.replace(/ /g, ''))) s += 40;
+  else if (aw.length && aw.every((x) => hay.includes(' ' + x + ' '))) s += 20;
+  if (v.art) s += 15; else if (v.ver) s += 5;
+  if (w.sec && v.sec) { const d = Math.abs(v.sec - w.sec); s += d <= 3 ? 45 : d <= 8 ? 30 : d <= 20 ? 5 : d <= 60 ? -25 : -60; }
+  const vv = hoqYtVers(v.t);
+  vv.forEach((x) => { if (!w.vers.has(x)) s -= 45; });   // a version this track isn't
+  w.vers.forEach((x) => { if (!vv.has(x)) s -= 30; });   // or not the version it is
+  if (/\blyrics?\b/.test(vt)) s -= 8;                     // fan lyric videos last among equals
+  return s + Math.log10((+v.views || 0) + 1) * 2;
+}
+
+function hoqYtSearch(q) {
+  return new Promise((resolve) => {
+    if (!hoqHasHost()) return resolve(null);
+    const rid = 'y' + (++_ytRid);
+    _ytWait.set(rid, resolve);
+    setTimeout(() => { if (_ytWait.delete(rid)) resolve(null); }, 20000);
+    scPost('yt:search:' + JSON.stringify({ rid, q }));
+  });
+}
+window.__hoqYtRes = function (rid, list) {
+  const done = _ytWait.get(rid);
+  if (done) { _ytWait.delete(rid); done(Array.isArray(list) ? list : null); }
+};
+
+function hoqYtStart(path, want) {
+  // listen along / a jam opened it partway through: start there
+  const h = window.__hoqWantPos;
+  const startAt = h && hoqSamePath(h.path, path) && Date.now() - h.t < 30000 ? h.sec + (Date.now() - h.t) / 1000 : 0;
+  const y = _yt = { path, want, cands: null, idx: -1, vid: '', wid: 0, frame: null, heard: false, ready: false, state: -1,
+    pos: startAt, at: Date.now(), dur: want.sec || 0, wantPlay: true, t0: Date.now(), startAt, loadAt: 0, vol: -1,
+    endedFor: '', advancing: false, real: null };
+  hoqScPause();
+  hoqYtCard();
+  hoqYtPaint();
+  const ask = (tries) => hoqYtSearch(want.q).then((list) => {
+    if (_yt !== y) return;
+    if ((!list || !list.length) && tries < 1) return ask(tries + 1);   // YouTube's answer varies request to request: once more
+    y.cands = (list || []).map((v) => ({ v, s: hoqYtScore(v, want) })).filter((r) => r.s >= 60)
+      .sort((a, b) => b.s - a.s).slice(0, 6).map((r) => r.v);
+    if (!y.cands.length) return hoqYtGiveUp(list ? 'Couldn’t find the full song.' : 'Couldn’t look for the full song right now.');
+    hoqYtLoad(0);
+  });
+  ask(0);
+}
+
+// Put match i in the card: YouTube's own embed, controlled the way its IFrame API
+// script does it (postMessage: "listening", then commands; it answers with its state).
+function hoqYtLoad(i) {
+  const y = _yt;
+  if (!y || !y.cands) return;
+  if (i >= y.cands.length) return hoqYtGiveUp(y.cands.length > 1 ? 'None of the versions found would play here.' : 'The version found won’t play here.');
+  const v = y.cands[i];
+  Object.assign(y, { idx: i, vid: v.id, wid: y.wid + 1, heard: false, ready: false, state: -1, pos: y.startAt, at: Date.now(),
+    dur: v.sec || y.want.sec || 0, loadAt: Date.now(), vol: -1, endedFor: '', real: null, seekOnReady: null });
+  const box = hoqYtCard(), holder = box.querySelector('.hoq-yt-vid');
+  if (y.frame) y.frame.remove();
+  const f = document.createElement('iframe');
+  f.title = 'Video player';
+  f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+  f.setAttribute('allowfullscreen', '');
+  f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');   // YouTube refuses an embed that sends no referrer
+  f.src = HOQ_YT_HOST + '/embed/' + encodeURIComponent(v.id) + '?enablejsapi=1&playsinline=1&rel=0&iv_load_policy=3&controls=0&disablekb=1&fs=0' +
+    '&autoplay=' + (y.wantPlay ? 1 : 0) + (y.startAt >= 1 ? '&start=' + Math.floor(y.startAt) : '') +
+    '&origin=' + encodeURIComponent(location.origin) + '&widgetid=' + y.wid;
+  const wid = y.wid;
+  f.addEventListener('load', () => {
+    let n = 0;
+    const iv = setInterval(() => {
+      if (_yt !== y || y.wid !== wid || y.heard || ++n > 40) { clearInterval(iv); return; }
+      hoqYtListen(y);
+    }, 250);
+  });
+  holder.appendChild(f);
+  y.frame = f;
+  hoqYtRenderHead();
+}
+// "Someone is listening": after that the player sends its events and state.
+function hoqYtListen(y) {
+  try { y.frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: y.wid, channel: 'widget' }), HOQ_YT_HOST); } catch (e) {}
+}
+
+function hoqYtCmd(func, args) {
+  const y = _yt;
+  if (!y || !y.frame || !y.frame.contentWindow) return;
+  try { y.frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args: args || [], id: y.wid, channel: 'widget' }), HOQ_YT_HOST); } catch (e) {}
+}
+
+function hoqYtOnMsg(e) {
+  const y = _yt;
+  if (!y || !y.frame || e.source !== y.frame.contentWindow || e.origin !== HOQ_YT_HOST) return;
+  let d = e.data;
+  if (typeof d === 'string') { try { d = JSON.parse(d); } catch (x) { return; } }
+  if (!d || typeof d !== 'object') return;
+  // The player says when it can hear us; a "listening" sent before that is lost.
+  if (d.event === 'readyToListen') { hoqYtListen(y); return; }
+  if (!y.heard) { y.heard = true; hoqYtCmd('addEventListener', ['onStateChange']); hoqYtCmd('addEventListener', ['onError']); }
+  if (d.event === 'onReady') {
+    y.ready = true; y.vol = -1; hoqYtVolume();
+    // a seek that came while it loaded (its start= was already set)
+    if (y.seekOnReady != null) { hoqYtCmd('seekTo', [y.seekOnReady, true]); y.pos = y.seekOnReady; y.at = Date.now(); y.seekOnReady = null; }
+    hoqYtCmd(y.wantPlay ? 'playVideo' : 'pauseVideo');
+  } else if (d.event === 'infoDelivery' || d.event === 'initialDelivery') {
+    const i = d.info;
+    if (!i || typeof i !== 'object') return;
+    if (typeof i.currentTime === 'number') { y.pos = i.currentTime; y.at = Date.now(); }
+    if (typeof i.duration === 'number' && i.duration > 0) y.dur = i.duration;
+    if (i.videoData && typeof i.videoData === 'object' && i.videoData.title) y.real = { title: String(i.videoData.title), author: String(i.videoData.author || '') };
+    if (typeof i.playerState === 'number') hoqYtState(y, i.playerState);
+  } else if (d.event === 'onStateChange') {
+    if (typeof d.info === 'number') hoqYtState(y, d.info);
+  } else if (d.event === 'onError') {
+    // 100: gone; 101/150: its owner keeps it off other apps; 2/5/152/153: it won't load here. The next match.
+    hoqYtLoad(y.idx + 1);
+  }
+}
+
+// YouTube's states: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued.
+function hoqYtState(y, st) {
+  if (st === y.state) return;
+  const was = y.state;
+  y.state = st;
+  if (st === 1 || st === 3) {
+    y.ready = true;
+    if (st === 1) window.__hoqEverPlayed = true;   // hoqWhenIdle: music has played, so wait for a real pause
+    // it autoplayed after you'd paused from the bar while it loaded; later, you pressed play on the video
+    if (!y.wantPlay) { if (Date.now() - y.loadAt < 15000) hoqYtCmd('pauseVideo'); else y.wantPlay = true; }
+  } else if (st === 2 && (was === 1 || was === 3)) y.wantPlay = false;   // paused on the video itself
+  else if (st === 0) hoqYtEnded(y);
+  hoqYtPaint();
+  hoqYtRenderHead();
+}
+
+function hoqYtEnded(y) {
+  if (y.endedFor === y.vid) return;
+  y.endedFor = y.vid;
+  const rp = document.querySelector('.playControls .repeatControl');
+  if (rp && rp.classList.contains('m-one')) { y.endedFor = ''; y.wantPlay = true; hoqYtCmd('seekTo', [0, true]); hoqYtCmd('playVideo'); return; }
+  y.wantPlay = false;
+  if (hoqYtJamDrives()) return;   // the jam's queue says what plays next
+  if (y.manual) {
+    // SoundCloud's queue never had this song: go on down the list it was pressed in
+    // (another Go+ song comes back here; anything else SoundCloud plays itself)
+    const nb = hoqGoNextBtn(y.btn);
+    if (nb) { y.advancing = true; nb.click(); }
+    return;
+  }
+  const nx = document.querySelector('.playControls__next, .skipControl__next');
+  if (nx) { y.advancing = true; nx.click(); }
+}
+// The play button after this one in the same page (the next row of the list).
+function hoqGoNextBtn(btn) {
+  if (!btn || !btn.isConnected) return null;
+  const me = btn.matches('.sc-button-play') ? btn : btn.querySelector('.sc-button-play');
+  if (!me) return null;
+  const all = [...btn.ownerDocument.querySelectorAll('.sc-button-play')].filter((b) => !b.closest('.playControls, #hoq-yt'));
+  const i = all.indexOf(me);
+  return i >= 0 ? all[i + 1] || null : null;
+}
+function hoqYtJamDrives() {
+  try { const s = hoqJamSess(); return !!(s && _jam && (s.host ? (_jam.queue || []).length > 0 : _jamGuest.following)); } catch (e) { return false; }
+}
+
+// A Go+ song SoundCloud refused outright (pressed, never in its player bar, which may
+// still show the song before): what's playing is ours to say, for Discord, Last.fm,
+// stats, jams, the compact player and the player bar. null otherwise.
+function hoqYtSolo() {
+  const y = _yt;
+  if (!y || !y.manual || !y.want) return null;
+  const w = y.want;
+  return { url: 'https://soundcloud.com' + y.path, title: w.title || '', artist: w.artist || '', cover: w.art || '', userUrl: w.userUrl || '' };
+}
+
+function hoqYtPos() {
+  const y = _yt;
+  if (!y) return 0;
+  const p = y.pos + (y.state === 1 ? (Date.now() - y.at) / 1000 : 0);
+  return y.dur > 0 ? Math.min(y.dur, p) : p;
+}
+// playerProgress() for a Go+ song on YouTube (null otherwise).
+function hoqYtProgress() {
+  const y = _yt;
+  if (!y) return null;
+  // still finding or loading it counts as playing, so a jam or Discord doesn't flicker to paused
+  const starting = !y.ready && Date.now() - y.t0 < 12000;
+  return { pos: Math.floor(hoqYtPos()), dur: Math.round(y.dur || 0), paused: !y.wantPlay || !(y.state === 1 || y.state === 3 || starting) };
+}
+// Whatever is actually playing, from whichever player has it.
+function hoqMediaNow() {
+  if (_yt) { const p = hoqYtProgress(); return { playing: !p.paused && _yt.ready, pos: hoqYtPos(), dur: _yt.dur || 0 }; }
+  const el = window.__hoqMediaEl;
+  return el ? { playing: !el.paused, pos: el.currentTime || 0, dur: isFinite(el.duration) ? el.duration : 0 } : null;
+}
+
+function hoqYtPlay() {
+  const y = _yt;
+  if (!y) return;
+  y.wantPlay = true;
+  if (y.state === 0) { y.endedFor = ''; hoqYtCmd('seekTo', [0, true]); }
+  hoqYtCmd('playVideo');
+  hoqYtPaint();
+}
+function hoqYtPause() { const y = _yt; if (!y) return; y.wantPlay = false; hoqYtCmd('pauseVideo'); hoqYtPaint(); }
+function hoqYtToggle() { const p = hoqYtProgress(); if (!p) return; if (p.paused) hoqYtPlay(); else hoqYtPause(); }
+// window.__hoqMedia (media keys, compact player): true when the YouTube player took it.
+function hoqYtMedia(action) {
+  if (!_yt) return false;
+  if (action === 'next' || action === 'prev') return false;   // SoundCloud's queue
+  if (action === 'stop' || action === 'pause') hoqYtPause();
+  else if (action === 'play') hoqYtPlay();
+  else hoqYtToggle();
+  return true;
+}
+// hoqSeek(): true when the YouTube player took it.
+function hoqYtSeek(sec) {
+  const y = _yt;
+  if (!y) return false;
+  if (!(sec >= 0)) return true;
+  if (y.ready) { hoqYtCmd('seekTo', [sec, true]); y.pos = sec; y.at = Date.now(); hoqYtPaint(); }
+  else {
+    // still finding it: it starts there. Already loading: there once it's ready.
+    y.startAt = sec; y.pos = sec;
+    if (y.frame) y.seekOnReady = sec;
+  }
+  return true;
+}
+// The app's own volume (the slider, the compact player) on the YouTube player too.
+function hoqYtVolume() {
+  const y = _yt;
+  if (!y || !y.ready) return;
+  let v = 1;
+  try { if (window.__scGetVolume) v = window.__scGetVolume(); } catch (e) {}
+  const want = Math.round(Math.max(0, Math.min(1, +v || 0)) * 100);
+  if (want === y.vol) return;
+  y.vol = want;
+  hoqYtCmd('setVolume', [want]);
+  hoqYtCmd(want === 0 ? 'mute' : 'unMute');
+}
+
+// Our presses on SoundCloud's own play button (pause its preview, play the next song).
+function hoqScPress() {
+  const b = document.querySelector('.playControls__play');
+  if (!b) return;
+  _scPressAt = Date.now();
+  _ytBypass = true;
+  try { b.click(); } finally { _ytBypass = false; }
+}
+// once per 1.5 s: the button's state lags a press, and a second press would undo it
+function hoqScPause() { if (Date.now() - _scPressAt > 1500 && !hoqScProgress().paused) hoqScPress(); }
+function hoqScPlay() { if (Date.now() - _scPressAt > 1500 && hoqScProgress().paused) hoqScPress(); }
+
+function hoqYtStop(keepCard) {
+  const y = _yt;
+  _yt = null;
+  if (y && y.frame) { try { y.frame.remove(); } catch (e) {} }
+  const box = document.getElementById('hoq-yt');
+  if (box && !keepCard) box.remove();
+  hoqYtPaint();
+}
+// Nothing on YouTube would do: say so for a moment, and SoundCloud's preview plays.
+function hoqYtGiveUp(msg) {
+  const y = _yt;
+  if (!y) return;
+  _goSkip = y.path;
+  const resume = y.wantPlay, path = y.path;
+  hoqYtStop(true);
+  const box = document.getElementById('hoq-yt');
+  if (box) {
+    box.classList.add('gone');
+    box.querySelector('.hoq-yt-sub').textContent = 'The 30-second preview plays instead';
+    box.querySelector('.hoq-yt-vid').innerHTML = '<div class="hoq-yt-msg">' + hoqEsc(msg) + '</div>';
+    box.querySelectorAll('.hoq-yt-next').forEach((b) => { b.hidden = true; });
+    setTimeout(() => { if (!_yt && box.isConnected) box.remove(); }, 7000);
+  }
+  // (still this song: you may have moved on, or paused something else, meanwhile)
+  if (resume) setTimeout(() => { if (!_yt && hoqSamePath(hoqGoPath(), path)) hoqScPlay(); }, 1600);
+}
+
+// The card: our own little player around the video. The song's cover, title and
+// artist (SoundCloud's), our play / seek controls in the accent, "wrong song" and
+// close. The video itself stays fully on screen, uncovered (the embed's terms want
+// that), with its own controls hidden in favour of ours. Dragged by its top row;
+// where you leave it is kept.
+const HOQ_YT_IC = {
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.7v12.6c0 .8.9 1.3 1.6.9l9.9-6.3c.6-.4.6-1.4 0-1.8L9.6 4.8C8.9 4.4 8 4.9 8 5.7z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
+  swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M21 7H9a4 4 0 0 0-4 4"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12a4 4 0 0 0 4-4"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+};
+function hoqYtCard() {
+  let box = document.getElementById('hoq-yt');
+  if (box && box.classList.contains('gone')) { box.remove(); box = null; }
+  if (!box) {
+    hoqYtCss();
+    box = document.createElement('div');
+    box.id = 'hoq-yt';
+    box.innerHTML =
+      '<div class="hoq-yt-vid"><div class="hoq-yt-msg">Finding the full song…</div></div>' +
+      '<div class="hoq-yt-top" title="Drag to move">' +
+        '<i class="hoq-yt-art"></i>' +
+        '<span class="hoq-yt-t"><b class="hoq-yt-title">Full song</b><span class="hoq-yt-sub">Finding it…</span></span>' +
+        '<button type="button" class="hoq-yt-btn hoq-yt-next" title="Not this song? Try the next one" hidden>' + HOQ_YT_IC.swap + '</button>' +
+        '<button type="button" class="hoq-yt-btn hoq-yt-x" title="Close (back to the 30-second preview)">' + HOQ_YT_IC.x + '</button>' +
+      '</div>' +
+      '<div class="hoq-yt-ctl">' +
+        '<button type="button" class="hoq-yt-pp" title="Play / pause"><span class="i-play">' + HOQ_YT_IC.play + '</span><span class="i-pause">' + HOQ_YT_IC.pause + '</span></button>' +
+        '<span class="hoq-yt-t0"></span>' +
+        '<div class="hoq-yt-seek"><div class="hoq-yt-fill"></div><div class="hoq-yt-knob"></div></div>' +
+        '<span class="hoq-yt-t1"></span>' +
+      '</div>';
+    document.body.appendChild(box);
+    box.querySelector('.hoq-yt-next').addEventListener('click', () => { if (_yt && _yt.cands) { _yt.startAt = 0; hoqYtLoad(_yt.idx + 1); } });
+    box.querySelector('.hoq-yt-x').addEventListener('click', () => { if (_yt) { _goSkip = _yt.path; hoqYtStop(); } else box.remove(); });
+    box.querySelector('.hoq-yt-pp').addEventListener('click', () => hoqYtToggle());
+    // seek: press or drag along the bar
+    const seek = box.querySelector('.hoq-yt-seek');
+    const seekAt = (x) => { const r = seek.getBoundingClientRect(); if (_yt && _yt.dur > 0 && r.width > 0) hoqYtSeek(Math.max(0, Math.min(1, (x - r.left) / r.width)) * _yt.dur); };
+    seek.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      seekAt(e.clientX);
+      box.classList.add('drag');
+      const mv = (ev) => seekAt(ev.clientX);
+      const up = () => { window.removeEventListener('mousemove', mv, true); window.removeEventListener('mouseup', up, true); box.classList.remove('drag'); };
+      window.addEventListener('mousemove', mv, true);
+      window.addEventListener('mouseup', up, true);
+    });
+    hoqYtDrag(box);
+  }
+  hoqYtPlace(box);
+  return box;
+}
+function hoqYtPlace(box) {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem('hoqYtPos') || 'null'); } catch (e) {}
+  if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return;   // bottom left, above the player bar
+  const w = box.offsetWidth || 372, h = box.offsetHeight || 300;
+  box.style.left = Math.round(Math.max(0, Math.min(innerWidth - w, p.x))) + 'px';
+  box.style.top = Math.round(Math.max(40, Math.min(innerHeight - h - 4, p.y))) + 'px';
+  box.style.bottom = 'auto';
+}
+function hoqYtDrag(box) {
+  box.querySelector('.hoq-yt-top').addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    const r = box.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    box.classList.add('drag');   // the video can't swallow the mouse halfway
+    const move = (ev) => {
+      box.style.left = Math.round(Math.max(0, Math.min(innerWidth - r.width, ev.clientX - dx))) + 'px';
+      box.style.top = Math.round(Math.max(40, Math.min(innerHeight - r.height - 4, ev.clientY - dy))) + 'px';
+      box.style.bottom = 'auto';
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mouseup', up, true);
+      box.classList.remove('drag');
+      try { localStorage.setItem('hoqYtPos', JSON.stringify({ x: parseFloat(box.style.left) || 0, y: parseFloat(box.style.top) || 0 })); } catch (e2) {}
+    };
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mouseup', up, true);
+  });
+}
+function hoqYtRenderHead() {
+  const y = _yt, box = document.getElementById('hoq-yt');
+  if (!y || !box) return;
+  const w = y.want || {};
+  const title = w.title || 'Full song', artist = w.artist || '';
+  const tEl = box.querySelector('.hoq-yt-title');
+  if (tEl.textContent !== title) { tEl.textContent = title; tEl.title = title; }
+  let sub = artist;
+  const v = y.cands && y.cands[y.idx];
+  if (!v) sub = 'Finding the full song…';
+  // the browser held back autoplay (no click in the app yet this session)
+  else if (y.ready && y.wantPlay && (y.state === -1 || y.state === 5) && Date.now() - y.loadAt > 8000) sub = 'Press play to start';
+  const sEl = box.querySelector('.hoq-yt-sub');
+  if (sEl.textContent !== sub) sEl.textContent = sub;
+  const art = box.querySelector('.hoq-yt-art'), au = w.art ? 'url("' + w.art + '")' : '';
+  if (art.style.backgroundImage !== au) art.style.backgroundImage = au;
+  const nx = box.querySelector('.hoq-yt-next'), more = !!(y.cands && y.idx + 1 < y.cands.length);
+  if (nx.hidden === more) nx.hidden = !more;
+  const msg = box.querySelector('.hoq-yt-msg');
+  if (msg && msg.hidden !== !!y.frame) msg.hidden = !!y.frame;
+}
+
+const hoqYtFmt = (s) => {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = String(s % 60).padStart(2, '0');
+  return h ? h + ':' + String(m).padStart(2, '0') + ':' + x : m + ':' + x;
+};
+// SoundCloud's bar shows the YouTube player's time and play state. The numbers go
+// through a stylesheet rule (CSSOM): no DOM writes, so no page observer wakes 4×/s.
+function hoqYtVars() {
+  const sh = _ytVarRule && _ytVarRule.parentStyleSheet;
+  if (sh && sh.ownerNode && sh.ownerNode.isConnected) return _ytVarRule.style;
+  hoqYtCss();
+  const st = document.getElementById('hoq-yt-css');
+  if (!st || !st.sheet) return null;
+  _ytVarRule = st.sheet.cssRules[st.sheet.insertRule(':root {}', st.sheet.cssRules.length)];
+  return _ytVarRule.style;
+}
+function hoqYtPaint() {
+  const de = document.documentElement, y = _yt, p = y ? hoqYtProgress() : null;
+  const solo = hoqYtSolo();
+  de.classList.toggle('hoq-yt-on', !!y);
+  de.classList.toggle('hoq-yt-playing', !!(p && !p.paused));
+  de.classList.toggle('hoq-yt-solo', !!solo);
+  const vs = (y || _ytVarRule) ? hoqYtVars() : null;
+  if (!vs) return;
+  if (!y) { ['--hoq-yt-p', '--hoq-yt-t0', '--hoq-yt-t1', '--hoq-yt-cover', '--hoq-yt-label'].forEach((k) => vs.removeProperty(k)); return; }
+  const pos = hoqYtPos(), dur = y.dur || 0;
+  vs.setProperty('--hoq-yt-p', dur > 0 ? Math.min(1, pos / dur).toFixed(4) : '0');
+  vs.setProperty('--hoq-yt-t0', JSON.stringify(hoqYtFmt(pos)));
+  vs.setProperty('--hoq-yt-t1', JSON.stringify(hoqYtFmt(dur)));
+  // a song SoundCloud refused: its bar may still show the song before, so it shows this one
+  if (solo) {
+    const label = JSON.stringify(solo.title) + ' "\\A " ' + JSON.stringify(solo.artist);
+    if (vs.getPropertyValue('--hoq-yt-label') !== label) vs.setProperty('--hoq-yt-label', label);
+    const cov = solo.cover ? 'url(' + JSON.stringify(solo.cover) + ')' : 'none';
+    if (vs.getPropertyValue('--hoq-yt-cover') !== cov) vs.setProperty('--hoq-yt-cover', cov);
+  }
+}
+
+function hoqYtCss() {
+  if (document.getElementById('hoq-yt-css')) return;
+  const st = document.createElement('style');
+  st.id = 'hoq-yt-css';
+  st.textContent = `
+    #hoq-yt { position: fixed; left: 16px; bottom: 66px; z-index: 99990; width: 372px; box-sizing: border-box; padding: 8px;
+      border-radius: 16px; overflow: hidden; color: #ececf1;
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 120px), rgba(14,14,19,0.84);
+      border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 16px 44px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06);
+      backdrop-filter: blur(30px) saturate(1.7); -webkit-backdrop-filter: blur(30px) saturate(1.7);
+      font: 500 12px Inter,-apple-system,"Segoe UI",Arial,sans-serif; }
+    #hoq-yt .hoq-yt-vid { position: relative; width: 356px; height: 200px; border-radius: 10px; overflow: hidden; background: #000; }
+    #hoq-yt .hoq-yt-vid iframe { display: block; width: 356px; height: 200px; border: 0; }
+    #hoq-yt.drag iframe { pointer-events: none; }
+    #hoq-yt .hoq-yt-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 28px;
+      text-align: center; color: #a8a8b2; font-size: 12.5px; line-height: 1.4;
+      background: radial-gradient(120% 90% at 50% 40%, color-mix(in srgb, var(--sc-accent, #ff5500) 22%, #0d0d10), #0b0b0e); }
+    #hoq-yt .hoq-yt-msg[hidden] { display: none; }
+    #hoq-yt .hoq-yt-top { display: flex; align-items: center; gap: 10px; padding: 10px 2px 2px 2px; cursor: move; user-select: none; }
+    #hoq-yt .hoq-yt-art { flex: none; width: 40px; height: 40px; border-radius: 8px; background: #22222a center / cover no-repeat;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+    #hoq-yt .hoq-yt-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1.25; }
+    #hoq-yt .hoq-yt-title { color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #hoq-yt .hoq-yt-sub { color: #9a9aa6; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #hoq-yt .hoq-yt-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0;
+      border: 0; border-radius: 9px; background: transparent; color: #a6a6b0; cursor: pointer; transition: background .12s ease, color .12s ease; }
+    #hoq-yt .hoq-yt-btn:hover { background: rgba(255,255,255,0.09); color: #fff; }
+    #hoq-yt .hoq-yt-btn svg { width: 15px; height: 15px; }
+    #hoq-yt .hoq-yt-btn[hidden] { display: none; }
+    #hoq-yt .hoq-yt-ctl { display: flex; align-items: center; gap: 10px; padding: 8px 4px 2px 2px; }
+    #hoq-yt .hoq-yt-pp { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0;
+      border: 0; border-radius: 50%; cursor: pointer; color: #fff;
+      background: var(--sc-accent-bg, var(--sc-accent, #ff5500)); box-shadow: 0 3px 10px rgba(0,0,0,0.4); transition: filter .12s ease, transform .1s ease; }
+    #hoq-yt .hoq-yt-pp:hover { filter: brightness(1.1); }
+    #hoq-yt .hoq-yt-pp:active { transform: scale(.94); }
+    #hoq-yt .hoq-yt-pp svg { width: 15px; height: 15px; display: block; }
+    #hoq-yt .hoq-yt-pp .i-pause { display: none; }
+    html.hoq-yt-playing #hoq-yt .hoq-yt-pp .i-play { display: none; }
+    html.hoq-yt-playing #hoq-yt .hoq-yt-pp .i-pause { display: block; }
+    #hoq-yt .hoq-yt-t0, #hoq-yt .hoq-yt-t1 { flex: none; min-width: 30px; font-size: 11px; color: #8e8e99; font-variant-numeric: tabular-nums; }
+    #hoq-yt .hoq-yt-t1 { text-align: right; }
+    #hoq-yt .hoq-yt-t0::after { content: var(--hoq-yt-t0, "0:00"); color: #c9c9d2; }
+    #hoq-yt .hoq-yt-t1::after { content: var(--hoq-yt-t1, "0:00"); }
+    #hoq-yt .hoq-yt-seek { position: relative; flex: 1 1 auto; height: 16px; cursor: pointer; }
+    #hoq-yt .hoq-yt-seek::before { content: ''; position: absolute; left: 0; right: 0; top: 6px; height: 4px; border-radius: 99px; background: rgba(255,255,255,0.14); }
+    #hoq-yt .hoq-yt-fill { position: absolute; left: 0; top: 6px; height: 4px; border-radius: 99px; width: calc(var(--hoq-yt-p, 0) * 100%);
+      background: var(--sc-accent-bg, var(--sc-accent, #ff5500)); }
+    #hoq-yt .hoq-yt-knob { position: absolute; top: 3px; left: calc(var(--hoq-yt-p, 0) * 100%); width: 10px; height: 10px; margin-left: -5px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); opacity: 0; transition: opacity .12s ease; }
+    #hoq-yt .hoq-yt-seek:hover .hoq-yt-knob, #hoq-yt.drag .hoq-yt-knob { opacity: 1; }
+    #hoq-yt.gone .hoq-yt-vid { height: auto; background: none; }
+    #hoq-yt.gone .hoq-yt-msg { position: static; padding: 14px 12px; background: none; justify-content: flex-start; text-align: left; }
+    #hoq-yt.gone .hoq-yt-ctl { display: none; }
+    html.hoq-yt-on .playControls .playbackTimeline__progressBar { width: calc(var(--hoq-yt-p, 0) * 100%) !important; transition: none !important; }
+    html.hoq-yt-on .playControls .playbackTimeline__progressHandle { left: calc(var(--hoq-yt-p, 0) * 100%) !important; transition: none !important; }
+    html.hoq-yt-on .playControls .playbackTimeline__timePassed > *, html.hoq-yt-on .playControls .playbackTimeline__duration > * { display: none !important; }
+    html.hoq-yt-on .playControls .playbackTimeline__timePassed::after { content: var(--hoq-yt-t0, ""); color: #c9c9d2; }
+    html.hoq-yt-on .playControls .playbackTimeline__duration::after { content: var(--hoq-yt-t1, ""); }
+    html.hoq-yt-playing .playControls .playControls__play { background-image: none !important; position: relative !important; }
+    html.hoq-yt-playing .playControls .playControls__play svg { visibility: hidden !important; }
+    html.hoq-yt-playing .playControls .playControls__play::after { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 12px;
+      transform: translate(-50%, -50%); box-sizing: border-box; border-left: 4px solid #fff; border-right: 4px solid #fff; pointer-events: none; }
+    /* a song SoundCloud refused isn't in its bar: the bar's song slot shows it instead
+       of whatever was there before (that one's links can't be clicked meanwhile) */
+    html.hoq-yt-solo .playControls .playbackSoundBadge { position: relative !important; }
+    html.hoq-yt-solo .playControls .playbackSoundBadge > * { visibility: hidden !important; }
+    html.hoq-yt-solo .playControls .playbackSoundBadge::before { content: ''; position: absolute; left: 0; top: 50%; width: 30px; height: 30px;
+      transform: translateY(-50%); border-radius: 4px; background: #22222a var(--hoq-yt-cover, none) center / cover no-repeat; visibility: visible; }
+    html.hoq-yt-solo .playControls .playbackSoundBadge::after { content: var(--hoq-yt-label, ""); position: absolute; left: 40px; right: 4px; top: 50%;
+      transform: translateY(-50%); white-space: pre; overflow: hidden; text-overflow: ellipsis; visibility: visible;
+      font: 600 12px/1.4 Inter,-apple-system,"Segoe UI",Arial,sans-serif; color: #ececf1; }
+  `;
+  (document.head || document.documentElement).appendChild(st);
+}
+
+// Each tick while YouTube has the song: a player that never answered gets the next
+// match, the app's volume follows, the card's text stays current.
+function hoqYtKeep() {
+  const y = _yt;
+  if (!y) return;
+  if (y.frame && !y.heard && Date.now() - y.loadAt > 15000) hoqYtLoad(y.idx + 1);
+  hoqYtVolume();
+  hoqYtRenderHead();
+}
+
+// Every half second: a Go+ preview just started → YouTube; the song changed → back to SoundCloud.
+function hoqGoTick() {
+  if (!hoqHasHost() || window.top !== window) return;
+  const path = hoqGoPath();
+  // No song in the bar: SoundCloud redrawing it, most likely. Only a bar that stays
+  // empty ends the YouTube song; a blink mustn't stop it or forget a closed card.
+  if (!path) {
+    if (!_goNoPathSince) _goNoPathSince = Date.now();
+    if (_yt && !_yt.manual && Date.now() - _goNoPathSince > 5000) hoqYtStop();
+    // a song SoundCloud refused never reaches its bar: an empty bar is normal then,
+    // and the player still needs looking after
+    if (_yt && _yt.manual) hoqYtKeep();
+    return;
+  }
+  _goNoPathSince = 0;
+  const y = _yt;
+  if (y && !hoqSamePath(path, y.path) && !(y.manual && hoqSamePath(path, y.barAt))) {
+    // you moved on (Next, another song): that one plays, even after a paused preview
+    const go = y.wantPlay || y.advancing;
+    hoqYtStop();
+    if (go) setTimeout(() => { if (!_yt && hoqSamePath(hoqGoPath(), path)) hoqScPlay(); }, 900);
+  }
+  if (_goSkip && !hoqSamePath(path, _goSkip)) _goSkip = '';
+  const scOn = !hoqScProgress().paused;
+  if (_yt) {
+    // SoundCloud's preview started up again (a play button we don't catch): the video plays instead
+    if (scOn) { hoqScPause(); hoqYtPlay(); }
+    hoqYtKeep();
+    return;
+  }
+  if (!hoqGoOn() || (_goSkip && hoqSamePath(path, _goSkip))) return;
+  const info = hoqGoLookup(path);   // asked once a song is in the bar, so it's known by the time it plays
+  if (!scOn || !info || !info.snip) return;
+  // SoundCloud is playing it in full after all (a Go+ account whose sign-in the page
+  // couldn't read): leave it. A preview's stream is 30 s long.
+  const el = window.__hoqMediaEl;
+  if (el && !el.paused && isFinite(el.duration) && el.duration > 45) return;
+  hoqYtStart(path, info.want);
+}
+
+// ---- A play press that SoundCloud answers with its Go+ sales page ----------------
+// A track only Go+ can play doesn't even get a 30-second preview: pressing play
+// opens SoundCloud's Go+ checkout instead (the host stops that page loading and
+// calls __hoqGoAd). So nothing ever reaches the player bar for hoqGoTick to catch.
+// Remember which track's play button was just pressed (in the page and in the
+// new-app frames: Home, the new track page) and play that one in full here.
+var _goPress = null;   // { path, t }
+const HOQ_NOT_TRACK = /^\/(discover|search|you|stream|feed|charts|tags|pages|upload|settings|messages|notifications|people|terms-of-use|imprint)(\/|$)/;
+function hoqPressedPath(btn, doc) {
+  const row = btn.closest('.soundList__item, .soundBadge, .trackItem, .compactTrackListItem, .queueItemView, [role="listitem"], .MuiCard-root, .sound, li, article');
+  for (const a of (row ? row.querySelectorAll('a[href]') : [])) {
+    const p = hoqTrackPath(a.href || '');
+    if (p && p.split('/').filter(Boolean).length === 2 && !HOQ_NOT_TRACK.test(p)) return p;
+  }
+  // the big play button on a track's own page
+  if (btn.closest('.fullHero, .fullListenHero, .listenHero, section[aria-label="Track header"]')) {
+    const p = (doc.defaultView || window).location.pathname.replace(/^\/n\//, '/');
+    if (p.split('/').filter(Boolean).length === 2 && !HOQ_NOT_TRACK.test(p)) return p;
+  }
+  return '';
+}
+function attachGoPress(doc) {
+  if (!doc || doc.__hoqGoPress) return;
+  doc.__hoqGoPress = true;
+  // on the window, capturing: SoundCloud stops a press on a Go+ play button there,
+  // before it ever reaches the document
+  (doc.defaultView || window).addEventListener('click', (e) => {
+    if (_ytBypass) return;
+    const b = e.target && e.target.closest && e.target.closest('.sc-button-play, .playButton, .soundTitle__playButton, .entity-card__play-button, button[aria-label="Play"], [role="button"][aria-label="Play"]');
+    if (!b) return;
+    const path = hoqPressedPath(b, doc);
+    if (!path) return;
+    _goPress = { path, t: Date.now(), btn: b };
+    // Signed out (and on some pages signed in) SoundCloud greys the button out
+    // ("Unavailable") and a press does nothing at all, not even the sales page.
+    // That press is ours: play it right away.
+    if (hoqGoOn() && hoqHasHost() && (b.matches('.sc-button-disabled') || b.querySelector('.sc-button-disabled'))) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _goPress = null;
+      hoqGoManual(path, b, true);
+    }
+  }, true);
+}
+window.__hoqGoAd = function (url) {
+  const p = _goPress;
+  _goPress = null;
+  if (!p || Date.now() - p.t > 6000) return;
+  hoqGoManual(p.path, p.btn, false);
+};
+// Play a track SoundCloud refused outright, in full from YouTube. `press`: straight
+// from its play button, so pressing it again while it plays pauses / plays it.
+var _goManualFor = '';
+function hoqGoManual(path, btn, press) {
+  if (!hoqGoOn() || !hoqHasHost()) return;
+  if (_yt && hoqSamePath(_yt.path, path)) { if (press) hoqYtToggle(); return; }
+  if (hoqSamePath(_goManualFor, path)) return;   // already being looked up
+  _goManualFor = path;
+  _goSkip = '';
+  let n = 0;
+  const go = () => {
+    const info = hoqGoLookup(path);
+    if (info === undefined && ++n < 40) { setTimeout(go, 250); return; }
+    _goManualFor = '';
+    if (!info || !info.want) {
+      try { window.__hoqUpdate && window.__hoqUpdate('notice', 'Couldn’t play that one', 'SoundCloud didn’t answer about it. Try again in a moment.'); } catch (e) {}
+      return;
+    }
+    if (_yt) hoqYtStop();
+    hoqYtStart(path, info.want);
+    // The player bar never got this track (SoundCloud refused it): it may still show
+    // the song before. That isn't "you moved on", so the tick leaves this one be.
+    if (_yt) { _yt.manual = true; _yt.barAt = hoqGoPath(); _yt.btn = btn || null; hoqYtPaint(); }
+  };
+  go();
+}
+if (window.top === window) attachGoPress(document);
+
+// While YouTube has the song: SoundCloud's play button (and the song's own big one on
+// its page), its seek bar and Space work the YouTube player. Capture on window, ahead
+// of every listener SoundCloud has; our own presses (_ytBypass) go through.
+if (window.top === window) {
+  window.addEventListener('message', hoqYtOnMsg);
+  window.addEventListener('click', (e) => {
+    if (!_yt || _ytBypass) return;
+    const t = e.target && e.target.closest ? e.target : null;
+    if (!t) return;
+    let hit = !!t.closest('.playControls__play');
+    if (!hit && t.closest('.fullHero .sc-button-play, .fullListenHero .sc-button-play, .listenHero .sc-button-play')) hit = hoqSamePath(location.pathname, _yt.path);
+    if (hit) { e.preventDefault(); e.stopImmediatePropagation(); hoqYtToggle(); return; }
+    if (t.closest('.playControls .playbackTimeline__progressWrapper')) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+  window.addEventListener('mousedown', (e) => {
+    if (!_yt || _ytBypass || e.button !== 0) return;
+    const w = e.target && e.target.closest && e.target.closest('.playControls .playbackTimeline__progressWrapper');
+    if (!w) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const r = w.getBoundingClientRect();
+    if (r.width > 0 && _yt.dur > 0) hoqYtSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * _yt.dur);
+  }, true);
+  window.addEventListener('keydown', (e) => {
+    if (!_yt || e.repeat || e.ctrlKey || e.metaKey || e.altKey || (e.code !== 'Space' && e.key !== ' ')) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName || ''))) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    hoqYtToggle();
+  }, true);
+  window.addEventListener('resize', () => { const b = document.getElementById('hoq-yt'); if (b) hoqYtPlace(b); });
+}
+// For tests and DevTools: what the YouTube stand-in is doing.
+window.__hoqYtInfo = () => (_yt ? {
+  path: _yt.path, q: _yt.want.q, vid: _yt.vid, idx: _yt.idx, state: _yt.state, ready: _yt.ready, heard: _yt.heard,
+  wantPlay: _yt.wantPlay, pos: Math.round(hoqYtPos()), dur: Math.round(_yt.dur), real: _yt.real, manual: !!_yt.manual, solo: hoqYtSolo(),
+  cands: (_yt.cands || []).map((c) => c.id + ' ' + c.sec + 's ' + c.t + ' / ' + c.ch),
+} : null);
 
 function setupProfileExtras() {
   hoqPfAutoPlay();
@@ -9434,14 +10244,17 @@ function setupAmbientMode() {
 
   let lastArt = '';
   const sync = () => {
-    const u = big(artUrl());
+    const solo = hoqYtSolo();   // a Go+ song YouTube plays on its own
+    const u = solo ? solo.cover : big(artUrl());
     if (u && u !== lastArt) { lastArt = u; np.querySelector('.np-art').style.backgroundImage = 'url("' + u + '")'; np.querySelector('.np-bg').style.backgroundImage = 'url("' + u + '")'; }
-    np.querySelector('.np-title').textContent = (txt('.playbackSoundBadge__titleLink', 'title') || txt('.playbackSoundBadge__titleLink')).trim();
-    np.querySelector('.np-artist').textContent = (txt('.playbackSoundBadge__lightLink', 'title') || txt('.playbackSoundBadge__lightLink')).trim();
-    np.querySelector('.np-bar i').style.width = (document.querySelector('.playbackTimeline__progressBar') || {}).style && document.querySelector('.playbackTimeline__progressBar').style.width || '0%';
-    np.querySelector('.np-cur').textContent = txt('.playbackTimeline__timePassed span[aria-hidden]');
-    np.querySelector('.np-dur').textContent = txt('.playbackTimeline__duration span[aria-hidden]');
-    const playing = !!document.querySelector('.playControls__play.playing');
+    np.querySelector('.np-title').textContent = solo ? solo.title : (txt('.playbackSoundBadge__titleLink', 'title') || txt('.playbackSoundBadge__titleLink')).trim();
+    np.querySelector('.np-artist').textContent = solo ? solo.artist : (txt('.playbackSoundBadge__lightLink', 'title') || txt('.playbackSoundBadge__lightLink')).trim();
+    const ytp = hoqYtProgress();   // a Go+ song on YouTube: its time, not SoundCloud's paused preview
+    np.querySelector('.np-bar i').style.width = ytp ? (ytp.dur > 0 ? Math.min(100, ytp.pos / ytp.dur * 100).toFixed(2) + '%' : '0%')
+      : (document.querySelector('.playbackTimeline__progressBar') || {}).style && document.querySelector('.playbackTimeline__progressBar').style.width || '0%';
+    np.querySelector('.np-cur').textContent = ytp ? hoqYtFmt(ytp.pos) : txt('.playbackTimeline__timePassed span[aria-hidden]');
+    np.querySelector('.np-dur').textContent = ytp ? hoqYtFmt(ytp.dur) : txt('.playbackTimeline__duration span[aria-hidden]');
+    const playing = ytp ? !ytp.paused : !!document.querySelector('.playControls__play.playing');
     np.querySelector('.np-play').innerHTML = playing
       ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
@@ -10026,6 +10839,8 @@ function boot() {
   if (hoqHasHost()) setTimeout(() => { const s = hoqJamSess(); if (s) scPost('jam:watch:' + JSON.stringify(hoqJamAuth(s))); }, 1400);
   setInterval(() => { try { hoqJamTick(); } catch (e) {} }, 1000);
   setInterval(() => { try { hoqSearchTick(); } catch (e) {} }, 700);   // Best match / Lyrics in search
+  setInterval(() => { try { hoqGoTick(); } catch (e) {} }, 500);       // Go+ songs from YouTube
+  setInterval(() => { try { if (_yt) hoqYtPaint(); } catch (e) {} }, 250);   // its time on SoundCloud's bar
   // The player bar appears/disappears with playback, so keep the tab's bottom
   // edge honest while it's open.
   setInterval(() => {

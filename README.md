@@ -25,6 +25,7 @@ u need the [webview2 runtime](https://developer.microsoft.com/microsoft-edge/web
 - **friends feed:** see what other people using the app are listening to, live, n listen along w them
 - **jam:** like spotify jam. start one n ur friends join w the code (or right from the friends list), everybody hears what ur playing n anyone in it can add songs to the queue
 - **better search:** a best match option so the song u actually typed comes up first, n a lyrics option, type a line u remember n it finds the song
+- **go+ songs:** if a song would only play soundclouds 30 sec go+ preview, the app finds the same song on youtube n plays the whole thing in a small youtube player in the corner (u can turn it off in settings)
 - **last.fm scrobbling:** the app does it itself so ur login never touches the page
 - **more than 1 account:** save soundcloud logins n switch between them without logging out (theyre saved encrypted)
 - **share to discord:** send the song ur on to a webhook, once per song
@@ -43,7 +44,7 @@ pretty much the whole app is 2 files
 
 | file | what it does |
 |---|---|
-| `Program.cs` | the c# side: the frameless window around webview2, the window buttons, blocking ad sites, pulling colours from the cover, discord, the friends n last.fm stuff, webhook posts |
+| `Program.cs` | the c# side: the frameless window around webview2, the window buttons, blocking ad sites, pulling colours from the cover, discord, the friends n last.fm stuff, webhook posts, the lyrics n youtube searches |
 | `preload.js` | everything on the page. it loads before soundclouds own scripts n builds all the custom ui: themes, visualizer, waveforms, title bar, panels |
 
 plus `Updater.cs` (updates from github releases), `HoqAccount.cs` (the optional holdonquietly.com account), `LastFm.cs` (scrobbling), `Desktop.cs` (the song pop up n taskbar buttons) n `ShortcutHelper.cs` (so windows media controls know its holdonquietly)

@@ -91,6 +91,34 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   if the chosen one stops responding (asleep monitor, unplugged headset), and tries
   it again when it reconnects.
 - **Volume:** a horizontal slider instead of SoundCloud's vertical pop-up.
+- **Go+ songs from YouTube** (desktop, Settings → Desktop, on by default): when a
+  song would only play SoundCloud's 30-second Go+ preview, the app finds the same
+  recording on YouTube and plays it in YouTube's own embedded player, a small card
+  (bottom left, drag it anywhere) while it plays.
+  - **Picking the video:** the length counts most (a music video with a long intro
+    loses to the plain audio), then the title, the artist's own channel, and the
+    right version (an acoustic track gets the acoustic recording; remixes, live
+    takes and sped-up uploads drop back). "Not it" plays the next match, ↗ opens it
+    on YouTube, × goes back to the preview.
+  - **Controls:** SoundCloud's play button, Space, the media keys, the seek bar and
+    the compact player work the YouTube player, and the bar shows its time. When the
+    video ends, SoundCloud plays the next song. Discord, Last.fm, stats, jams and
+    listen along follow the YouTube player's progress.
+  - **Songs SoundCloud won't start at all:** usually SoundCloud gives no preview.
+    Either the play button is greyed out ("Unavailable", nothing happens), or
+    pressing it opens SoundCloud's Go+ checkout, which the host stops from loading.
+    The app catches both presses and plays the song from YouTube straight away.
+    SoundCloud's bar never gets that song, so the app says what's playing:
+    - The bar's song slot, Discord, Last.fm, stats, jams and the compact player
+      all show the pressed song.
+    - Pressing its button again pauses or plays it.
+    - When it ends, the next row of the list it was pressed in plays.
+    - Starting any song SoundCloud can play ends it.
+  - **No match:** the card says so and the preview plays.
+  - **Doesn't reach YouTube:** the EQ and effects, speed and the output-device
+    picker. Its audio plays through the Windows default device.
+  - **Go+ subscribers:** SoundCloud gives a signed-in Go+ account full streams, so
+    the card never shows up for them.
 
 ### Pages
 
@@ -131,7 +159,10 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   adds songs to a shared queue (the **+** on any track row, right-click → Add to
   Jam, or "Add what's playing"), and the host's app plays the queue in order as
   songs end (or **Play now** / **Play next now**). A guest who plays something
-  else for 8 s straight drops out of following and gets **Back to the jam**. The
+  else for 8 s straight drops out of following and gets **Back to the jam**. A
+  guest dropped by the server (PC asleep past 90 s) rejoins by itself, at most
+  once in 5 minutes: joining hands out a new key, so the same account in one jam
+  on two PCs would otherwise knock each other out forever. The
   server side is `/jam/*` in `proxy/friends-server.js`: a key per person, 50
   people, 100 queued songs, ends 10 min after the host's app goes quiet.
 - **Discord Rich Presence:** what you're playing, progress and cover on your
@@ -260,6 +291,56 @@ the request up to 20 s until something changes. The host app makes every call
 (page → `jam:req:` / `jam:watch:`), like presence and the feed. Test copies never
 post, unless `HOQ_BACKEND` points them at a local copy (§6).
 
+### Go+ songs from YouTube
+
+1. **Is it a preview?** `hoqGoTick()` (every 0.5 s) looks the song in the player bar
+   up with api-v2 `/resolve` and the page's own sign-in (the `oauth_token` cookie).
+   It's a preview when every stream is `snipped`; the track also gives `full_duration`
+   and `publisher_metadata.artist`.
+2. **Find it.** The page asks the host (`yt:search:{rid,q}` → `window.__hoqYtRes`).
+   The host fetches YouTube's results page with a plain HTTPS request (§7) and
+   reads its `ytInitialData`:
+   - A video there is a `videoRenderer`, or, in the layout YouTube tries out on
+     about 1 request in 6, a `lockupViewModel`. Both give the same fields.
+   - It returns id, title, channel, length, badges and views.
+   - An empty answer is asked once more.
+
+   `hoqYtScore()` ranks the results.
+3. **Play it.** A `youtube-nocookie.com/embed/<id>?enablejsapi=1` iframe in
+   `#hoq-yt`, driven by YouTube's postMessage widget protocol, the one its own IFrame
+   API script speaks:
+   - The player sends `readyToListen`; the page answers `listening`.
+   - The player then sends `onReady`, `infoDelivery` (time, length, state, title)
+     and `onStateChange` / `onError`.
+   - The page sends `command` messages: `playVideo`, `pauseVideo`, `seekTo`,
+     `setVolume`.
+4. **Hand control to YouTube.** SoundCloud's preview is paused. While `_yt` is set:
+   - **Readers:** `playerProgress()` returns the YouTube player's state, and
+     `hoqMediaNow()` replaces direct `__hoqMediaEl` reads.
+   - **Controls:** `hoqSeek()` and `window.__hoqMedia()` go to it. Capture-phase
+     listeners on `window` take SoundCloud's play button, seek bar and Space.
+   - **Player bar:** the times and play icon come from a CSSOM rule, never DOM
+     writes, so no page observer wakes four times a second.
+5. **Stay out of its frame.** The host's preload wrapper skips youtube(-nocookie)
+   frames.
+6. **Songs SoundCloud refuses outright ("manual").** These never reach the player
+   bar, so `hoqGoTick` can't see them.
+   - **Catching the press:** `attachGoPress` (the page and the new-app frames)
+     notes every play-button press.
+     - A greyed-out button (`.sc-button-disabled`, title "Unavailable") is taken
+       on the spot: `hoqGoManual(path, btn, true)`.
+     - A press that opens the Go+ checkout instead comes back through the host:
+       `IsGoAd` cancels the load, `GoAdBlocked` calls `window.__hoqGoAd`.
+   - **What `_yt.manual` changes:**
+     - `hoqYtSolo()` answers `currentNowPlaying()`, `npPublicUrl()` and
+       `hoqNowHref()`.
+     - `hoqGoPath()` reads the real bar through `hoqBarHref()`, so a song you start
+       yourself is still noticed.
+     - `html.hoq-yt-solo` lays the song over the bar's song slot.
+     - At the end, `hoqGoNextBtn` presses the next play button in the list.
+6. **Open links outside.** NewWindowRequested sends youtube.com links to the
+   default browser.
+
 ---
 
 ## 5. Build, release, deploy
@@ -311,6 +392,11 @@ as a script file (PowerShell mangles quotes on the way to ssh).
   queue), put a stand-in player first in `<body>`: a `.playbackSoundBadge__titleLink`,
   a `.playControls__play` (class `playing` and title "Pause current" / "Play
   current") and the two `.playbackTimeline__*` times. The app reads the first match.
+- **Go+ from YouTube on a test copy:** the same stand-in, with its title link on a
+  Go+ track (e.g. `/szababy2/snooze-1`) and the button set to playing. YouTube's
+  player really plays (muted by `--mute-audio`) once the page has had a click (CDP
+  `Runtime.evaluate` with `userGesture`). `window.__hoqYtInfo()` shows the matches
+  and the player's state.
 - **Live app inspection:** start the real app with `--remote-debugging-port=9222`,
   then `node tools/cdp.js -e "<js>"` / `node tools/shot.js out.png`.
 - **Sign-in by hand:** `HOQ_ACCOUNTS_NO_BROWSER=1` logs the holdonquietly.com sign-in
@@ -375,18 +461,50 @@ as a script file (PowerShell mangles quotes on the way to ssh).
   the Jam card stayed empty until it rendered into the panel it was given.
 - **Never hide SoundCloud's own result lists.** A hidden lazy list counts as
   scrolled to the bottom and loads page after page. Add above them instead.
+- **YouTube's search answers a WebView fetch with "No results found".** The same
+  URL through `BrowserGet` comes back empty (a `backgroundPromoRenderer`), filters
+  or not. The host fetches it with its own `HttpClient`, which YouTube doesn't turn
+  away. Genius is the other way round.
+- **YouTube's embedded player has to be told someone is listening, after it says
+  so.** It posts `readyToListen` first. A `listening` sent before that is lost, and
+  taking `readyToListen` as the answer left the player silent forever.
+- **The preload runs in every frame, including other sites' players.** Anything
+  embedded gets the audio hooks and the theme unless the wrapper in Program.cs
+  skips its host, as it does for youtube(-nocookie).com.
+- **Read play state through `playerProgress()` / `hoqMediaNow()`.** Reading
+  `__hoqMediaEl` directly reads SoundCloud's paused preview while YouTube plays a
+  Go+ song.
+- **A Go+ song you can't play never reaches the player.** SoundCloud gives no 30-s
+  preview to start from: the play button is greyed out, or opens its checkout. Any
+  feature that waits for the player bar never sees it, so catch the press instead.
+  A signed-out test copy shows the greyed-out case. It won't load songs into the
+  bar after a while either, so test the "you started another song" side with the
+  stand-in bar.
+- **An empty player-bar link isn't a new song.** SoundCloud redraws the bar, and
+  one tick without a link stopped the YouTube song mid-play and brought a closed
+  card back. Only a bar that stays empty for 5 s counts.
+- **Logged-out test copies get sent to checkout.soundcloud.com/go** when a
+  major-label song is opened, and then the test runs against that page. Use free
+  uploads in tests (policy `ALLOW`), and start from the full
+  `https://soundcloud.com/...` URL.
 
 ---
 
 ## 8. Open items
 
-- **Jam, Best match and Lyrics are desktop only.** The phone builds have no host
-  app for the jam server or Genius, and SoundCloud's API doesn't answer the
-  proxy's origin for the search.
+- **Jam, Best match, Lyrics and Go+ from YouTube are desktop only.** The phone
+  builds have no host app for the jam server, Genius or YouTube's search, and
+  SoundCloud's API doesn't answer the proxy's origin for the search.
 - **Pick up where you left off** is switched off: jumping back the moment a song
   starts stalled playback on signed-in accounts. The position is still saved.
 - **holdonquietlySC bot** shows offline in Discord because nothing signs in as it.
   Rich Presence only uses the app ID. Making it online needs a small always-on bot
   with its token on the server.
-- **Go+ tracks** play in full only with a Go+ subscription. The app doesn't get
-  around that.
+- **Go+ tracks** play in full on SoundCloud only with a Go+ subscription. The app
+  doesn't get around that: it plays the song's YouTube upload in YouTube's own
+  player instead (§3). YouTube's rules keep that player on screen (at least
+  200×200, no hidden background player), so it's a card, not invisible. SoundCloud's
+  Go+ checkout never loads in the app (`IsGoAd`), so subscribing to Go+ has to happen
+  in a browser. Like a
+  browser tab, it keeps playing if you minimize the app or switch to the compact
+  player.

@@ -291,8 +291,10 @@ class Program
             // SoundCloud's new React app in an iframe (/n/...). The theme editing
             // that page before React hydrated it broke it: track pages showed the
             // previous song. Same fix as the phone build: stay out of that frame.
+            // Out of YouTube's player too (Go+ songs from YouTube): it's YouTube's
+            // page, and the audio hooks in here would grab its video.
             // (Wrapping is safe: the host only ever calls window.* functions.)
-            preload = "(function () {\nif (window !== window.top && /^\\/n\\//.test(location.pathname)) return;\n" + preload + "\n})();";
+            preload = "(function () {\nif (window !== window.top && (/^\\/n\\//.test(location.pathname) || /(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname))) return;\n" + preload + "\n})();";
             await core.AddScriptToExecuteOnDocumentCreatedAsync(preload);
             Log("preload injected OK");
         }
@@ -358,6 +360,18 @@ class Program
         {
             e.Handled = true;
 
+            if (IsGoAd(e.Uri)) { GoAdBlocked(e.Uri); return; }
+
+            // YouTube's player (Go+ songs from YouTube) links out to youtube.com:
+            // that opens in the default browser. Navigating this window there
+            // would leave SoundCloud, and the song, behind.
+            if (IsYouTube(e.Uri))
+            {
+                if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var yu) && (yu.Scheme == Uri.UriSchemeHttps || yu.Scheme == Uri.UriSchemeHttp))
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(yu.AbsoluteUri) { UseShellExecute = true }); } catch { }
+                return;
+            }
+
             bool isAuth = false;
             try
             {
@@ -397,6 +411,12 @@ class Program
             }
             catch { }
             finally { deferral.Complete(); }
+        };
+
+        // ...and the same page reached by a plain link in this window.
+        core.NavigationStarting += (s, e) =>
+        {
+            if (IsGoAd(e.Uri)) { e.Cancel = true; GoAdBlocked(e.Uri); }
         };
 
         // Keep the window title fixed.
@@ -474,6 +494,32 @@ class Program
     static string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SoundCloudApp");
 
     static string HostOf(string url) { try { return new Uri(url).Host; } catch { return "?"; } }
+    static bool IsYouTube(string url)
+    {
+        string h = HostOf(url).ToLowerInvariant();
+        return h == "youtu.be" || h == "youtube.com" || h.EndsWith(".youtube.com", StringComparison.Ordinal)
+            || h == "youtube-nocookie.com" || h.EndsWith(".youtube-nocookie.com", StringComparison.Ordinal);
+    }
+    // SoundCloud's Go+ sales / checkout page. Pressing play on a track only Go+ can
+    // play opens it, and every new window here becomes a page load in the main
+    // window: the sales page replaced SoundCloud (and the music). It never loads;
+    // the page is told instead, so it can play that track in full another way.
+    static bool IsGoAd(string url)
+    {
+        try
+        {
+            var u = new Uri(url);
+            string h = u.Host.ToLowerInvariant(), p = u.AbsolutePath.TrimEnd('/').ToLowerInvariant();
+            if (h == "checkout.soundcloud.com") return true;
+            return (h == "soundcloud.com" || h == "www.soundcloud.com") && (p == "/go" || p == "/go-plus" || p == "/goplus");
+        }
+        catch { return false; }
+    }
+    static void GoAdBlocked(string url)
+    {
+        Log("Go+ page blocked: " + url);
+        try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqGoAd && window.__hoqGoAd(" + JsonSerializer.Serialize(url) + ")"); } catch { }
+    }
     static bool TrustedSource(string url)
     {
         string h = HostOf(url).ToLowerInvariant();
@@ -608,6 +654,183 @@ class Program
         await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
     }
 
+    // Go+ songs from YouTube: the same recording on YouTube, for the page to rank
+    // and play in YouTube's own embedded player. YouTube's own results page, by a
+    // plain HTTPS request: through the WebView (BrowserGet) YouTube answers that
+    // fetch with "No results found". Only what the page ranks with goes back: id,
+    // title, channel, length, badges, views.
+    static readonly System.Text.RegularExpressions.Regex YtIdRx = new System.Text.RegularExpressions.Regex("^[A-Za-z0-9_-]{11}$");
+    // Its own client: keeps no cookies, and sends only the "reject all" answer to
+    // YouTube's cookie question (SOCS=CAI), so a consent page can't stand in for the results.
+    static readonly HttpClient ytHttp = new HttpClient(new SocketsHttpHandler
+    {
+        UseCookies = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    }) { Timeout = TimeSpan.FromSeconds(12) };
+    static async Task<(int status, string body)> YtGet(string url)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.TryAddWithoutValidation("User-Agent", CHROME_UA);
+        req.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+        req.Headers.TryAddWithoutValidation("Cookie", "SOCS=CAI");
+        using var resp = await ytHttp.SendAsync(req);
+        return ((int)resp.StatusCode, await resp.Content.ReadAsStringAsync());
+    }
+    static async Task YtSearch(string json)
+    {
+        string rid = "", list = "null";
+        try
+        {
+            using var d = JsonDocument.Parse(json);
+            rid = Prop(d.RootElement, "rid");
+            string q = Prop(d.RootElement, "q").Trim();
+            if (q.Length > 0 && q.Length <= 200)
+            {
+                // sp=EgIQAQ== is YouTube's "Videos" filter: no channels, playlists or Shorts shelves
+                var (status, body) = await YtGet("https://www.youtube.com/results?search_query=" + Uri.EscapeDataString(q) + "&sp=EgIQAQ%253D%253D");
+                if (status != 200) Log("youtube search: answered " + status);
+                else list = JsonSerializer.Serialize(await Task.Run(() => YtVideos(body)));
+            }
+        }
+        catch (Exception ex) { Log("youtube search failed: " + ex.GetType().Name); }
+        string js = "window.__hoqYtRes && window.__hoqYtRes(" + JsonSerializer.Serialize(rid) + "," + list + ")";
+        await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
+    }
+
+    // The results are the page's ytInitialData. A video in it is a videoRenderer, or
+    // in the layout YouTube tries out on some requests (about 1 in 6), a lockupViewModel.
+    static List<Dictionary<string, object>> YtVideos(string html)
+    {
+        var found = new List<Dictionary<string, object>>();
+        int i = html.IndexOf("ytInitialData = ", StringComparison.Ordinal);
+        if (i < 0) i = html.IndexOf("ytInitialData\"] = ", StringComparison.Ordinal);
+        int start = i < 0 ? -1 : html.IndexOf('{', i);
+        if (start < 0) { Log("youtube search: no results data in the page"); return found; }
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(html.Substring(start)));
+        using var doc = JsonDocument.ParseValue(ref reader);   // that one value; the script after it is never read
+        void Walk(JsonElement e, int depth)
+        {
+            if (found.Count >= 15 || depth > 48) return;
+            if (e.ValueKind == JsonValueKind.Array) { foreach (var x in e.EnumerateArray()) Walk(x, depth + 1); return; }
+            if (e.ValueKind != JsonValueKind.Object) return;
+            foreach (var p in e.EnumerateObject())
+            {
+                if (p.Value.ValueKind == JsonValueKind.Object && (p.Name == "videoRenderer" || p.Name == "lockupViewModel"))
+                {
+                    var v = p.Name == "videoRenderer" ? YtVideo(p.Value) : YtLockup(p.Value);
+                    if (v != null) found.Add(v);
+                }
+                else Walk(p.Value, depth + 1);
+            }
+        }
+        Walk(doc.RootElement, 0);
+        return found;
+    }
+
+    static string YtText(JsonElement o, string k)
+    {
+        if (!o.TryGetProperty(k, out var t) || t.ValueKind != JsonValueKind.Object) return "";
+        if (t.TryGetProperty("simpleText", out var s) && s.ValueKind == JsonValueKind.String) return s.GetString() ?? "";
+        if (!t.TryGetProperty("runs", out var runs) || runs.ValueKind != JsonValueKind.Array) return "";
+        var sb = new StringBuilder();
+        foreach (var r in runs.EnumerateArray()) sb.Append(Prop(r, "text"));
+        return sb.ToString();
+    }
+
+    // "3:22" / "1:02:15" → seconds; 0 for anything else (a live stream or premiere has no length).
+    static int YtSeconds(string len)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(len ?? "", @"^\d+(:\d\d){1,2}$")) return 0;
+        int sec = 0;
+        foreach (var part in len.Split(':')) sec = sec * 60 + int.Parse(part);
+        return sec;
+    }
+    // "172M" / "1.2K" / "12,345 views" → a rough count (it only breaks ties).
+    static long YtCount(string s)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(s ?? "", @"^([\d.,]+)\s*([KMB])?\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return 0;
+        string n = m.Groups[1].Value.Replace(",", "");
+        if (!double.TryParse(n, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double d)) return 0;
+        string k = m.Groups[2].Value.ToUpperInvariant();
+        return (long)(d * (k == "K" ? 1e3 : k == "M" ? 1e6 : k == "B" ? 1e9 : 1));
+    }
+
+    static Dictionary<string, object> YtVideo(JsonElement v)
+    {
+        string id = Prop(v, "videoId");
+        if (!YtIdRx.IsMatch(id)) return null;
+        int sec = YtSeconds(YtText(v, "lengthText"));
+        if (sec <= 0) return null;
+        string ch = YtText(v, "ownerText");
+        if (ch.Length == 0) ch = YtText(v, "longBylineText");
+        bool artist = false, verified = false;   // the official-artist note badge / the plain check
+        if (v.TryGetProperty("ownerBadges", out var badges) && badges.ValueKind == JsonValueKind.Array)
+            foreach (var b in badges.EnumerateArray())
+            {
+                if (!b.TryGetProperty("metadataBadgeRenderer", out var mb) || mb.ValueKind != JsonValueKind.Object) continue;
+                string style = Prop(mb, "style");
+                if (style.Contains("VERIFIED_ARTIST")) artist = true; else if (style.Contains("VERIFIED")) verified = true;
+            }
+        long.TryParse(new string(YtText(v, "viewCountText").Where(char.IsDigit).ToArray()), out long views);
+        return new Dictionary<string, object> { ["id"] = id, ["t"] = YtText(v, "title"), ["ch"] = ch, ["sec"] = sec, ["art"] = artist, ["ver"] = verified, ["views"] = views };
+    }
+
+    // The same, from the lockupViewModel layout: the length is a badge on the
+    // thumbnail, the channel and its badge the first metadata row, views the second.
+    static Dictionary<string, object> YtLockup(JsonElement l)
+    {
+        if (Prop(l, "contentType") != "LOCKUP_CONTENT_TYPE_VIDEO") return null;
+        string id = Prop(l, "contentId");
+        if (!YtIdRx.IsMatch(id)) return null;
+        int sec = l.TryGetProperty("contentImage", out var img) ? YtBadgeSeconds(img, 0) : 0;
+        if (sec <= 0) return null;
+        string title = "", ch = "";
+        bool artist = false, verified = false;
+        long views = 0;
+        if (l.TryGetProperty("metadata", out var md) && md.ValueKind == JsonValueKind.Object && md.TryGetProperty("lockupMetadataViewModel", out var lm) && lm.ValueKind == JsonValueKind.Object)
+        {
+            if (lm.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.Object) title = Prop(t, "content");
+            if (lm.TryGetProperty("metadata", out var m2) && m2.ValueKind == JsonValueKind.Object && m2.TryGetProperty("contentMetadataViewModel", out var cm) && cm.ValueKind == JsonValueKind.Object
+                && cm.TryGetProperty("metadataRows", out var rows) && rows.ValueKind == JsonValueKind.Array && rows.GetArrayLength() > 0
+                && rows[0].ValueKind == JsonValueKind.Object && rows[0].TryGetProperty("metadataParts", out var parts) && parts.ValueKind == JsonValueKind.Array)
+            {
+                int k = 0;
+                foreach (var p in parts.EnumerateArray())
+                {
+                    if (p.ValueKind != JsonValueKind.Object) { k++; continue; }
+                    if (k == 0)
+                    {
+                        if (p.TryGetProperty("text", out var tx) && tx.ValueKind == JsonValueKind.Object) ch = Prop(tx, "content");
+                        if (ch.Length == 0 && p.TryGetProperty("avatarStack", out var av) && av.ValueKind == JsonValueKind.Object
+                            && av.TryGetProperty("avatarStackViewModel", out var avm) && avm.ValueKind == JsonValueKind.Object
+                            && avm.TryGetProperty("text", out var at) && at.ValueKind == JsonValueKind.Object) ch = Prop(at, "content");
+                        if (p.TryGetProperty("icon", out var ic) && ic.ValueKind == JsonValueKind.Object)
+                        {
+                            string name = Prop(ic, "name"), label = Prop(ic, "accessibilityLabel");
+                            if (name == "AUDIO_BADGE" || label.Contains("Official Artist")) artist = true;
+                            else if (name.Contains("CHECK") || label.Contains("Verified")) verified = true;
+                        }
+                    }
+                    else if (k == 1 && p.TryGetProperty("text", out var vt) && vt.ValueKind == JsonValueKind.Object) views = YtCount(Prop(vt, "content"));
+                    k++;
+                }
+            }
+        }
+        if (title.Length == 0) return null;
+        return new Dictionary<string, object> { ["id"] = id, ["t"] = title, ["ch"] = ch, ["sec"] = sec, ["art"] = artist, ["ver"] = verified, ["views"] = views };
+    }
+    static int YtBadgeSeconds(JsonElement e, int depth)
+    {
+        if (depth > 12) return 0;
+        if (e.ValueKind == JsonValueKind.Array) { foreach (var x in e.EnumerateArray()) { int s = YtBadgeSeconds(x, depth + 1); if (s > 0) return s; } return 0; }
+        if (e.ValueKind != JsonValueKind.Object) return 0;
+        if (e.TryGetProperty("thumbnailBadgeViewModel", out var b) && b.ValueKind == JsonValueKind.Object) { int s = YtSeconds(Prop(b, "text")); if (s > 0) return s; }
+        foreach (var p in e.EnumerateObject()) { int s = YtBadgeSeconds(p.Value, depth + 1); if (s > 0) return s; }
+        return 0;
+    }
+
     // ===== Jam (a shared listening session, proxy/friends-server.js /jam/*) =====
     // Host-side like friends and feed (no CORS from the page). The page asks with
     // jam:req:{rid,op,body} and hears back window.__hoqJamRes(rid, status, json).
@@ -661,6 +884,8 @@ class Program
         while (!ct.IsCancellationRequested)
         {
             string push = null;
+            long was = v;
+            var asked = DateTime.UtcNow;
             try
             {
                 using var t = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -691,6 +916,10 @@ class Program
             string js = "window.__hoqJam && window.__hoqJam(" + push + ")";
             await win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync(js); } catch { } });
             if (push.StartsWith("{\"ended\"", StringComparison.Ordinal)) return;
+            // Nothing new, straight away: the server has no room to hold the request
+            // (its waiter cap). Asking again at once made a tight loop.
+            if (v == was && (DateTime.UtcNow - asked).TotalMilliseconds < 1000)
+                try { await Task.Delay(2000, ct); } catch { return; }
         }
     }
 
@@ -1566,6 +1795,7 @@ class Program
         if (m != null && m.StartsWith("jam:watch:")) { JamWatch(m.Substring(10)); return; }
         if (m == "jam:unwatch") { JamWatch(null); return; }
         if (m != null && m.StartsWith("lyrics:search:")) { _ = LyricsSearch(m.Substring(14)); return; }
+        if (m != null && m.StartsWith("yt:search:")) { _ = YtSearch(m.Substring(10)); return; }
         // Compact player: mini:on[:WxH[:pin]] | mini:off | mini:size:WxH | mini:pin:0/1 | mini:alpha:0-100
         if (m != null && m.StartsWith("mini:"))
         {
