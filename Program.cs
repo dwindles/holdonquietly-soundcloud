@@ -67,7 +67,16 @@ class Program
     static CoreWebView2Environment env;   // shared so OAuth popups use the same cookie store
     static bool maxed = false;
     static Rect restoreBounds;
-    static readonly string LogFile = Path.Combine(Path.GetTempPath(), "scwv2.log");
+    static readonly string LogFile = LogPath();
+    // %TEMP%\scwv2.log; a test copy logs into its own data folder instead: sharing
+    // the file, its start wiped the real app's log and both wrote into one file.
+    static string LogPath()
+    {
+        string d = Environment.GetEnvironmentVariable("HOQ_DATADIR");
+        if (string.IsNullOrWhiteSpace(d)) return Path.Combine(Path.GetTempPath(), "scwv2.log");
+        try { Directory.CreateDirectory(d); } catch { }
+        return Path.Combine(d, "scwv2.log");
+    }
     internal static void Log(string s) { try { File.AppendAllText(LogFile, DateTime.Now.ToString("HH:mm:ss ") + s + "\n"); } catch { } }
     // for Desktop.cs (song pop-up, taskbar buttons)
     internal static Window MainWin => win;
@@ -243,13 +252,16 @@ class Program
         // your microphone" prompt on a music app. It is used ONLY to unlock the output
         // list: preload opens a stream and stops it in the same breath (setupOutputPicker),
         // never reading any audio. Nothing else changes permission behavior.
+        // SoundCloud's own pages only: links open other sites in this same window,
+        // and any of them could otherwise record the mic without a prompt. Every
+        // other site gets WebView2's normal "allow?" question.
         try
         {
             core.PermissionRequested += (s, e) =>
             {
                 try
                 {
-                    if (e.PermissionKind == CoreWebView2PermissionKind.Microphone)
+                    if (e.PermissionKind == CoreWebView2PermissionKind.Microphone && TrustedSource(e.Uri))
                         e.State = CoreWebView2PermissionState.Allow;
                 }
                 catch { }
@@ -267,6 +279,9 @@ class Program
 
         // Inject all our page-side features (ad-skip, themes, clutter removal, titlebar).
         File.WriteAllText(LogFile, "init " + DateTime.Now + "\n");
+        // After the log starts over, so what these two do stays in it.
+        MigrateAccounts();               // seal saved logins an older build left in plain text
+        _ = ResetForeignMicGrants(core); // and take back mic grants older builds gave other sites
         try
         {
             string preload = EmbeddedText("preload.js");
@@ -285,8 +300,21 @@ class Program
 
         try { SetupMediaKeys(); } catch (Exception ex) { Log("mediakeys FAIL: " + ex.Message); }
 
-        // Network ad/tracker blocking.
-        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+        // Network ad/tracker blocking. Filters for those hosts only: a "*" filter
+        // sent every request the page makes (each audio segment, image and API
+        // call) through this UI thread first, just to let nearly all of them pass.
+        // Workers too: SoundCloud's service worker takes over the page within
+        // seconds, and from then on requests come from it, which a page-only
+        // filter never saw, so blocking stopped ~10 s after every launch.
+        foreach (var h in AD_HOSTS)
+        {
+            foreach (string pat in new[] { "*://" + h + "/*", "*://*." + h + "/*" })
+            {
+                // An older WebView2 runtime lacks the worker-aware overload: page requests only, then.
+                try { core.AddWebResourceRequestedFilter(pat, CoreWebView2WebResourceContext.All, CoreWebView2WebResourceRequestSourceKinds.All); }
+                catch { core.AddWebResourceRequestedFilter(pat, CoreWebView2WebResourceContext.All); }
+            }
+        }
         core.WebResourceRequested += (s, e) =>
         {
             try
@@ -311,8 +339,8 @@ class Program
         {
             // Only SoundCloud's own pages speak for the app. Ordinary links open in
             // this window, and any other site there would otherwise get the same
-            // powers: "open:" hands its argument to the shell, "app:reset" wipes
-            // the profile, "hook:set" swaps the webhook.
+            // powers: "open:" hands its argument to the shell, "app:reset" signs
+            // out and clears caches, "hook:set" swaps the webhook.
             if (!TrustedSource(e.Source)) { Log("message ignored from " + HostOf(e.Source)); return; }
             string m = e.TryGetWebMessageAsString();
             if (m != null && m.StartsWith("DBG")) Log(m);
@@ -386,8 +414,13 @@ class Program
         // A test copy (HOQ_DATADIR) stays silent: no Discord status, no friends-list
         // entry, no phone relay. It showed up as a second "you" and could overwrite
         // the real app's Discord status.
-        if (!IsTestCopy) _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
-        _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
+        // KeepAlive is gated too: its first tick connects, and a connected test copy
+        // still sent SET_ACTIVITY under its own PID.
+        if (!IsTestCopy)
+        {
+            _ = DiscordRpc.Connect();   // Rich Presence (best effort; needs Discord running)
+            _ = DiscordRpc.KeepAlive(); // reconnect if Discord starts later / pipe drops
+        }
         if (!IsTestCopy) _ = PhoneNowPlayingLoop();  // the phone's listening, onto the same presence
         _ = PhoneStatsLoop();       // the phone's play counts, onto the hoq account
         _ = FriendsLoop();          // poll the shared friends backend
@@ -441,6 +474,23 @@ class Program
         return h == "soundcloud.com" || h.EndsWith(".soundcloud.com", StringComparison.Ordinal);
     }
 
+    // Builds up to v1.6.37 granted the microphone to ANY site that asked, and
+    // WebView2 keeps such grants in the profile. Put every one that isn't
+    // SoundCloud's back to "ask".
+    static async Task ResetForeignMicGrants(CoreWebView2 core)
+    {
+        try
+        {
+            foreach (var p in await core.Profile.GetNonDefaultPermissionSettingsAsync())
+            {
+                if (p.PermissionKind != CoreWebView2PermissionKind.Microphone || TrustedSource(p.PermissionOrigin)) continue;
+                await core.Profile.SetPermissionStateAsync(p.PermissionKind, p.PermissionOrigin, CoreWebView2PermissionState.Default);
+                Log("mic grant reset for " + HostOf(p.PermissionOrigin));
+            }
+        }
+        catch (Exception ex) { Log("mic grant cleanup failed: " + ex.GetType().Name); }
+    }
+
     // Data headed into ExecuteScriptAsync as a JS expression. The friends/feed
     // backend is a shared server, so whatever it returns must never become code:
     // only JSON that parses goes through (JSON is a subset of JS), else null.
@@ -483,6 +533,9 @@ class Program
     // (AV scan, another process holding it, transient IO) used to drop the request
     // silently and look exactly like "it worked for a second, then stopped".
     static string _webhookCache = "";
+
+    // Discord's allowed_mentions with nothing allowed: the text still shows, no one is pinged.
+    static readonly Dictionary<string, object> NoMentions = new() { ["parse"] = Array.Empty<string>() };
 
     // Fallback home for the URL, written by Settings → Discord webhook. The
     // registry is a separate storage path from the folder above, so it still
@@ -544,14 +597,18 @@ class Program
     }
 
     // The original file, then one beside the exe (handy for the portable build).
+    // A test copy uses only its own data folder: the exe it runs may be the real one.
     static IEnumerable<string> WebhookFileCandidates()
     {
         yield return WebhookPath();
-        yield return Path.Combine(AppContext.BaseDirectory, "webhook.txt");
+        if (!IsTestCopy) yield return Path.Combine(AppContext.BaseDirectory, "webhook.txt");
     }
 
+    // The registry copy is shared by every copy of the app, so a test copy neither
+    // reads it (its Share would post to the real channel) nor changes it.
     static string ReadWebhookRegistry()
     {
+        if (IsTestCopy) return "";
         try
         {
             using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(HOOK_REG_KEY);
@@ -572,8 +629,11 @@ class Program
             return;
         }
         bool reg = false, file = false;
-        try { using var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(HOOK_REG_KEY); k.SetValue(HOOK_REG_VAL, url); reg = true; }
-        catch (Exception ex) { Log("webhook save (registry) failed: " + ex.Message); }
+        if (!IsTestCopy)
+        {
+            try { using var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(HOOK_REG_KEY); k.SetValue(HOOK_REG_VAL, url); reg = true; }
+            catch (Exception ex) { Log("webhook save (registry) failed: " + ex.Message); }
+        }
         try { string p = WebhookPath(); Directory.CreateDirectory(Path.GetDirectoryName(p)); File.WriteAllText(p, url); file = true; }
         catch (Exception ex) { Log("webhook save (file) failed: " + ex.GetType().Name + " " + ex.Message); }
         _webhookCache = url;
@@ -583,8 +643,15 @@ class Program
 
     static async Task ClearWebhook()
     {
-        try { using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(HOOK_REG_KEY, true); k?.DeleteValue(HOOK_REG_VAL, false); } catch { }
-        try { File.Delete(WebhookPath()); } catch { }
+        if (!IsTestCopy)
+            try { using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(HOOK_REG_KEY, true); k?.DeleteValue(HOOK_REG_VAL, false); } catch { }
+        // Every file ReadWebhook looks at, the one beside the exe included: leaving
+        // it meant "Remove" changed nothing for the portable build.
+        foreach (string path in WebhookFileCandidates())
+        {
+            try { File.Delete(path); }
+            catch (Exception ex) { Log("webhook remove (" + path + ") failed: " + ex.GetType().Name); }
+        }
         _webhookCache = "";
         Log("webhook removed");
         await SendHookStatus(null);
@@ -798,7 +865,11 @@ class Program
                 else
                 {
                     using var form = new MultipartFormDataContent();
-                    form.Add(new StringContent(JsonSerializer.Serialize(new { content = caption.Length > 0 ? caption[..Math.Min(caption.Length, 300)] : "my month on holdonquietly" }), Encoding.UTF8, "application/json"), "payload_json");
+                    form.Add(new StringContent(JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["content"] = caption.Length > 0 ? caption[..Math.Min(caption.Length, 300)] : "my month on holdonquietly",
+                        ["allowed_mentions"] = NoMentions,   // the caption carries names too
+                    }), Encoding.UTF8, "application/json"), "payload_json");
                     var file = new ByteArrayContent(png);
                     file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
                     form.Add(file, "files[0]", "recap-" + safeMonth + ".png");
@@ -915,6 +986,9 @@ class Program
                 ["username"] = string.IsNullOrEmpty(name) ? "holdonquietly" : name,
                 ["flags"] = 32768,             // IS_COMPONENTS_V2 (1 << 15)
                 ["components"] = new object[] { container },
+                // Titles and names are anyone's text: a track called "@everyone…"
+                // (or one carrying a role mention) must never ping the server.
+                ["allowed_mentions"] = NoMentions,
             };
             if (!string.IsNullOrEmpty(avatar)) payload["avatar_url"] = avatar;
 
@@ -1065,10 +1139,34 @@ class Program
         Directory.CreateDirectory(d);
         return d;
     }
-    static string AcctFile(string name)
+    // A saved login holds SoundCloud's oauth_token, so it's DPAPI-sealed like
+    // lastfm.dat and hoq-account.dat: accounts\<name>.acct. Builds up to v1.6.37
+    // wrote plain <name>.json; MigrateAccounts seals those and deletes them.
+    static string AcctFile(string name, string ext = ".acct")
     {
         foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
-        return Path.Combine(AcctDir(), name + ".json");
+        return Path.Combine(AcctDir(), name + ext);
+    }
+
+    static void MigrateAccounts()
+    {
+        try
+        {
+            int n = 0;
+            foreach (string plain in Directory.GetFiles(AcctDir(), "*.json"))
+            {
+                try
+                {
+                    string sealedPath = Path.ChangeExtension(plain, ".acct");
+                    if (!File.Exists(sealedPath)) File.WriteAllBytes(sealedPath, HoqAccount.Protect(File.ReadAllBytes(plain)));
+                    File.Delete(plain);
+                    n++;
+                }
+                catch (Exception ex) { Log("account login seal failed: " + ex.GetType().Name); }
+            }
+            if (n > 0) Log("account logins sealed: " + n);
+        }
+        catch { }
     }
 
     static async Task AcctSave(string name)
@@ -1080,21 +1178,27 @@ class Program
             var list = new List<object>();
             foreach (var c in cookies)
                 list.Add(new { c.Name, c.Value, c.Domain, c.Path, Secure = c.IsSecure, Http = c.IsHttpOnly, Session = c.IsSession, c.Expires, Same = (int)c.SameSite });
-            File.WriteAllText(AcctFile(name), JsonSerializer.Serialize(list));
+            File.WriteAllBytes(AcctFile(name), HoqAccount.Protect(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(list))));
+            try { File.Delete(AcctFile(name, ".json")); } catch { }   // a plain copy from an older build
         }
-        catch { }
+        catch (Exception ex) { Log("account save failed: " + ex.GetType().Name); }
         AcctList();
     }
 
-    static async Task AcctSwitch(string name)
+    static void AcctSwitch(string name)
     {
         try
         {
+            if (!File.Exists(AcctFile(name)) && File.Exists(AcctFile(name, ".json"))) MigrateAccounts();
             string f = AcctFile(name);
             if (!File.Exists(f)) return;
+            // Read the whole login before touching the cookies: a file that didn't
+            // open used to leave you signed out of everything.
+            using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(HoqAccount.Unprotect(File.ReadAllBytes(f))));
+            var arr = doc.RootElement;
+            if (arr.ValueKind != JsonValueKind.Array) return;
             var cm = wv.CoreWebView2.CookieManager;
             cm.DeleteAllCookies();
-            var arr = JsonDocument.Parse(File.ReadAllText(f)).RootElement;
             foreach (var c in arr.EnumerateArray())
             {
                 var ck = cm.CreateCookie(Prop(c, "Name"), Prop(c, "Value"), Prop(c, "Domain"), Prop(c, "Path"));
@@ -1107,10 +1211,15 @@ class Program
             }
             wv.CoreWebView2.Navigate("https://soundcloud.com/discover");
         }
-        catch { }
+        catch (Exception ex) { Log("account switch failed: " + ex.GetType().Name); }
     }
 
-    static void AcctRemove(string name) { try { File.Delete(AcctFile(name)); } catch { } AcctList(); }
+    static void AcctRemove(string name)
+    {
+        try { File.Delete(AcctFile(name)); } catch { }
+        try { File.Delete(AcctFile(name, ".json")); } catch { }
+        AcctList();
+    }
 
     static void AcctNew()
     {
@@ -1121,7 +1230,10 @@ class Program
     {
         try
         {
-            var names = Directory.GetFiles(AcctDir(), "*.json").Select(p => Path.GetFileNameWithoutExtension(p)).ToArray();
+            // sealed logins, plus any plain one MigrateAccounts couldn't convert yet
+            var names = Directory.GetFiles(AcctDir(), "*.acct").Concat(Directory.GetFiles(AcctDir(), "*.json"))
+                .Select(p => Path.GetFileNameWithoutExtension(p)).Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
             string json = JsonSerializer.Serialize(names);
             win.Dispatcher.InvokeAsync(() => { try { _ = wv.CoreWebView2.ExecuteScriptAsync("window.__hoqAccounts && window.__hoqAccounts(" + json + ")"); } catch { } });
         }
@@ -1207,7 +1319,7 @@ class Program
         if (m != null && m.StartsWith("webhook:")) { await PostWebhook(m.Substring(8)); return; }
         if (m != null && m.StartsWith("playreq:")) { await PostWebhook(m.Substring(8), true); return; }
         if (m != null && m.StartsWith("acct:save:")) { await AcctSave(m.Substring(10)); return; }
-        if (m != null && m.StartsWith("acct:switch:")) { await AcctSwitch(m.Substring(12)); return; }
+        if (m != null && m.StartsWith("acct:switch:")) { AcctSwitch(m.Substring(12)); return; }
         if (m != null && m.StartsWith("acct:remove:")) { AcctRemove(m.Substring(12)); return; }
         if (m == "acct:list") { AcctList(); return; }
         if (m == "acct:new") { AcctNew(); return; }
@@ -1276,6 +1388,7 @@ class Program
         if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }
         if (m == "dcwidget") { _ = DcWidget(); return; }
         if (m == "update:apply") { Updater.ApplyAndRestart?.Invoke(); return; }
+        if (m == "update:status") { Updater.PageReady(); return; }   // the page has loaded: its update toasts can show now
         // Compact player: mini:on[:WxH[:pin]] | mini:off | mini:size:WxH | mini:pin:0/1 | mini:alpha:0-100
         if (m != null && m.StartsWith("mini:"))
         {
@@ -1324,7 +1437,18 @@ class Program
                 SendMessage(new WindowInteropHelper(win).Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
                 break;
             case "app:reset":
-                try { await wv.CoreWebView2.Profile.ClearBrowsingDataAsync(); } catch { }
+                // "Fix blocked": cookies, caches and site databases, never localStorage.
+                // The listening stats and every setting live there and SoundCloud has no
+                // copy (clearing everything wiped them); the page drops SoundCloud's own
+                // localStorage keys itself before it asks.
+                try
+                {
+                    await wv.CoreWebView2.Profile.ClearBrowsingDataAsync(
+                        CoreWebView2BrowsingDataKinds.Cookies | CoreWebView2BrowsingDataKinds.DiskCache |
+                        CoreWebView2BrowsingDataKinds.CacheStorage | CoreWebView2BrowsingDataKinds.IndexedDb |
+                        CoreWebView2BrowsingDataKinds.ServiceWorkers);
+                }
+                catch (Exception ex) { Log("reset failed: " + ex.GetType().Name); }
                 wv.CoreWebView2.Navigate("https://soundcloud.com/discover");
                 break;
             case "opendevtools":
@@ -1369,7 +1493,7 @@ class Program
         if (msg == WM_HOTKEY)
         {
             int id = wParam.ToInt32();
-            string act = id == HK_NEXT ? "next" : id == HK_PREV ? "prev" : (id == HK_PLAYPAUSE || id == HK_STOP) ? "playpause" : null;
+            string act = id == HK_NEXT ? "next" : id == HK_PREV ? "prev" : id == HK_PLAYPAUSE ? "playpause" : id == HK_STOP ? "stop" : null;
             if (act != null)
             {
                 handled = true;
@@ -1590,8 +1714,15 @@ static class DiscordRpc
     public static async Task Connect()
     {
         if (ready) return;
+        // Only the pipes Discord has open. ConnectAsync on a pipe that doesn't exist
+        // busy-waits for its whole timeout, so with Discord closed every 8 s retry
+        // spun through 10 × 1.5 s of polling, round the clock.
+        HashSet<string> open;
+        try { open = new HashSet<string>(Directory.GetFiles(@"\\.\pipe\"), StringComparer.OrdinalIgnoreCase); }
+        catch { open = null; }   // can't list them: try each, as before
         for (int i = 0; i < 10; i++)
         {
+            if (open != null && !open.Contains(@"\\.\pipe\discord-ipc-" + i)) continue;
             try
             {
                 var p = new NamedPipeClientStream(".", "discord-ipc-" + i, PipeDirection.InOut, PipeOptions.Asynchronous);

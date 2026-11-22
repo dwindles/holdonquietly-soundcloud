@@ -24,18 +24,18 @@ static class ShortcutHelper
 
             var store = (IPropertyStore)link;
             var key = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 }; // System.AppUserModel.ID
-            InitPropVariantFromString(aumid, out var pv);
-            store.SetValue(ref key, ref pv);
-            store.Commit();
-            PropVariantClear(ref pv);
+            // A VT_LPWSTR built by hand. InitPropVariantFromString is an inline helper
+            // in propvarutil.h, not a propsys.dll export: importing it threw
+            // EntryPointNotFoundException every time, so no shortcut was ever saved.
+            var pv = new PROPVARIANT { vt = 31 /* VT_LPWSTR */, p = Marshal.StringToCoTaskMemUni(aumid) };
+            try { store.SetValue(ref key, ref pv); store.Commit(); }
+            finally { PropVariantClear(ref pv); }
 
             ((System.Runtime.InteropServices.ComTypes.IPersistFile)link).Save(lnk, true);
         }
         catch { }
     }
 
-    [DllImport("propsys.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
-    static extern void InitPropVariantFromString(string psz, out PROPVARIANT ppropvar);
     [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT pvar);
 }
 

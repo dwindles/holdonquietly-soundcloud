@@ -32,6 +32,8 @@ static class Updater
 
     static string exeDir;
     static bool pending;                          // an update .exe is staged & ready
+    static string doneVer;                        // "Updated to vX", waiting for the page to load
+    static string readyVer;                       // the staged update's version
 
     public static bool IsPending => pending;
 
@@ -40,6 +42,28 @@ static class Updater
     {
         try { _ = RunAsync(userData); } catch { }
     }
+
+    // The page says it has loaded (preload: "update:status"). Start() runs right
+    // after Navigate, while WebView2 still shows its blank first document, so a
+    // toast sent then had nowhere to land and "Updated to vX" never appeared. The
+    // "ready" note is offered again too, since a reload drops it.
+    public static void PageReady()
+    {
+        Program.Log("update: page ready (notice " + (doneVer ?? "none") + ", staged " + (pending ? readyVer : "none") + ")");
+        if (doneVer != null)
+        {
+            string v = doneVer; doneVer = null;   // once per update
+            Program.Log("update: page ready, showing 'Updated to v" + v + "'");
+            RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('done'," + JsStr(v) + ")");
+        }
+        else if (pending && readyVer != null)
+            RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('ready'," + JsStr(readyVer) + ")");
+    }
+
+    // 1.6.37 parses with Revision -1, while the assembly says 1.6.37.0, and Version
+    // orders -1 below 0: unfilled parts count as 0 here so equal versions compare equal.
+    static Version Norm(Version v) =>
+        v == null ? null : new Version(v.Major, v.Minor, Math.Max(0, v.Build), Math.Max(0, v.Revision));
 
     static async Task RunAsync(string userData)
     {
@@ -52,24 +76,29 @@ static class Updater
             // the real distributable so we never clobber a dev build with a release.
             if (File.Exists(Path.Combine(exeDir, "holdonquietly.dll"))) return;
 
-            var cur = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
+            var cur = Norm(Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0));
 
             // "Notify after": if this launch is running a newer version than we last
-            // recorded, an update just applied — tell the user.
+            // recorded, an update just applied — tell the user once the page asks.
             try
             {
                 string vf = Path.Combine(userData, "version.txt");
                 Version last = null;
                 if (File.Exists(vf)) Version.TryParse(File.ReadAllText(vf).Trim(), out last);
-                if (last != null && cur > last)
-                    RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('done'," + JsStr(VerStr(cur)) + ")");
+                if (last != null && cur > Norm(last))
+                {
+                    doneVer = VerStr(cur);
+                    Program.Log("update: v" + VerStr(Norm(last)) + " -> v" + doneVer + ", notice waits for the page");
+                }
                 Directory.CreateDirectory(userData);
                 File.WriteAllText(vf, VerStr(cur));
             }
             catch { }
 
-            // Clean up a stale staged exe from a previous run that never applied.
+            // Clean up a stale staged exe from a previous run that never applied, and
+            // its swap script (an app closed by Task Manager or shutdown never ran it).
             try { var np = Path.Combine(exeDir, NEW_EXE); if (File.Exists(np)) File.Delete(np); } catch { }
+            try { var sc = Path.Combine(exeDir, CMD); if (File.Exists(sc)) File.Delete(sc); } catch { }
 
             await Task.Delay(6000); // let the app finish booting first
 
@@ -110,8 +139,9 @@ static class Updater
 
             WriteSwapCmd();
             pending = true;
+            readyVer = VerStr(remote);
 
-            RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('ready'," + JsStr(VerStr(remote)) + ")");
+            RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('ready'," + JsStr(readyVer) + ")");
         }
         catch { /* offline / rate-limited / no release yet — silently skip */ }
     }
@@ -162,7 +192,7 @@ static class Updater
         if (string.IsNullOrWhiteSpace(tag)) return null;
         tag = tag.Trim();
         if (tag.StartsWith("v") || tag.StartsWith("V")) tag = tag.Substring(1);
-        return Version.TryParse(tag, out var v) ? v : null;
+        return Version.TryParse(tag, out var v) ? Norm(v) : null;
     }
 
     static string VerStr(Version v)

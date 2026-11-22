@@ -37,16 +37,39 @@ const s = (v, n) => String(v == null ? '' : v).slice(0, n);
 // through (a javascript: or data: URL would run or hide things in every reader).
 const url = (v, n) => { const t = s(v, n).trim(); return /^https:\/\/[^\s"'<>\\]+$/i.test(t) ? t : ''; };
 
-// Feed posting is per-address rate limited (nginx passes the real one).
-const posts = new Map(); // ip -> [timestamps]
-function allowPost(ip) {
-  const now = Date.now();
-  const list = (posts.get(ip) || []).filter((t) => now - t < 60000);
-  if (list.length >= 5) { posts.set(ip, list); return false; }
-  list.push(now); posts.set(ip, list);
-  if (posts.size > 5000) posts.clear();
-  return true;
+// Per-address rate limits (nginx passes the real address).
+function limiter(max, windowMs) {
+  const seen = new Map(); // ip -> [timestamps]
+  return (ip) => {
+    const now = Date.now();
+    const list = (seen.get(ip) || []).filter((t) => now - t < windowMs);
+    if (list.length >= max) { seen.set(ip, list); return false; }
+    list.push(now); seen.set(ip, list);
+    if (seen.size > 5000) seen.clear();
+    return true;
+  };
 }
+const allowPost = limiter(5, 60000);        // community feed posts
+// An app reports every ~8 s while playing (more when skipping), and a few apps
+// can share one address.
+const allowPresence = limiter(60, 60000);
+
+// Only nginx (on this box) may name the real address; direct :8790 callers get their own.
+function clientIp(req) {
+  const peer = String(req.socket.remoteAddress || '?');
+  return /^(::ffff:)?127\.0\.0\.1$|^::1$/.test(peer) ? String(req.headers['x-real-ip'] || peer) : peer;
+}
+
+// Presence is anyone's to post, so it's bounded: unlimited posts with made-up ids
+// grew the map until the box ran out of memory, and every app downloads the whole
+// list each poll. Stale entries now go every minute, not only when someone reads
+// /friends, and new ids stop at a ceiling.
+const MAX_PRESENCES = 2000;
+function sweepPresences() {
+  const now = Date.now();
+  for (const [id, p] of presences) if (now - p.ts > TTL) presences.delete(id);
+}
+setInterval(sweepPresences, 60 * 1000).unref();
 
 function readBody(req, max, cb) {
   let body = '', dead = false;
@@ -59,24 +82,29 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   if (req.method === 'POST' && req.url === '/presence') {
+    if (!allowPresence(clientIp(req))) { res.writeHead(429); return res.end('slow down'); }
     readBody(req, 6000, (body) => {
+      let code = 200;
       try {
         const d = JSON.parse(body);
-        if (d.id) {
-          if (d.title) {
-            presences.set(s(d.id, 64), {
+        if (d && d.id) {
+          const id = s(d.id, 64);
+          if (!d.title) {
+            presences.delete(id); // stopped playing
+          } else {
+            if (!presences.has(id) && presences.size >= MAX_PRESENCES) sweepPresences();
+            if (!presences.has(id) && presences.size >= MAX_PRESENCES) code = 503;   // full: known ids still update
+            else presences.set(id, {
               name: s(d.name, 60), sc: url(d.sc, 200),
               title: s(d.title, 200), artist: s(d.artist, 120),
               cover: url(d.cover, 400), url: scUrl(d.url),
               pos: num(d.pos, 0, 86400, 0), dur: num(d.dur, 0, 86400, 0), paused: d.paused === true, rate: num(d.rate, 0.5, 1.5, 1),
               ts: Date.now(),
             });
-          } else {
-            presences.delete(s(d.id, 64)); // stopped playing
           }
         }
       } catch (e) {}
-      res.writeHead(200); res.end('ok');
+      res.writeHead(code); res.end(code === 200 ? 'ok' : 'full');
     });
     return;
   }
@@ -101,9 +129,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'POST' && req.url === '/feed') {
-    // Only nginx (on this box) may name the real address; direct :8790 callers get their own.
-    const peer = String(req.socket.remoteAddress || '?');
-    const ip = /^(::ffff:)?127\.0\.0\.1$|^::1$/.test(peer) ? String(req.headers['x-real-ip'] || peer) : peer;
+    const ip = clientIp(req);
     readBody(req, 8000, (body) => {
       let d;
       try { d = JSON.parse(body); } catch (e) { res.writeHead(400); return res.end('bad json'); }

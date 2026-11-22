@@ -131,7 +131,8 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   and settings sync across PCs. The stats can come back if lost locally, and can show
   on your holdonquietly profile along with "Listening now". Not needed to use the app.
 - **Last.fm scrobbling:** done by the host, so the login never touches the page.
-- **Several SoundCloud accounts:** save logins and switch without logging out.
+- **Several SoundCloud accounts:** save logins and switch without logging out. Saved
+  logins are DPAPI-sealed (`accounts\<name>.acct`), like the Last.fm and holdonquietly ones.
 
 ### Desktop
 
@@ -266,9 +267,12 @@ Copy `proxy/friends-server.js` to the box and restart its pm2 process (DEPLOY.md
   `HOQ_DATADIR=<folder>` (its own data, settings and logins) and
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223 --mute-audio`.
   A test copy is silent toward the outside world: no Discord status, no friends
-  list, no phone relay, no Last.fm.
+  list, no phone relay, no Last.fm, and it leaves the shared Discord webhook in the
+  registry alone. It logs to `<folder>\scwv2.log`; the real app logs to `%TEMP%\scwv2.log`.
 - **Live app inspection:** start the real app with `--remote-debugging-port=9222`,
   then `node tools/cdp.js -e "<js>"` / `node tools/shot.js out.png`.
+- **Sign-in by hand:** `HOQ_ACCOUNTS_NO_BROWSER=1` logs the holdonquietly.com sign-in
+  link instead of opening a browser, so a test can call the loopback callback itself.
 - **Saved pages:** copy a frame's outerHTML from DevTools and render it in headless
   Edge with the current CSS injected (useful for signed-in-only pages).
 - Logged out, SoundCloud shows sign-in walls after a few plays and never shows the
@@ -302,6 +306,25 @@ Copy `proxy/friends-server.js` to the box and restart its pm2 process (DEPLOY.md
   test copy.
 - **The install folder's name is a hidden left-to-right mark.** PowerShell file
   cmdlets trim it, so use .NET calls with a `\\?\` path.
+- **Permission grants stick.** WebView2 saves what the host allows in the profile,
+  and links open other sites in the main window. Only soundcloud.com gets the
+  microphone (to unlock device names); mic grants older builds gave other sites are
+  reset at startup.
+- **The host can't reach the page at startup.** WebView2 begins on a blank document,
+  so anything sent right after `Navigate` is lost. The page asks instead
+  (`update:status` for the update toasts).
+- **Never clear localStorage.** The stats and every setting live only there. "Fix
+  blocked" clears cookies and caches, and the page drops just SoundCloud's own keys.
+- **Mutation-driven work must ignore our own UI** (and the player's clock). A button
+  rewriting itself every second kept the full-page clutter scan running all session.
+- **SoundCloud's service worker takes over the page** about 10 s after load, and from
+  then on requests come from it. A `WebResourceRequested` filter has to include the
+  worker source kinds, or the ad blocking quietly stops ~10 s after every launch.
+- **Guard every localStorage read that runs while preload loads.** On a sandboxed page
+  it throws, and one throw stops the whole file: no titlebar on a frameless window.
+- **A `catch { }` around P/Invoke hides a missing export forever.** The Start Menu
+  shortcut called `InitPropVariantFromString`, an inline header helper rather than a
+  propsys.dll export, so no shortcut was ever saved, and nothing said so.
 
 ---
 

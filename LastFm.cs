@@ -133,16 +133,22 @@ static class LastFm
     static long curStart = 0;
     static bool curScrobbled = false;
     static long lastNp = 0;
+    static int curPos = 0;
 
     public static void Track(string track, string artist, int pos, int dur, bool paused)
     {
         if (!Connected || string.IsNullOrWhiteSpace(track) || string.IsNullOrWhiteSpace(artist)) return;
 
-        if (track != curTrack || artist != curArtist)
+        // The same track again (repeat-one, or played once more): after it already
+        // scrobbled, its position jumps back to the start. That's a new play; keyed
+        // on title + artist alone, every replay used to go unscrobbled.
+        bool replay = track == curTrack && artist == curArtist && curScrobbled && pos < 15 && pos + 20 < curPos;
+        if (track != curTrack || artist != curArtist || replay)
         {
             curTrack = track; curArtist = artist; curScrobbled = false; lastNp = 0;
             curStart = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - Math.Max(0, pos);
         }
+        curPos = pos;
         if (paused) return;
 
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

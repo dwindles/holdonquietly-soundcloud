@@ -124,7 +124,7 @@ function scPost(cmd) {
     cmd = String(cmd);
     if (cmd.indexOf('webhook:') === 0) window.__hoqSend(cmd.slice(8), false);
     else if (cmd.indexOf('playreq:') === 0) window.__hoqSend(cmd.slice(8), true);
-    else if (cmd.indexOf('open:') === 0) window.open(cmd.slice(5), '_blank');
+    else if (cmd.indexOf('open:') === 0) { if (/^https?:\/\//i.test(cmd.slice(5))) window.open(cmd.slice(5), '_blank', 'noopener'); }   // web links only
     else if (cmd.indexOf('rpc:') === 0) window.__hoqNpRelay && window.__hoqNpRelay(cmd.slice(4));
   } catch (e) {}
 }
@@ -557,6 +557,7 @@ window.__hoqSeek = hoqSeek;
   setInterval(() => {
     const el = window.__hoqMediaEl;
     if (!el) return;
+    if (!el.paused) window.__hoqEverPlayed = true;   // hoqWhenIdle: from now on, wait for a pause
     const st = hoqFxState();
     // ads are muted / fast-forwarded by the ad skipper: leave their rate alone
     if (!el.muted) {
@@ -659,7 +660,9 @@ window.__hoqMedia = function (action) {
     const q = (s) => document.querySelector(s);
     if (action === 'next') { const b = q('.playControls__next') || q('.skipControl__next'); if (b) b.click(); }
     else if (action === 'prev') { const b = q('.playControls__prev') || q('.skipControl__previous'); if (b) b.click(); }
-    else { const b = q('.playControls__play'); if (b) b.click(); } // playpause / stop
+    // Stop only ever pauses: as a toggle, pressing it while paused started the music.
+    else if (action === 'stop') { const b = q('.playControls__play'); if (b && b.classList.contains('playing')) b.click(); }
+    else { const b = q('.playControls__play'); if (b) b.click(); } // playpause
   } catch (e) {}
 };
 
@@ -683,7 +686,11 @@ window.__hoqMedia = function (action) {
   var media = new Set();
   function watch(el){ if (el.__scWatched) return; el.__scWatched = true; }
   // --- Custom volume: our own 0..1 level applied to every media element ---
-  var vol = parseFloat(localStorage.getItem('scVol'));
+  // Guarded: on a sandboxed page (a bot check can be served that way) touching
+  // localStorage throws, and a throw here stopped the whole file, titlebar and
+  // Fix blocked included, leaving a frameless window that couldn't be moved or closed.
+  var vol = NaN;
+  try { vol = parseFloat(localStorage.getItem('scVol')); } catch (e) {}
   if (isNaN(vol)) vol = 1;
   window.__scGetVolume = function(){ return vol; };
   window.__scSetVolume = function(v){
@@ -3943,25 +3950,15 @@ function startPlayerViz() {
   if (window.__hoqViz) return;
   window.__hoqViz = true;
   let canvas = null, ctx = null, wrap = null, amp = 0, accent = '#ff5500', accentTick = 0;
-  // Web Audio analyser (real reactivity) — bound lazily to the playing element.
-  let actx = null, analyser = null, boundEl = null, td = null;
-  const tried = new WeakSet();
+  // Real reactivity: the tap hung off SoundCloud's own source near the top of this
+  // file (window.__hoqAudioAnalyser, which ambient mode reads too). SoundCloud's
+  // media element is detached, so looking for an <audio>/<video> in the page found
+  // nothing and the bar always drew the stand-in wave. No tap yet → procedural.
+  let analyser = null, td = null;
   function ensureAnalyser() {
-    const els = Array.from(document.querySelectorAll('audio, video'));
-    const el = els.find((e) => (e.currentSrc || e.src || '').startsWith('blob:')) || null;
-    if (!el) return null;                       // no MSE element → procedural
-    if (boundEl === el && analyser) return analyser;
-    if (tried.has(el)) return boundEl === el ? analyser : null;
-    tried.add(el);
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      const a = actx.createAnalyser();
-      a.fftSize = 1024; a.smoothingTimeConstant = 0.72;
-      const src = actx.createMediaElementSource(el); // routes audio through the graph…
-      src.connect(a); a.connect(actx.destination);   // …then back out so it stays audible
-      analyser = a; boundEl = el; td = new Uint8Array(a.fftSize);
-      return analyser;
-    } catch (e) { analyser = null; return null; }   // fall back to procedural, never break audio
+    const a = window.__hoqAudioAnalyser || null;
+    if (a !== analyser) { analyser = a; td = a ? new Uint8Array(a.fftSize) : null; }
+    return analyser;
   }
 
   function ensure() {
@@ -4004,7 +4001,6 @@ function startPlayerViz() {
 
       const pr = playerProgress();
       const an = ensureAnalyser();
-      if (an && actx && actx.state === 'suspended') { try { actx.resume(); } catch (e) {} }
       let live = false;
       if (an && !pr.paused) { an.getByteTimeDomainData(td); live = true; }
       amp += ((pr.paused ? 0.04 : 1) - amp) * 0.08; // ease in/out (flat when paused)
@@ -4346,6 +4342,10 @@ function ensureAdBadge() {
 function skipAdManual() {
   document.dispatchEvent(new CustomEvent('sc-kill-ad'));
 }
+
+// localStorage keys that are the app's own (everything else is SoundCloud's):
+// hoq*, the scFx_* effect switches, and the sc* look/volume settings.
+const HOQ_OWN_KEY = /^(hoq|scFx_|sc(Accent|MatchCover|CoverBg|CustomBg|Zoom|Vol)$)/;
 
 // ---------------------------------------------------------------------------
 // Custom titlebar + palette panel
@@ -4767,6 +4767,15 @@ function buildTitlebar() {
     push();
   });
   panel.querySelector('.fixblock').addEventListener('click', () => {
+    // SoundCloud's own saved state goes (its block flags can live there too); ours
+    // stays. The listening stats and every setting exist only in localStorage, and
+    // the host clears cookies and caches but never localStorage.
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && !HOQ_OWN_KEY.test(k)) localStorage.removeItem(k);
+      }
+    } catch (e) {}
     window.scDesktop.reset();
   });
 
@@ -5948,16 +5957,41 @@ function hoqSettingsSnap() {
 const hoqSig = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
 function hoqSyncState() { try { return JSON.parse(localStorage.getItem('hoqSettingsSync')) || {}; } catch (e) { return {}; } }
 let _settingsReady = false;   // wait for the account's copy before sending ours
+// Run `fn` once nothing is playing: straight away if nothing has played yet this
+// session (the usual case, right after launch), else after half a minute paused.
+// A newer job replaces one that is still waiting.
+let _idleJob = null, _idleIv = 0;
+function hoqWhenIdle(fn) {
+  _idleJob = fn;
+  if (_idleIv) return;
+  let since = 0;
+  const tick = () => {
+    if (!playerProgress().paused) { since = 0; return; }
+    if (!since) since = Date.now();
+    if (window.__hoqEverPlayed && Date.now() - since < 30000) return;
+    clearInterval(_idleIv); _idleIv = 0;
+    const job = _idleJob; _idleJob = null;
+    try { if (job) job(); } catch (e) {}
+  };
+  _idleIv = setInterval(tick, 1000);
+  tick();
+}
 function hoqSettingsFromCloud(item) {
   const st = hoqSyncState(), snap = hoqSettingsSnap(), sig = hoqSig(snap);
   const remote = item && item.data && typeof item.data === 'object' && item.data.values && typeof item.data.values === 'object' ? item.data : null;
   _settingsReady = true;
   if (remote && (remote.ts || 0) > (st.ts || 0) && hoqSig(remote.values) !== sig) {
-    // the account has newer settings than this PC: take them
-    for (const k of Object.keys(snap)) if (!(k in remote.values) && !(k === 'scCustomBg' && snap[k].length > 150000)) localStorage.removeItem(k);
-    for (const [k, v] of Object.entries(remote.values)) if ((HOQ_SYNC_KEYS.includes(k) || /^scFx_[a-z]+$/.test(k)) && typeof v === 'string') localStorage.setItem(k, v);
-    localStorage.setItem('hoqSettingsSync', JSON.stringify({ ts: remote.ts, sig: hoqSig(hoqSettingsSnap()) }));
-    setTimeout(() => location.reload(), 300);
+    // The account has newer settings than this PC: take them. That means a
+    // reload, and this also runs on background pulls (the phone's stats
+    // arriving), so it waits until nothing is playing instead of cutting a song.
+    hoqWhenIdle(() => {
+      if ((remote.ts || 0) <= (hoqSyncState().ts || 0)) return;   // changed here meanwhile: this PC is newer now
+      const now = hoqSettingsSnap();
+      for (const k of Object.keys(now)) if (!(k in remote.values) && !(k === 'scCustomBg' && now[k].length > 150000)) localStorage.removeItem(k);
+      for (const [k, v] of Object.entries(remote.values)) if ((HOQ_SYNC_KEYS.includes(k) || /^scFx_[a-z]+$/.test(k)) && typeof v === 'string') localStorage.setItem(k, v);
+      localStorage.setItem('hoqSettingsSync', JSON.stringify({ ts: remote.ts, sig: hoqSig(hoqSettingsSnap()) }));
+      setTimeout(() => location.reload(), 300);
+    });
     return;
   }
   if (remote && hoqSig(remote.values) === sig) { localStorage.setItem('hoqSettingsSync', JSON.stringify({ ts: remote.ts || 0, sig })); return; }
@@ -5973,7 +6007,7 @@ function hoqSettingsPush(force) {
 }
 setInterval(() => { try { hoqSettingsPush(false); } catch (e) {} }, 20000);
 
-let _statsTitle = '', _statsLastTick = 0;
+let _statsTitle = '', _statsLastTick = 0, _statsLastPos = 0;
 function hoqStatsTick() {
   const np = currentNowPlaying();
   const pr = playerProgress();
@@ -6004,7 +6038,11 @@ function hoqStatsTick() {
   }
   const day = s.days[dk] || (s.days[dk] = { plays: 0, seconds: 0, artists: {}, tracks: {} });
   day.seconds += addSec;
-  if (np.title && np.title !== _statsTitle) {
+  // The same track again (repeat-one, or played once more) jumps back to the
+  // start after a real listen: that's another play, not the same one.
+  const replay = !!np.title && np.title === _statsTitle && _statsLastPos > 30 && pr.pos < 10 && pr.pos + 20 < _statsLastPos;
+  _statsLastPos = np.title ? pr.pos : 0;
+  if (np.title && (np.title !== _statsTitle || replay)) {
     _statsTitle = np.title;
     s.last = np.title;
     s.plays++;
@@ -6854,16 +6892,20 @@ function startShareButton() {
     return np.title ? (np.title + '|' + np.artist) : '';
   };
   // Paint the button for the current track's shared state (skips while a
-  // transient message like "Nothing playing" is showing).
+  // transient message like "Nothing playing" is showing). Writes only when the
+  // state flips: rewriting it every second kept the page's mutation observer,
+  // and so removeClutter's full-page scan, busy for the whole session.
+  let painted = '';
+  const paint = (html) => { if (html !== painted) { painted = html; btn.innerHTML = html; } };
   const refresh = () => {
     if (btn.dataset.msg) return;
-    const shared = songKey() && songKey() === _hoqLastShared;
-    btn.classList.toggle('done', !!shared);
-    btn.innerHTML = (shared ? CHECK : ICON) + '<span>' + (shared ? 'Shared' : 'Share to Discord') + '</span>';
+    const k = songKey(), shared = !!(k && k === _hoqLastShared);
+    btn.classList.toggle('done', shared);
+    paint((shared ? CHECK : ICON) + '<span>' + (shared ? 'Shared' : 'Share to Discord') + '</span>');
   };
   const flash = (txt) => {
     btn.dataset.msg = '1';
-    btn.innerHTML = ICON + '<span>' + txt + '</span>';
+    paint(ICON + '<span>' + txt + '</span>');
     setTimeout(() => { delete btn.dataset.msg; refresh(); }, 1600);
   };
 
@@ -6880,7 +6922,11 @@ function startShareButton() {
 
   document.body.appendChild(btn);
   refresh();
-  setInterval(refresh, 1000); // re-enables automatically when a new track starts
+  // Re-enables automatically when a new track starts. One timer for whichever
+  // copy is current: mountDiscordActions rebuilds the button when React takes
+  // the player bar with it, and each rebuild used to leave its old timer running.
+  clearInterval(window.__hoqShareIv);
+  window.__hoqShareIv = setInterval(refresh, 1000);
 }
 
 // "Play in Discord" — same payload as Share, but flagged so the host marks
@@ -7113,15 +7159,18 @@ function startPlayButton() {
     return np.title ? (np.title + '|' + np.artist) : '';
   };
 
+  // Writes only when the state flips (see startShareButton).
+  let painted = '';
+  const paint = (html) => { if (html !== painted) { painted = html; btn.innerHTML = html; } };
   const refresh = () => {
     if (btn.dataset.msg) return;
-    const queued = songKey() && songKey() === _hoqLastQueued;
-    btn.classList.toggle('done', !!queued);
-    btn.innerHTML = (queued ? CHECK : PLAY) + '<span>' + (queued ? 'Queued' : 'Play in Discord') + '</span>';
+    const k = songKey(), queued = !!(k && k === _hoqLastQueued);
+    btn.classList.toggle('done', queued);
+    paint((queued ? CHECK : PLAY) + '<span>' + (queued ? 'Queued' : 'Play in Discord') + '</span>');
   };
   const flash = (txt) => {
     btn.dataset.msg = '1';
-    btn.innerHTML = PLAY + '<span>' + txt + '</span>';
+    paint(PLAY + '<span>' + txt + '</span>');
     setTimeout(() => { delete btn.dataset.msg; refresh(); }, 1600);
   };
 
@@ -7153,7 +7202,8 @@ function startPlayButton() {
 
   document.body.appendChild(btn);
   refresh();
-  setInterval(refresh, 1000);   // re-enables when the track changes
+  clearInterval(window.__hoqPlayIv);   // one timer, whichever copy is current (see startShareButton)
+  window.__hoqPlayIv = setInterval(refresh, 1000);   // re-enables when the track changes
 }
 
 // Links/images that came from other people (feed, friends): plain https only, so a
@@ -7187,7 +7237,7 @@ window.__hoqFriends = function (list) {
     '<div class="hoq-dc-ftext"><b>' + hoqEsc(f.name || 'Someone') +
     (f.id === me ? '<em class="hoq-me">you</em>' : '') + '</b>' +
     '<span>' + hoqEsc(f.title) + (f.artist ? ' · ' + hoqEsc(f.artist) : '') + '</span>' +
-    (f.sc ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(f.sc) + '">' + hoqEsc(f.sc.replace(/^https?:\/\//, '')) + '</a>' : '') +
+    (hoqSafeUrl(f.sc) ? '<a class="hoq-dc-sclink" data-url="' + hoqEsc(hoqSafeUrl(f.sc)) + '">' + hoqEsc(hoqSafeUrl(f.sc).replace(/^https?:\/\//, '')) + '</a>' : '') +
     '</div>' +
     // Listen along: needs their track link from the server (newer friends server)
     (f.id !== me && hoqTrackPath(f.url) ? '<button type="button" class="hoq-dc-along' + (fol && fol.id === f.id ? ' on' : '') + '" data-id="' + hoqEsc(f.id) + '" data-name="' + hoqEsc(f.name || 'Someone') + '">' + (fol && fol.id === f.id ? 'Listening' : 'Listen along') + '</button>' : '') +
@@ -7230,7 +7280,9 @@ function hoqFollowTick(list) {
   const fol = window.__hoqFollow;
   if (!fol) return;
   const f = (list || []).find((x) => x.id === fol.id);
-  if (!f) { if (list && list.length !== 1) hoqFollowStop(fol.name + ' stopped listening.'); return; }
+  // Gone from the list: stop. (This used to skip the stop whenever exactly one
+  // other person was on, so following carried on after they'd left.)
+  if (!f) { if (list) hoqFollowStop(fol.name + ' stopped listening.'); return; }
   const path = hoqTrackPath(f.url);
   if (!path) return;
   const mine = (() => { try { const h = npPublicUrl('.playbackSoundBadge__titleLink'); return h ? new URL(h).pathname : ''; } catch (e) { return ''; } })();
@@ -8234,7 +8286,21 @@ function setupMiniMode() {
     prog.addEventListener('input', () => { scrubbing = true; fillR(prog); const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) widget.querySelector('.mn-t0').textContent = fmt(prog.value / 1000 * el.duration); });
     prog.addEventListener('change', () => { const el = window.__hoqMediaEl; if (el && isFinite(el.duration)) hoqSeek(prog.value / 1000 * el.duration); scrubbing = false; });
     const vol = widget.querySelector('.mn-volrange');
-    const setVol = () => { fillR(vol); const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = Math.min(1, Math.max(0, vol.value / 100)); } catch (e) {} } };
+    // Through the app's own volume, like the main slider: setting the element
+    // alone was undone by the next play() (which re-applies the saved level) and
+    // left the main slider showing the old one.
+    const setVol = () => {
+      fillR(vol);
+      const v = Math.min(1, Math.max(0, vol.value / 100));
+      if (window.__scSetVolume) window.__scSetVolume(v);
+      else { const el = window.__hoqMediaEl; if (el) { try { el.muted = false; el.volume = v; } catch (e) {} } }
+      const main = document.querySelector('.hoq-vol');
+      if (main) {
+        main.value = String(Math.round(v * 100)); updateVolFill(main);
+        const pct = main.parentElement && main.parentElement.querySelector('.hoq-vol-pct');
+        if (pct) pct.textContent = main.value + '%';
+      }
+    };
     vol.addEventListener('input', () => { adjustingVol = true; setVol(); });
     vol.addEventListener('change', () => { adjustingVol = false; });
     // scroll anywhere on the player = volume
@@ -9303,7 +9369,17 @@ function boot() {
       syncQueueOpen();
     }
   };
-  const obs = new MutationObserver(() => { watchQueue(); syncQueueOpen(); schedule(); });
+  // Changes inside the app's own UI, and the player's ticking clock, can't bring
+  // clutter. Counting them kept removeClutter's full-page scan running every
+  // 0.8 s for the whole session, playing or idle.
+  const QUIET = '[id^="hoq-"], #sc-titlebar, #sc-palette, .hoq-wave, .playbackTimeline__timePassed, .playbackTimeline__duration';
+  const obs = new MutationObserver((recs) => {
+    watchQueue(); syncQueueOpen();
+    for (let i = 0; i < recs.length; i++) {
+      const t = recs[i].target;
+      if (!(t && t.nodeType === 1 && t.closest(QUIET))) { schedule(); return; }
+    }
+  });
   obs.observe(document.body, { childList: true, subtree: true });
   watchQueue(); syncQueueOpen();
   // Cold load shows a burst of SoundCloud orange (follow buttons, badges) before
@@ -9325,6 +9401,8 @@ function boot() {
   setInterval(() => { try { hoqStatsTick(); } catch (e) {} }, 4000);
   // ask who's signed in to the hoq account at boot (the Settings bar may never open)
   if (hoqHasHost()) setTimeout(() => scPost('hoqacct:status'), 1200);
+  // and for any update toast: the host can't show one before this page exists
+  if (hoqHasHost()) setTimeout(() => scPost('update:status'), 1500);
   // The player bar appears/disappears with playback, so keep the tab's bottom
   // edge honest while it's open.
   setInterval(() => {
@@ -9382,7 +9460,11 @@ function startOverlayScrollbar() {
 
   window.addEventListener('scroll', () => { layout(); reveal(); }, { passive: true, capture: true });
   window.addEventListener('resize', layout);
-  new MutationObserver(layout).observe(document.documentElement, { childList: true, subtree: true });
+  // At most once a frame, as part of it: called straight from the observer, every
+  // DOM change forced a synchronous layout just to read scrollHeight.
+  let layoutRaf = 0;
+  new MutationObserver(() => { if (!layoutRaf) layoutRaf = requestAnimationFrame(() => { layoutRaf = 0; layout(); }); })
+    .observe(document.documentElement, { childList: true, subtree: true });
   thumb.addEventListener('mousedown', (e) => { dragging = true; startY = e.clientY; startScroll = se().scrollTop; document.body.style.userSelect = 'none'; bar.classList.add('show'); e.preventDefault(); });
   window.addEventListener('mousemove', (e) => {
     if (dragging) {

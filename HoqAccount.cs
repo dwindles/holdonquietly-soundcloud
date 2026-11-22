@@ -272,46 +272,82 @@ static class HoqAccount
         RunJs?.Invoke("window.__hoqAccount && window.__hoqAccount(" + JsonSerializer.Serialize(s) + ")");
     }
 
-    // Serve exactly one request on the loopback listener: the browser coming back
-    // from holdonquietly.com. Anything else (favicon, a stray tab) gets a 404 and
-    // the wait goes on. The state check makes sure it's our sign-in coming back.
+    // Wait for the browser to come back from holdonquietly.com on the loopback
+    // listener. Each connection is served on its own with a short read timeout:
+    // browsers open spare sockets that never send a byte, and one of those used to
+    // hold the only reader until the 5-minute sign-in timeout while the real
+    // request waited behind it. Anything else (favicon, a stray tab) gets a 404 and
+    // the wait goes on; the state check makes sure it's our sign-in coming back.
     static async Task<Dictionary<string, string>> WaitForCallback(TcpListener listener, string state, CancellationToken ct)
     {
-        while (true)
+        var done = new TaskCompletionSource<Dictionary<string, string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = ct.Register(() => done.TrySetCanceled(ct));
+        async Task AcceptLoop()
         {
-            using var client = await listener.AcceptTcpClientAsync(ct);
-            using var stream = client.GetStream();
-            stream.ReadTimeout = 5000;
-            var buf = new byte[8192];
-            int n = await stream.ReadAsync(buf, 0, buf.Length, ct);
-            string first = Encoding.ASCII.GetString(buf, 0, n).Split('\n')[0];   // GET /callback?code=... HTTP/1.1
-            var parts = first.Split(' ');
-            string target = parts.Length >= 2 ? parts[1] : "";
-            if (!target.StartsWith("/callback?", StringComparison.Ordinal))
+            while (!done.Task.IsCompleted)
             {
-                await Reply(stream, 404, "not here");
-                continue;
+                TcpClient client;
+                try { client = await listener.AcceptTcpClientAsync(ct); }
+                catch (OperationCanceledException) { done.TrySetCanceled(ct); return; }
+                catch (Exception ex) { done.TrySetException(ex); return; }   // listener stopped
+                _ = ServeCallback(client, state, done, ct);
             }
-            var q = new Dictionary<string, string>();
-            foreach (var kv in target.Substring(10).Split('&'))
+        }
+        _ = AcceptLoop();
+        return await done.Task;
+    }
+
+    static async Task ServeCallback(TcpClient client, string state, TaskCompletionSource<Dictionary<string, string>> done, CancellationToken ct)
+    {
+        using (client)
+        {
+            try
             {
-                int i = kv.IndexOf('=');
-                if (i > 0) q[Uri.UnescapeDataString(kv.Substring(0, i))] = Uri.UnescapeDataString(kv.Substring(i + 1).Replace('+', ' '));
+                using var read = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                read.CancelAfter(TimeSpan.FromSeconds(10));
+                var stream = client.GetStream();
+                // The request line, which can arrive in more than one piece.
+                var buf = new byte[8192];
+                int n = 0;
+                while (n < buf.Length && Array.IndexOf(buf, (byte)'\n', 0, n) < 0)
+                {
+                    int k = await stream.ReadAsync(buf.AsMemory(n), read.Token);
+                    if (k <= 0) break;
+                    n += k;
+                }
+                string first = Encoding.ASCII.GetString(buf, 0, n).Split('\n')[0];   // GET /callback?code=... HTTP/1.1
+                var parts = first.Split(' ');
+                string target = parts.Length >= 2 ? parts[1] : "";
+                if (!target.StartsWith("/callback?", StringComparison.Ordinal))
+                {
+                    if (n > 0) await Reply(stream, 404, "not here");
+                    return;
+                }
+                var q = new Dictionary<string, string>();
+                foreach (var kv in target.Substring(10).Split('&'))
+                {
+                    int i = kv.IndexOf('=');
+                    if (i > 0) q[Uri.UnescapeDataString(kv.Substring(0, i))] = Uri.UnescapeDataString(kv.Substring(i + 1).Replace('+', ' '));
+                }
+                if (!q.TryGetValue("state", out var st) || st != state)
+                {
+                    await Reply(stream, 400, Page("that sign-in link wasnt from this app", "start it again from holdonquietly's settings"));
+                    return;
+                }
+                if (q.TryGetValue("iss", out var iss) && iss.TrimEnd('/') != ORIGIN)
+                {
+                    done.TrySetResult(null);
+                    await Reply(stream, 400, Page("that sign-in came from the wrong place", "start it again from holdonquietly's settings"));
+                    return;
+                }
+                // Hand the answer over first: the page below is only for the person,
+                // and a browser that already closed the tab mustn't cost the sign-in.
+                done.TrySetResult(q);
+                bool ok = q.ContainsKey("code");
+                await Reply(stream, 200, ok ? Page("ur signed in", "u can close this tab n go back to the app")
+                                            : Page("sign-in didnt finish", "go back to the app n try again"));
             }
-            if (!q.TryGetValue("state", out var st) || st != state)
-            {
-                await Reply(stream, 400, Page("that sign-in link wasnt from this app", "start it again from holdonquietly's settings"));
-                continue;
-            }
-            if (q.TryGetValue("iss", out var iss) && iss.TrimEnd('/') != ORIGIN)
-            {
-                await Reply(stream, 400, Page("that sign-in came from the wrong place", "start it again from holdonquietly's settings"));
-                return null;
-            }
-            bool ok = q.ContainsKey("code");
-            await Reply(stream, 200, ok ? Page("ur signed in", "u can close this tab n go back to the app")
-                                        : Page("sign-in didnt finish", "go back to the app n try again"));
-            return q;
+            catch { }   // a spare socket that never spoke, or one the browser dropped
         }
     }
 
