@@ -218,6 +218,10 @@ Three ways to get the theme on a phone, all built from the same `preload.js` by
   scans the app's Settings → Phone → Show code with the phone's own camera, in the
   same Safari tab or Home Screen web app (no new tab, nothing to paste). The login
   is then set by the proxy's server, so iOS keeps it for a year instead of a week.
+  No PC: **Sign in → No PC?** walks through a bookmark run on soundcloud.com that
+  carries a sign-in made there over to the proxy (a stand-in until there's a
+  direct sign-in; MOBILE.md has the steps). Settings → **Home Screen app** →
+  **Copy link** moves a sign-in between Safari and the Home Screen app.
   Added to the Home Screen it's its own app (holdonquietly name and icon, dark,
   standalone). It has its own
   phone layout, laid out like a phone app:

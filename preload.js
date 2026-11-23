@@ -4960,6 +4960,11 @@ function buildDiscordTab() {
 // dot on the tab for everyone who hasn't opened it since).
 // Each item: [kind, where, text]: kind 'new' | 'fix', where 'phone' | 'pc' | ''.
 const HOQ_CHANGES = [
+  { id: 'v1.6.43', title: 'v1.6.43: sign in with no PC', when: 'Nov 22, 2026', items: [
+    ['new', 'phone', 'No PC? Sign in on soundcloud.com and a bookmark brings you back here signed in. Sign in → No PC? has every step. It\'s a stand-in until there\'s a direct way in.'],
+    ['new', 'phone', 'Signed in in Safari but not the Home Screen app (or the other way round)? Settings → Home Screen app → Copy link, then paste it into the other one\'s Sign in sheet.'],
+    ['fix', '', 'The sign-in code (Settings → Phone → Show code) is much smaller and scans first time. It holds a one-time link now instead of your whole login, so it works once, within 10 minutes.'],
+  ] },
   { id: 'v1.6.42', title: 'v1.6.42: scan to sign in', when: 'Nov 22, 2026', items: [
     ['new', 'phone', 'Sign in by scanning: tap Sign in, then Scan the code, and point your phone at the code from the app on your PC (Settings → Phone → Show code). It signs you in right there, in the same tab or Home Screen app.'],
     ['fix', 'phone', 'Your phone stays signed in. iPhone was signing you out every week; the sign-in now lasts a year, and a phone that\'s already signed in moves over by itself.'],
@@ -5796,7 +5801,11 @@ function ensureDiscordPanel() {
     } else hoqSec.remove();
   }
   const pairSec = p.querySelector('.hoq-pair-sec');
-  if (pairSec) { if (hoqHasHost()) setupPairSettings(pairSec); else pairSec.remove(); }
+  if (pairSec) {
+    if (hoqHasHost()) setupPairSettings(pairSec);
+    else if (window.__hoqProxyBuild && hoqProxyLogin().o) setupAppLinkSettings(pairSec);
+    else pairSec.remove();
+  }
   p.dataset.pane = 'social';
   // Changes: the list, and a dot on its tab until you've opened it since the
   // newest entry went in (hoqChangesSeen; html.hoq-chg-new also dots the way in).
@@ -6837,6 +6846,79 @@ function setupHookSettings(sec) {
 
 // Settings → Phone → "Log in on your phone". The host makes a QR from this app's
 // own SoundCloud login; it shows for a minute and is then wiped from the page.
+// The phone site (proxy build): a Home Screen web app keeps its own cookies,
+// apart from Safari's, so signing in one doesn't sign in the other. Settings ->
+// "Home Screen app" hands the sign-in across with the same one-time link the
+// PC's Copy link makes (POST /__hoq/pair, here same-origin), pasted into the
+// other one's Sign in sheet. Its login cookies aren't HttpOnly (the pair
+// service sets them that way, as SoundCloud does), so the page can read them.
+function hoqProxyLogin() {
+  const g = (n) => { const m = document.cookie.match(new RegExp('(?:^|; )' + n + '=([^;]*)')); return m ? m[1] : ''; };
+  return { o: g('oauth_token'), s: g('sc_session') };
+}
+function setupAppLinkSettings(sec) {
+  const inApp = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+  const hint = inApp
+    ? 'Copy a one-time link, open sc.holdonquietly.com in Safari, tap Sign in and paste it. It works once, within 10 minutes.'
+    : 'The Home Screen app keeps its own sign-in. Copy a one-time link, open the app, tap Sign in and paste it. It works once, within 10 minutes.';
+  sec.querySelector('.hoq-dc-label').textContent = 'Home Screen app';
+  sec.querySelector('.hoq-rp').innerHTML =
+    '<div class="hoq-rp-row hoq-rp-static">' +
+      '<span><b>' + (inApp ? 'Sign in Safari too' : 'Sign in the Home Screen app') + '</b><em class="hoq-applink-state" style="white-space:normal;overflow:visible;text-overflow:clip;"></em></span>' +
+      '<button class="hoq-pair-btn hoq-applink-btn" type="button">Copy link</button>' +
+    '</div>' +
+    '<input class="hoq-applink-box" readonly hidden aria-label="Sign-in link" style="display:block;width:100%;box-sizing:border-box;margin:0 0 12px;' +
+      'padding:9px 12px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.05);color:#fff;font-size:16px;">';
+  const state = sec.querySelector('.hoq-applink-state'), btn = sec.querySelector('.hoq-applink-btn'), box = sec.querySelector('.hoq-applink-box');
+  state.textContent = hint;
+  let back = 0;
+  const done = (text) => {
+    btn.disabled = false; btn.textContent = 'Copy link';
+    state.textContent = text;
+    clearTimeout(back);
+    back = setTimeout(() => { state.textContent = hint; }, 20000);
+  };
+  const make = () => {
+    const c = hoqProxyLogin();
+    if (!c.o) return Promise.reject('out');
+    return fetch('/__hoq/pair', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ o: c.o, s: c.s }),
+    }).then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d) => {
+        if (!d || !/^[A-Za-z0-9_-]{16,64}$/.test(d.id || '')) throw new Error('bad id');
+        return location.origin + '/__hoq/pair/' + d.id;
+      });
+  };
+  const failed = (s) => done(s === 'out' ? 'You’re not signed in here.'
+    : s === 429 ? 'Too many sign-in links are waiting right now. Try again in a few minutes.'
+      : 'Couldn’t make a link. Check your connection and try again.');
+  const copied = () => { box.hidden = true; done('Copied. Now open ' + (inApp ? 'Safari' : 'the Home Screen app') + ', tap Sign in and paste it. It works once, within 10 minutes.'); };
+  // A link copied by hand when the clipboard says no.
+  const manual = (link) => {
+    box.hidden = false; box.value = link; box.focus(); box.setSelectionRange(0, link.length);
+    done('Copy the link in the box (tap it, Select All, Copy). It works once, within 10 minutes.');
+  };
+  btn.addEventListener('click', () => {
+    btn.disabled = true; btn.textContent = 'Making…';
+    const p = make();
+    p.catch(failed);
+    // Safari only copies during the tap itself: hand it the link as a promise
+    // (ClipboardItem) so the wait for the server still counts as the tap.
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      let item;
+      try { item = new ClipboardItem({ 'text/plain': p.then((l) => new Blob([l], { type: 'text/plain' })) }); } catch (e) { item = null; }
+      if (item) {
+        navigator.clipboard.write([item]).then(copied, () => p.then(manual, () => {}));
+        return;
+      }
+    }
+    p.then((l) => {
+      try { navigator.clipboard.writeText(l).then(copied, () => manual(l)); } catch (e) { manual(l); }
+    }, () => {});
+  });
+}
+
 function setupPairSettings(sec) {
   let modal = document.getElementById('hoq-pair-modal');
   if (!modal) {
@@ -6878,7 +6960,7 @@ function setupPairSettings(sec) {
       '<div class="hoq-pair-card">' +
         '<button class="hoq-pair-x" type="button" aria-label="Close">×</button>' +
         '<div class="hoq-pair-title">Log in on your phone</div>' +
-        '<div class="hoq-pair-sub">Point your phone’s camera at the code.</div>' +
+        '<div class="hoq-pair-sub">On your phone, open sc.holdonquietly.com and tap Sign in → Scan the code.</div>' +
         '<div class="hoq-pair-qr is-empty"><img alt="Login code"><span class="hoq-pair-status"></span></div>' +
         '<div class="hoq-pair-who">Signs in as <b></b></div>' +
         '<div class="hoq-pair-warn">This code is your login. Anyone who scans it gets into your SoundCloud, so don’t screenshot or share it.</div>' +
@@ -6897,9 +6979,13 @@ function setupPairSettings(sec) {
     box.classList.add('is-empty');
     clearInterval(tick); tick = null;
   };
-  window.__hoqPairQr = (src, err) => {
+  const warn = modal.querySelector('.hoq-pair-warn');
+  const WARN_LONG = warn.textContent;
+  window.__hoqPairQr = (src, err, once) => {
     if (modal.hidden) return;
     if (err || !src) { status.textContent = err || 'Couldn’t make the code.'; return; }
+    // a one-time link (the usual): small code, dead after one scan or 10 minutes
+    warn.textContent = once ? 'Works once, within 10 minutes. Until it’s used it signs into your SoundCloud, so don’t screenshot or share it.' : WARN_LONG;
     img.src = src;
     box.classList.remove('is-empty');
     let left = 60;

@@ -1064,58 +1064,79 @@ class Program
     // "redeem side"). Neither cookie is HttpOnly, so a page script can set them.
     const string PROXY_ORIGIN = "https://sc.holdonquietly.com";
 
+    // The QR holds a one-time link (64 characters: a 33-square code, easy for any
+    // camera), not the login itself: that ran to several hundred characters and
+    // made a code too dense to scan. Only if the pairing service can't be reached
+    // does it fall back to the whole login in the link.
     static async Task SendPairQr()
     {
         string img = "", err = "";
+        bool once = false;
         try
         {
-            var cookies = await wv.CoreWebView2.CookieManager.GetCookiesAsync("https://soundcloud.com");
-            string oauth = cookies.FirstOrDefault(c => c.Name == "oauth_token")?.Value ?? "";
-            string sess = cookies.FirstOrDefault(c => c.Name == "sc_session")?.Value ?? "";
+            var (oauth, sess) = await PairCookies();
             if (oauth.Length == 0) err = "Sign in to SoundCloud in this app first.";
             else
             {
-                string json = JsonSerializer.Serialize(new Dictionary<string, string> { ["o"] = oauth, ["s"] = sess });
-                string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-                string url = PROXY_ORIGIN + "/#hoq-login=" + b64;
+                var (link, linkErr) = await MakePairLink(oauth, sess);
+                string url = link;
+                once = url.Length > 0;
+                if (!once)
+                {
+                    Log("pair: no one-time link (" + linkErr + "), using the long code");
+                    string json = JsonSerializer.Serialize(new Dictionary<string, string> { ["o"] = oauth, ["s"] = sess });
+                    string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+                    url = PROXY_ORIGIN + "/#hoq-login=" + b64;
+                }
                 using var gen = new QRCoder.QRCodeGenerator();
                 using var data = gen.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.M);
                 img = "data:image/png;base64," + Convert.ToBase64String(new QRCoder.PngByteQRCode(data).GetGraphic(8));
                 // Length only — the link itself is a login, never written anywhere.
-                Log("pair: code ready (" + url.Length + "-char link, session cookie " + (sess.Length > 0 ? "included" : "missing") + ")");
+                Log("pair: code ready (" + (once ? "one-time" : "long") + " link, " + url.Length + " chars, " + data.ModuleMatrix.Count + " modules incl. border, session cookie " + (sess.Length > 0 ? "included" : "missing") + ")");
             }
         }
         catch (Exception ex) { err = "Couldn't make the code."; Log("pair failed: " + ex.GetType().Name + " " + ex.Message); }
-        string js = "window.__hoqPairQr && window.__hoqPairQr(" + JsonSerializer.Serialize(img) + "," + JsonSerializer.Serialize(err) + ")";
+        string js = "window.__hoqPairQr && window.__hoqPairQr(" + JsonSerializer.Serialize(img) + "," + JsonSerializer.Serialize(err) + "," + (once ? "true" : "false") + ")";
         try { await wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
     }
 
-    // For when the phone can't see this screen: hand the two cookies to the proxy's
-    // pairing service (https, proxy/pair-server.js) and get back a link that works
-    // once, within 10 minutes. The link carries only a random id, not the login.
+    static async Task<(string oauth, string sess)> PairCookies()
+    {
+        var cookies = await wv.CoreWebView2.CookieManager.GetCookiesAsync("https://soundcloud.com");
+        return (cookies.FirstOrDefault(c => c.Name == "oauth_token")?.Value ?? "",
+                cookies.FirstOrDefault(c => c.Name == "sc_session")?.Value ?? "");
+    }
+
+    // Hand the two cookies to the proxy's pairing service (https,
+    // proxy/pair-server.js) and get back a link that works once, within 10
+    // minutes. The link carries only a random id, not the login.
+    static async Task<(string link, string err)> MakePairLink(string oauth, string sess)
+    {
+        try
+        {
+            string body = JsonSerializer.Serialize(new Dictionary<string, string> { ["o"] = oauth, ["s"] = sess });
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(8));
+            var resp = await http.PostAsync(PROXY_ORIGIN + "/__hoq/pair", new StringContent(body, Encoding.UTF8, "application/json"), cts.Token);
+            if (!resp.IsSuccessStatusCode) return ("", "The pairing service answered " + (int)resp.StatusCode + ".");
+            string id = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetString() ?? "";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_-]{16,64}$")) return ("", "The pairing service sent a bad id.");
+            Log("pair: one-time link made");
+            return (PROXY_ORIGIN + "/__hoq/pair/" + id, "");
+        }
+        catch (Exception ex) { Log("pair link failed: " + ex.GetType().Name + " " + ex.Message); return ("", "Couldn't reach the pairing service."); }
+    }
+
+    // For when the phone can't see this screen: the same one-time link, copied.
     static async Task SendPairLink()
     {
         string link = "", err = "";
         try
         {
-            var cookies = await wv.CoreWebView2.CookieManager.GetCookiesAsync("https://soundcloud.com");
-            string oauth = cookies.FirstOrDefault(c => c.Name == "oauth_token")?.Value ?? "";
-            string sess = cookies.FirstOrDefault(c => c.Name == "sc_session")?.Value ?? "";
+            var (oauth, sess) = await PairCookies();
             if (oauth.Length == 0) err = "Sign in to SoundCloud in this app first.";
-            else
-            {
-                string body = JsonSerializer.Serialize(new Dictionary<string, string> { ["o"] = oauth, ["s"] = sess });
-                var resp = await http.PostAsync(PROXY_ORIGIN + "/__hoq/pair", new StringContent(body, Encoding.UTF8, "application/json"));
-                if (!resp.IsSuccessStatusCode) err = "The pairing service answered " + (int)resp.StatusCode + ".";
-                else
-                {
-                    string id = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetString();
-                    link = PROXY_ORIGIN + "/__hoq/pair/" + id;
-                    Log("pair: one-time link made");
-                }
-            }
+            else (link, err) = await MakePairLink(oauth, sess);
         }
-        catch (Exception ex) { err = "Couldn't reach the pairing service."; Log("pair link failed: " + ex.GetType().Name + " " + ex.Message); }
+        catch (Exception ex) { err = "Couldn't make a link."; Log("pair link failed: " + ex.GetType().Name + " " + ex.Message); }
         string js = "window.__hoqPairLink && window.__hoqPairLink(" + JsonSerializer.Serialize(link) + "," + JsonSerializer.Serialize(err) + ")";
         try { await wv.CoreWebView2.ExecuteScriptAsync(js); } catch { }
     }

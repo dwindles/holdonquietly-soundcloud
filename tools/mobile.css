@@ -1307,3 +1307,35 @@ html.hoq-anon #hoq-signin-cta { display: flex; }
   display: block; width: 100%; margin-top: 14px; padding: 11px; border-radius: 10px; cursor: pointer;
   border: 1px solid rgba(255,255,255,.12); background: transparent; color: #c9c9d2; font: 600 14px -apple-system, Inter, Arial, sans-serif;
 }
+/* No PC (for now): sign in on soundcloud.com and carry it over with a bookmark
+   (tools/mobile-signin.js). Folded away under the PC ways in. */
+#hoq-signin-sheet .sh-nopc { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
+#hoq-signin-sheet .sh-nopc summary {
+  display: flex; align-items: center; justify-content: space-between; min-height: 44px; cursor: pointer;
+  list-style: none; color: #fff; font-weight: 700; font-size: 14.5px; -webkit-tap-highlight-color: transparent;
+}
+#hoq-signin-sheet .sh-nopc summary::-webkit-details-marker { display: none; }
+#hoq-signin-sheet .sh-nopc summary::after { content: '+'; color: var(--sc-accent, #ff5500); font-size: 22px; font-weight: 600; }
+#hoq-signin-sheet .sh-nopc[open] summary::after { content: '\2212'; }
+#hoq-signin-sheet .sh-nopc h4 { margin: 14px 0 10px; color: #fff; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+#hoq-signin-sheet .sh-nopc .sh-note, #hoq-signin-sheet .sh-nopc .sh-app-note { margin: 4px 0 0; font-size: 13px; color: #9a9aa4; }
+#hoq-signin-sheet .sh-nopc .sh-app-note {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px; color: #e7e7ed;
+  background: color-mix(in srgb, var(--sc-accent, #ff5500) 14%, transparent);
+}
+#hoq-signin-sheet .sh-nopc .sh-app-note[hidden] { display: none; }
+#hoq-signin-sheet .sh-nopc li { font-size: 13.5px; }
+#hoq-signin-sheet .sh-copybm {
+  display: block; width: 100%; min-height: 44px; margin-top: 8px; border-radius: 11px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--sc-accent, #ff5500) 60%, transparent);
+  background: color-mix(in srgb, var(--sc-accent, #ff5500) 16%, transparent); color: #fff;
+  font: 700 14px -apple-system, Inter, Arial, sans-serif; touch-action: manipulation;
+}
+#hoq-signin-sheet .sh-bmcode {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 8px 10px; border-radius: 10px; resize: none;
+  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff;
+  font: 16px ui-monospace, Menlo, monospace;   /* 16px: no zoom on focus */
+}
+#hoq-signin-sheet .sh-bmcode[hidden] { display: none; }
+#hoq-signin-sheet .sh-bmmsg { min-height: 0; margin-top: 6px; font-size: 12.5px; color: #9ee6a8; }
+#hoq-signin-sheet .sh-bmmsg:empty { display: none; }

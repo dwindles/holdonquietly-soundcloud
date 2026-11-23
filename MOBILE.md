@@ -174,11 +174,69 @@ browser has one). It signs in the same Safari tab or Home Screen web app you're
 in: the iPhone camera app would open Safari instead, which is not where a web app
 keeps its sign-in. **Copy link** and paste still works for a phone without a camera.
 
+The code holds a one-time link, `https://sc.holdonquietly.com/__hoq/pair/<id>`
+(64 characters, a 33-square code), which the app gets by POSTing the two cookies to
+`/__hoq/pair`, the same as **Copy link**. It works once, within 10 minutes. Only if
+the pair service can't be reached does the app fall back to the whole login in the
+link (`/#hoq-login=…`, several hundred characters, a code too dense for many cameras).
+
 The login cookies are then set by the proxy's pair service (`POST /__hoq/pair/login`
 answers with Set-Cookie), not by the page: iOS keeps a cookie a page sets from
 script for 7 days at most, even in a Home Screen web app, and that is what kept
 signing phones out. Phones signed in the old way are moved over by themselves:
 once a day the page hands its login to the same endpoint.
+
+### No PC (temporary): sign in on soundcloud.com, carry it over with a bookmark
+
+Until there's a direct sign-in (SoundCloud's "Sign in with SoundCloud" needs an
+API app, which we can't get right now), a phone with no PC signs in on
+soundcloud.com itself and a bookmark carries that sign-in to this site. The
+password only ever goes into soundcloud.com. It's in the Sign in sheet under
+**No PC? Sign in on soundcloud.com instead** (`tools/mobile-signin.js`,
+`handOver`).
+
+What the user does, in Safari:
+
+1. **Copy the bookmark.** Sign in → No PC? → **Copy the bookmark**. It copies a
+   one-line `javascript:` bookmark. If the clipboard refuses, the code shows in a
+   box to copy by hand.
+2. **Bookmark any page.** Share button (square with an arrow) → **Add Bookmark**,
+   name it **hoq sign-in** → **Save**.
+3. **Put the code in it.** Bookmarks (book icon) → **Edit** → tap **hoq sign-in** →
+   clear the address (ⓧ), paste the code → **Done**.
+4. **Go to soundcloud.com** in Safari.
+5. **Request Desktop Website:** page menu in the address bar (**aA**) → **Request
+   Desktop Website**. An iPhone is sent to m.soundcloud.com, which keeps its
+   login where the bookmark can't read it.
+6. **Sign in to SoundCloud** there, the normal way.
+7. **Run the bookmark** on soundcloud.com: type **hoq sign-in** in the address bar
+   and tap the bookmark (or tap it in Bookmarks). Safari opens
+   `https://sc.holdonquietly.com/discover#hoq-login=…` and the redeem block at the
+   top of `preload.js` signs it in with the year-long cookies.
+8. **Home Screen app only.** It keeps its own cookies, apart from Safari's. In
+   Safari, signed in, go to Social → Settings → **Home Screen app** → **Copy link**
+   (a one-time `/__hoq/pair/<id>` link made from this page's own cookies, the
+   same as the PC's Copy link). Then open the app, tap Sign in and paste it into
+   the sheet's link box. It works once, within 10 minutes. The same button works
+   the other way round from inside the app ("Sign in Safari too").
+
+Afterwards Request Desktop Website can go back off; the bookmark is only needed
+again after a sign-out.
+
+How the bookmark works: it reads `oauth_token` and `sc_session` from
+`document.cookie` on soundcloud.com (neither is HttpOnly; soundcloud.com sends
+no CSP, so a bookmarklet runs there) and navigates to the proxy with them after
+`#hoq-login=` (base64url JSON, exactly the PC code's long link). Off
+soundcloud.com, signed out, or on the mobile site it shows an alert saying what
+to do instead. It's built from a function with `String(handOver)`, so the
+source needs no escaping. Inside that function: no comments (the lines are
+joined), no `%` (a `javascript:` URL is percent-decoded before it runs) and no
+`#` (it uses `String.fromCharCode(35)`).
+
+Tested: the bookmark's four cases (other site, m.soundcloud.com, signed out,
+signed in) in a sandbox, with the payload decoded exactly as the redeem block
+decodes it; the sheet and the Settings button in `tools/phone-preview.js` (the
+pair POST stubbed). Not tested: a real iPhone run with a real SoundCloud sign-in.
 
 ## Status
 
