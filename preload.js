@@ -143,6 +143,25 @@ function scPost(cmd) {
       };
   } catch (e) {}
 })();
+// --- Phone site: no Google display ads -----------------------------------------
+// The desktop app's blocker extension stops these; a website can't load one.
+// SoundCloud's own code sets up a full-screen "webi_interstitial" slot
+// (#div-gpt-ad-interstitial) and adds Google's gpt.js to <head> with appendChild
+// once cookie consent allows it. On the proxy, scripts from Google's ad hosts are
+// never added (top page and the new app's frames alike), so the slot never fills.
+(() => {
+  try {
+    if (!/(^|\.)holdonquietly\.com$/i.test(location.hostname)) return;
+    const AD = /^https?:\/\/([a-z0-9-]+\.)*(doubleclick\.net|googlesyndication\.com|googletagservices\.com|adservice\.google\.com|amazon-adsystem\.com)\//i;
+    const isAd = (n) => !!n && n.nodeName === 'SCRIPT' && AD.test(n.src || '');
+    const N = Node.prototype, app0 = N.appendChild, ins0 = N.insertBefore;
+    N.appendChild = function (n) { return isAd(n) ? n : app0.call(this, n); };
+    N.insertBefore = function (n, ref) { return isAd(n) ? n : ins0.call(this, n, ref); };
+    const st = document.createElement('style');
+    st.textContent = '#div-gpt-ad-interstitial, [id^="div-gpt-ad"], [id^="google_ads_iframe"], ins.adsbygoogle, #google_vignette { display: none !important; }';
+    (document.head || document.documentElement).appendChild(st);
+  } catch (e) {}
+})();
 // </hoq-webi-bridge>
 
 // --- iPhone (phone site): which <audio> is playing -----------------------------
@@ -3211,7 +3230,12 @@ const MUI_CSS = `
     background: transparent !important; background-image: none !important; box-shadow: none !important;
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-color: transparent !important;
   }
-  html:not(.hoq-webi) iframe[class*="webi"] { background: transparent !important; color-scheme: normal !important; }
+  /* light, not normal: the frame's root is normal (see html.hoq-webi) and the two
+     must match or the browser paints an opaque canvas under the frame. Normal on
+     the element resolves to the PAGE's scheme, and the phone site declares dark
+     (a meta tag), which turned Home's sections white there. Light is what normal
+     already meant in the desktop app, which declares no scheme. */
+  html:not(.hoq-webi) iframe[class*="webi"] { background: transparent !important; color-scheme: light !important; }
 
   /* --- buttons ------------------------------------------------------------- */
   .MuiButton-contained.MuiButton-colorPrimary {
@@ -5077,6 +5101,12 @@ function buildDiscordTab() {
 // dot on the tab for everyone who hasn't opened it since).
 // Each item: [kind, where, text]: kind 'new' | 'fix', where 'phone' | 'pc' | ''.
 const HOQ_CHANGES = [
+  { id: 'phone-noads', title: 'Phone: no pop-up ads, dark Home', when: 'Nov 23, 2026', items: [
+    ['fix', 'phone', 'No more full-screen ads popping up on the phone.'],
+    ['fix', 'phone', 'Home is dark again: its sections were white boxes on the phone.'],
+    ['new', 'phone', 'Settings → Home Screen app → Page details copies how the page is built, for bug reports. No sign-in or personal info.'],
+    ['new', 'phone', 'The Discord menu says what each option does: Play in Discord has the bot play it in your voice channel (and posts it), Share to Discord only posts it.'],
+  ] },
   { id: 'v1.6.44', title: 'v1.6.44: check for updates, and phone fixes', when: 'Nov 23, 2026', items: [
     ['new', 'pc', 'A Check for updates button in the header, next to the compact player. It finds, downloads and offers the update right then.'],
     ['fix', 'phone', 'Tapping a song stays in holdonquietly instead of opening the SoundCloud app.'],
@@ -7027,6 +7057,58 @@ function hoqProxyLogin() {
   const g = (n) => { const m = document.cookie.match(new RegExp('(?:^|; )' + n + '=([^;]*)')); return m ? m[1] : ''; };
   return { o: g('oauth_token'), s: g('sc_session') };
 }
+// "Copy page details" (phone site, Settings): how the page and SoundCloud's
+// newer-app frames are built and painted, for a layout bug only a signed-in
+// phone shows. Structure and colours only: no cookies, tokens, names or
+// addresses beyond paths (query strings are dropped).
+function hoqPageReport() {
+  const cs = (el) => { try { return getComputedStyle(el); } catch (e) { return null; } };
+  const bg = (el) => { const c = el && cs(el); return c ? c.backgroundColor + (c.backgroundImage && c.backgroundImage !== 'none' ? ' +img' : '') : '-'; };
+  const scheme = (el) => { const c = el && cs(el); return c ? c.colorScheme : '-'; };
+  const tag = (el) => el ? el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/).slice(0, 4).join('.') : '') : '-';
+  const path = (u) => { try { const x = new URL(u, location.href); return x.host + x.pathname; } catch (e) { return String(u || '').slice(0, 80); } };
+  const H = document.documentElement;
+  const out = {
+    v: (HOQ_CHANGES[0] || {}).id, at: new Date().toISOString(), ua: navigator.userAgent, vw: innerWidth + 'x' + innerHeight,
+    standalone: !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)),
+    page: location.pathname, html: [...H.classList].filter((c) => /^(sc-|hoq-)/.test(c)).join(' '),
+    meta: (document.querySelector('meta[name="color-scheme"]') || {}).content || '', scheme: scheme(H) + ' / ' + scheme(document.body),
+    bg: bg(H) + ' / ' + bg(document.body), frames: [],
+  };
+  document.querySelectorAll('iframe').forEach((f) => {
+    const r = f.getBoundingClientRect();
+    if (r.width < 40 || r.height < 40) return;
+    const fi = { el: tag(f), src: path(f.getAttribute('src') || ''), box: Math.round(r.width) + 'x' + Math.round(r.height), scheme: scheme(f), bg: bg(f) };
+    let d = null;
+    try { d = f.contentDocument; } catch (e) {}
+    if (!d || !d.documentElement) { fi.doc = 'cross-origin'; out.frames.push(fi); return; }
+    const fh = d.documentElement, fw = f.contentWindow;
+    const fcs = (el) => { try { return fw.getComputedStyle(el); } catch (e) { return null; } };
+    const fbg = (el) => { const c = el && fcs(el); return c ? c.backgroundColor + (c.backgroundImage && c.backgroundImage !== 'none' ? ' +img' : '') : '-'; };
+    fi.doc = path(fw.location.href);
+    fi.html = [...fh.classList].join(' ').slice(0, 200);
+    fi.themed = !!d.getElementById('sc-desktop-style') + '/' + !!d.getElementById('hoq-mobile-frame-css');
+    fi.scheme2 = (fcs(fh) || {}).colorScheme + ' / ' + (d.body ? (fcs(d.body) || {}).colorScheme : '-');
+    fi.bg2 = fbg(fh) + ' / ' + fbg(d.body);
+    // the largest light-painted boxes inside: what is actually white
+    const light = [];
+    d.querySelectorAll('body *').forEach((el) => {
+      if (light.length > 40) return;
+      const c = fcs(el); if (!c) return;
+      const m = (c.backgroundColor || '').match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?/);
+      if (!m || (m[4] !== undefined && +m[4] < 0.3)) return;
+      if ((+m[1] + +m[2] + +m[3]) / 3 < 150) return;
+      const b = el.getBoundingClientRect();
+      if (b.width * b.height < 4000) return;
+      light.push({ el: tag(el), bg: c.backgroundColor, box: Math.round(b.width) + 'x' + Math.round(b.height) });
+    });
+    light.sort((a, b2) => (+b2.box.split('x')[0] * +b2.box.split('x')[1]) - (+a.box.split('x')[0] * +a.box.split('x')[1]));
+    fi.light = light.slice(0, 8);
+    out.frames.push(fi);
+  });
+  return JSON.stringify(out, null, 1);
+}
+
 function setupAppLinkSettings(sec) {
   const inApp = !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
   const hint = inApp
@@ -7038,10 +7120,21 @@ function setupAppLinkSettings(sec) {
       '<span><b>' + (inApp ? 'Sign in Safari too' : 'Sign in the Home Screen app') + '</b><em class="hoq-applink-state" style="white-space:normal;overflow:visible;text-overflow:clip;"></em></span>' +
       '<button class="hoq-pair-btn hoq-applink-btn" type="button">Copy link</button>' +
     '</div>' +
+    '<div class="hoq-rp-row hoq-rp-static">' +
+      '<span><b>Page details</b><em class="hoq-diag-state" style="white-space:normal;overflow:visible;text-overflow:clip;">For a bug report: how this page is built and coloured. No sign-in or personal info.</em></span>' +
+      '<button class="hoq-pair-btn hoq-diag-btn" type="button">Copy</button>' +
+    '</div>' +
     '<input class="hoq-applink-box" readonly hidden aria-label="Sign-in link" style="display:block;width:100%;box-sizing:border-box;margin:0 0 12px;' +
       'padding:9px 12px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.05);color:#fff;font-size:16px;">';
   const state = sec.querySelector('.hoq-applink-state'), btn = sec.querySelector('.hoq-applink-btn'), box = sec.querySelector('.hoq-applink-box');
   state.textContent = hint;
+  const diagBtn = sec.querySelector('.hoq-diag-btn'), diagState = sec.querySelector('.hoq-diag-state');
+  diagBtn.addEventListener('click', () => {
+    let txt = '';
+    try { txt = hoqPageReport(); } catch (e) { txt = 'report failed: ' + (e && e.message); }
+    const shown = () => { box.hidden = false; box.value = txt; box.focus(); box.setSelectionRange(0, txt.length); diagState.textContent = 'Copy the text in the box (tap it, Select All, Copy) and paste it where you are reporting the bug.'; };
+    try { navigator.clipboard.writeText(txt).then(() => { diagState.textContent = 'Copied. Paste it in the chat.'; }, shown); } catch (e) { shown(); }
+  });
   let back = 0;
   const done = (text) => {
     btn.disabled = false; btn.textContent = 'Copy link';

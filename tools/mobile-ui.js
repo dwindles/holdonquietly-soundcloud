@@ -79,6 +79,12 @@
         b.type = 'button';
         b.setAttribute('role', 'menuitem');
         b.textContent = it.label;
+        if (it.sub) {   // a line under it saying what it does
+          const sm = document.createElement('small');
+          sm.className = 'ac-sub';
+          sm.textContent = it.sub;
+          b.appendChild(sm);
+        }
         b.addEventListener('click', () => { acts.hidden = true; try { it.run(); } catch (e) {} });
         list.appendChild(b);
       });
@@ -88,8 +94,8 @@
     const songLine = () => { const n = now(); return n.title ? n.title + (n.artist ? ' · ' + n.artist : '') : ''; };
     const discordMenu = () => {
       const items = [];
-      if (document.getElementById('hoq-playbtn')) items.push({ label: 'Play in Discord', run: () => press('#hoq-playbtn') });
-      if (document.getElementById('hoq-share')) items.push({ label: 'Share to Discord', run: () => press('#hoq-share') });
+      if (document.getElementById('hoq-playbtn')) items.push({ label: 'Play in Discord', sub: 'The bot plays it in your voice channel, and it’s posted in the text channel too.', run: () => press('#hoq-playbtn') });
+      if (document.getElementById('hoq-share')) items.push({ label: 'Share to Discord', sub: 'Posts it in the text channel, without playing it.', run: () => press('#hoq-share') });
       if (!items.length) { toast('Discord isn’t ready yet'); return; }
       actionSheet(songLine(), items);
     };
