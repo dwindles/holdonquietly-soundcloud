@@ -24,6 +24,9 @@
   html.hoq-mobile {
     --hoq-safe-t: env(safe-area-inset-top, 0px);
     --hoq-safe-b: env(safe-area-inset-bottom, 0px);
+    /* the sides matter in landscape, where the notch is on one of them */
+    --hoq-safe-l: env(safe-area-inset-left, 0px);
+    --hoq-safe-r: env(safe-area-inset-right, 0px);
     --hoq-top: calc(56px + var(--hoq-safe-t));
     --hoq-tabs: calc(56px + var(--hoq-safe-b));
     --hoq-pill-h: 62px;
@@ -44,6 +47,12 @@
     padding-bottom: var(--hoq-pad-b) !important;
     -webkit-tap-highlight-color: transparent;
   }
+  /* Things scrolled into view (a focused field, a jump to an element) land
+     between the bars, not under them. */
+  html.hoq-mobile { scroll-padding-top: calc(var(--hoq-top) + 8px); scroll-padding-bottom: var(--hoq-pad-b); color-scheme: dark; }
+  /* Our own controls: no iOS long-press callout (copy / open link) on a tap
+     that lingers. */
+  html.hoq-mobile #hoq-tabs, html.hoq-mobile #hoq-pill, html.hoq-mobile #hoq-mnp { -webkit-touch-callout: none; }
   /* With the newer-app frame up, SoundCloud makes body a 100vh grid with no
      padding; ours would make the page ~170px taller than the screen, and it
      scrolled under the (fixed) frame. */
@@ -57,7 +66,7 @@
   html.hoq-mobile .l-content,
   html.hoq-mobile .l-inner-fullwidth {
     max-width: 100% !important; width: 100% !important; min-width: 0 !important;
-    padding-left: 14px !important; padding-right: 14px !important;
+    padding-left: max(14px, var(--hoq-safe-l)) !important; padding-right: max(14px, var(--hoq-safe-r)) !important;
     box-sizing: border-box !important;
   }
   /* SoundCloud nests .l-content inside .l-container.l-content: pad once. */
@@ -94,7 +103,8 @@
   html.hoq-mobile .header .header__inner {
     display: flex !important; flex-wrap: nowrap !important; align-items: center !important; gap: 10px !important;
     width: 100% !important; max-width: none !important; height: 56px !important; min-height: 0 !important;
-    margin: 0 !important; padding: 0 8px 0 12px !important; box-sizing: border-box !important;
+    margin: 0 !important; box-sizing: border-box !important;
+    padding: 0 max(6px, var(--hoq-safe-r)) 0 max(12px, var(--hoq-safe-l)) !important;
   }
   html.hoq-mobile .header__left {
     display: flex !important; flex: 0 0 auto !important; align-items: center !important;
@@ -146,15 +156,16 @@
   html.hoq-mobile .header__forArtistsButton,
   html.hoq-mobile .header__moreButton { display: none !important; }
   html.hoq-mobile .header__userNav { display: flex !important; align-items: center !important; gap: 0 !important; }
+  /* 44x44: Apple's minimum for something you tap */
   html.hoq-mobile .header__userNavButton {
     display: flex !important; align-items: center !important; justify-content: center !important;
-    min-width: 36px !important; height: 40px !important; margin: 0 !important; padding: 0 !important;
+    min-width: 44px !important; height: 44px !important; margin: 0 !important; padding: 0 !important;
     border: 0 !important; float: none !important;
   }
   html.hoq-mobile .header__userNavButton::before { display: none !important; }   /* the desktop dividers */
   html.hoq-mobile .header__userNavActivitiesButton { order: 1 !important; }
   html.hoq-mobile .header__userNavMessagesButton { order: 2 !important; }
-  html.hoq-mobile .header__userNavUsernameButton { order: 3 !important; width: 40px !important; }
+  html.hoq-mobile .header__userNavUsernameButton { order: 3 !important; width: 44px !important; }
   html.hoq-mobile .header__userNavUsernameButtonIcon,
   html.hoq-mobile .header__userNavUsername { display: none !important; }
   html.hoq-mobile .header__userNavAvatar, html.hoq-mobile .header__userNavAvatar span {
@@ -172,7 +183,8 @@
      ====================================================================== */
   html.hoq-mobile #hoq-tabs {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1600;
-    height: var(--hoq-tabs); padding: 0 4px var(--hoq-safe-b); box-sizing: border-box;
+    height: var(--hoq-tabs); box-sizing: border-box;
+    padding: 0 max(4px, var(--hoq-safe-r)) var(--hoq-safe-b) max(4px, var(--hoq-safe-l));
     background: rgba(13,13,16,.88);
     -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5);
     border-top: 1px solid rgba(255,255,255,.07);
@@ -207,7 +219,7 @@
      ====================================================================== */
   html.hoq-mobile.hoq-pill-on #hoq-pill {
     display: flex; position: fixed; z-index: 1700; box-sizing: border-box;
-    left: 8px; right: 8px; bottom: calc(var(--hoq-tabs) + 8px);
+    left: max(8px, var(--hoq-safe-l)); right: max(8px, var(--hoq-safe-r)); bottom: calc(var(--hoq-tabs) + 8px);
     height: var(--hoq-pill-h); align-items: center; gap: 9px; padding: 0 4px 0 5px; border-radius: 31px;
     background: rgba(30,30,34,.9);
     -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
@@ -293,7 +305,8 @@
   @keyframes hoqPillSwR { 0% { transform: translateX(0); opacity: 1; } 45% { transform: translateX(24px); opacity: 0; }
     55% { transform: translateX(-24px); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }
   #hoq-pill .pl-btns { display: flex; align-items: center; flex: none; }
-  #hoq-pill .pl-btns button { width: 37px; height: 46px; border-radius: 12px; color: #ececf0; }
+  /* 42x48 targets (Apple asks 44; four of them plus a title fit at 375px this way) */
+  #hoq-pill .pl-btns button { width: 42px; height: 48px; border-radius: 12px; color: #ececf0; }
   #hoq-pill .pl-btns button:active { background: rgba(255,255,255,.08); }
   #hoq-pill .pl-btns button[hidden] { display: none; }
   #hoq-pill .pl-prev svg, #hoq-pill .pl-next svg { width: 21px; height: 21px; }
@@ -303,6 +316,7 @@
   #hoq-pill .pl-like.pop svg { animation: hoqPillPop .32s ease; }
   @keyframes hoqPillPop { 40% { transform: scale(1.28); } }
   html.hoq-anon #hoq-pill .pl-like, html.hoq-anon #hoq-mnp .mnp-like { display: none !important; }
+  @media (max-width: 390px) { #hoq-pill .pl-btns button { width: 40px; } }
   @media (max-width: 359px) { #hoq-pill .pl-prev { display: none; } }
 
   /* ======================================================================
@@ -330,7 +344,7 @@
   #hoq-mnp .mnp-in {
     position: relative; z-index: 1; height: 100%; box-sizing: border-box;
     display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto;
-    padding: calc(var(--hoq-safe-t) + 4px) 24px calc(var(--hoq-safe-b) + 16px);
+    padding: calc(var(--hoq-safe-t) + 4px) max(24px, var(--hoq-safe-r)) calc(var(--hoq-safe-b) + 16px) max(24px, var(--hoq-safe-l));
     overscroll-behavior: contain;
   }
   #hoq-mnp button {
@@ -401,7 +415,7 @@
   #hoq-mnp .mnp-play svg { width: 32px; height: 32px; }
   #hoq-mnp .mnp-foot { flex: none; display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
   #hoq-mnp .mnp-foot button {
-    flex: 1 1 0; min-width: 0; height: 42px; gap: 7px; border-radius: 21px;
+    flex: 1 1 0; min-width: 0; height: 44px; gap: 7px; border-radius: 22px;
     background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.08);
     font-size: 13px; font-weight: 600; color: #ececf0;
   }
@@ -462,7 +476,8 @@
   }
   #hoq-acts[hidden] { display: none; }
   #hoq-acts .ac-box {
-    width: 100%; max-width: 520px; box-sizing: border-box; padding: 8px 10px calc(10px + var(--hoq-safe-b));
+    width: 100%; max-width: 520px; box-sizing: border-box;
+    padding: 8px max(10px, var(--hoq-safe-r)) calc(10px + var(--hoq-safe-b)) max(10px, var(--hoq-safe-l));
     animation: hoqUp .26s cubic-bezier(.2,.8,.2,1);
   }
   #hoq-acts .ac-list { border-radius: 16px; overflow: hidden; background: rgba(36,36,41,.97); }
@@ -495,7 +510,24 @@
      ====================================================================== */
   html.hoq-mobile #hoq-discord {
     top: var(--hoq-top) !important; bottom: 0 !important; z-index: 1400 !important;
-    padding: 14px 14px var(--hoq-pad-b) !important;
+    padding: 14px max(14px, var(--hoq-safe-r)) var(--hoq-pad-b) max(14px, var(--hoq-safe-l)) !important;
+  }
+  /* Social / Feed / Settings / Changes: tabs you can hit, in one row */
+  html.hoq-mobile #hoq-discord .hoq-dc-card .hoq-sub { flex-wrap: nowrap !important; overflow-x: auto !important; scrollbar-width: none !important; }
+  html.hoq-mobile #hoq-discord .hoq-dc-card .hoq-sub::-webkit-scrollbar { display: none !important; }
+  html.hoq-mobile #hoq-discord .hoq-subtab {
+    flex: 0 0 auto !important; min-height: 44px !important; padding-top: 0 !important; padding-bottom: 0 !important;
+    margin-right: 16px !important; font-size: 14px !important;
+  }
+  /* Changes: the tags above the text, the text the full width */
+  html.hoq-mobile #hoq-discord .hoq-chg { padding: 14px 14px 6px !important; }
+  html.hoq-mobile #hoq-discord .hoq-chg li { flex-direction: column !important; gap: 5px !important; font-size: 14px !important; }
+  html.hoq-mobile #hoq-discord .hoq-chg-tags { width: auto !important; }
+  /* the Social tab in the tab bar gets the same dot while something's unseen */
+  #hoq-tabs button { position: relative; }
+  html.hoq-chg-new #hoq-tabs button[data-k="social"]::after {
+    content: ''; position: absolute; top: 9px; left: 50%; margin-left: 10px; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--sc-accent, #ff5500); box-shadow: 0 0 0 2px rgba(13,13,16,.9);
   }
   /* The panel is see-through over the page background, and the sign-in banner
      isn't part of the page it hides, so the two printed over each other. */
@@ -693,7 +725,7 @@
     margin: 0 !important; padding: 0 !important; float: none !important;
   }
   html.hoq-mobile .sound__soundActions .sc-button {
-    float: none !important; margin: 0 !important; width: 34px !important; height: 32px !important; min-width: 0 !important;
+    float: none !important; margin: 0 !important; width: 40px !important; height: 40px !important; min-width: 0 !important;
     padding: 0 !important; justify-content: center !important; font-size: 0 !important;
     background: transparent !important; border: 0 !important; box-shadow: none !important;
   }
@@ -749,8 +781,8 @@
     flex: 0 0 auto !important; width: auto !important; margin: 0 !important; padding: 0 !important; position: static !important;
   }
   html.hoq-mobile .searchOptions__navigation > li > a {
-    display: flex !important; align-items: center !important; gap: 6px !important; height: 34px !important;
-    margin: 0 !important; padding: 0 14px !important; border-radius: 17px !important; white-space: nowrap !important;
+    display: flex !important; align-items: center !important; gap: 6px !important; height: 40px !important;
+    margin: 0 !important; padding: 0 15px !important; border-radius: 20px !important; white-space: nowrap !important;
     font-size: 13.5px !important; background: rgba(255,255,255,.07) !important; border: 1px solid rgba(255,255,255,.08) !important;
     box-shadow: none !important; transform: none !important;
   }
@@ -1056,7 +1088,8 @@
   html.hoq-mobile .l-nav .collectionNav.g-tabs .g-tabs-item { width: auto !important; flex: 0 0 auto !important; }
   html.hoq-mobile .l-nav .collectionNav.g-tabs a {
     width: auto !important; white-space: nowrap !important; transform: none !important;
-    padding: 8px 13px !important; font-size: 13.5px !important; border-radius: 10px !important;
+    display: flex !important; align-items: center !important; min-height: 40px !important; box-sizing: border-box !important;
+    padding: 0 14px !important; font-size: 13.5px !important; border-radius: 10px !important;
   }
   /* The side panel's left accent bar reads wrong on a pill: a ring instead. */
   html.hoq-mobile .l-nav .collectionNav.g-tabs .active a, html.hoq-mobile .l-nav .collectionNav.g-tabs a.active,
@@ -1114,7 +1147,17 @@
   }
 
   /* Our own surfaces from the desktop theme, at phone width. */
-  html.hoq-mobile #hoq-discord .hoq-dc-quick button { padding: 9px 14px !important; }
+  html.hoq-mobile #hoq-discord .hoq-dc-quick button { padding: 9px 14px !important; min-height: 40px !important; }
+
+  /* Reduce Motion (iOS Settings -> Accessibility -> Motion): no slides, pops
+     or swipes, things just appear. */
+  @media (prefers-reduced-motion: reduce) {
+    html.hoq-mobile #hoq-mnp, html.hoq-mobile #hoq-mnp.on,
+    #hoq-mnp .mnp-art, #hoq-mnp .mnp-rail, #hoq-mnp .mnp-knob, #hoq-pill .pl-prog,
+    #hoq-tabs button svg, #hoq-mtoast { transition: none !important; }
+    #hoq-pill .pl-meta.sw-l, #hoq-pill .pl-meta.sw-r, #hoq-pill .pl-like.pop svg, #hoq-mnp .mnp-like.pop svg,
+    #hoq-acts, #hoq-acts .ac-box { animation: none !important; }
+  }
 }
 
 /* ========================================================================
@@ -1169,6 +1212,12 @@ html.hoq-anon .header__navMenu > li:has(> [data-menu-name='library']) { display:
   font: 13px/1.35 -apple-system, Inter, Arial, sans-serif; color: #d6d6dc;
 }
 html.hoq-anon #hoq-signin-cta { display: flex; }
+/* Wider than a phone (an iPad, a computer's browser) SoundCloud's own fixed
+   47px header is back and the page below keeps a 46px gap for it: the banner
+   clears the header, lines up with the 1240px page, and takes that gap back. */
+@media (min-width: 821px) {
+  html.hoq-anon #hoq-signin-cta { width: calc(100% - 28px); max-width: 1240px; margin: 59px auto -34px; }
+}
 #hoq-signin-cta .cta-txt { flex: 1 1 auto; min-width: 0; }
 #hoq-signin-cta .cta-txt b { display: block; color: #fff; font-size: 14px; margin-bottom: 1px; }
 #hoq-signin-cta button, #hoq-signin-sheet .sh-go {
@@ -1182,10 +1231,57 @@ html.hoq-anon #hoq-signin-cta { display: flex; }
 }
 #hoq-signin-sheet[hidden] { display: none; }
 #hoq-signin-sheet .sh {
-  width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto; box-sizing: border-box;
+  width: 100%; max-width: 520px; max-height: 88vh; max-height: 88dvh; overflow-y: auto; box-sizing: border-box;
   background: #141418; border: 1px solid rgba(255,255,255,.1); border-bottom: 0;
-  border-radius: 20px 20px 0 0; padding: 20px 18px calc(22px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  padding: 20px max(18px, env(safe-area-inset-right)) calc(22px + env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
   font: 14px/1.45 -apple-system, Inter, Arial, sans-serif; color: #c9c9d2;
+  overscroll-behavior: contain;
+  /* lifted above the iOS keyboard while you paste a link (tools/mobile-ui.js
+     keeps --hoq-kb at the keyboard's height) */
+  margin-bottom: var(--hoq-kb, 0px); transition: margin-bottom .2s ease;
+}
+/* Scan the code: the main way in, so the big button. */
+#hoq-signin-sheet .sh-scan {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 52px; margin: 2px 0 16px;
+  border: 0; border-radius: 14px; cursor: pointer; background: var(--sc-accent, #ff5500); color: #fff;
+  font: 700 16px -apple-system, Inter, Arial, sans-serif; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--sc-accent, #ff5500) 40%, transparent);
+}
+#hoq-signin-sheet .sh-scan:active { transform: scale(.98); }
+#hoq-signin-sheet .sh-scan svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linejoin: round; }
+#hoq-signin-sheet .sh-go, #hoq-signin-sheet .sh-close { min-height: 44px; touch-action: manipulation; }
+
+/* The QR scanner (tools/mobile-signin.js): the camera, full screen, a guide
+   square in the middle with everything around it dimmed. */
+#hoq-scan {
+  position: fixed; inset: 0; z-index: 2147483100; overflow: hidden; background: #000; color: #fff;
+  font: 14px/1.4 -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-user-select: none; user-select: none; touch-action: none; overscroll-behavior: contain;
+}
+#hoq-scan[hidden] { display: none; }
+#hoq-scan video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#hoq-scan .sc-frame {
+  position: absolute; left: 50%; top: 50%; width: min(74vw, 56vh, 360px); aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%); border-radius: 24px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.55);
+}
+#hoq-scan .sc-frame i { position: absolute; width: 38px; height: 38px; border: 4px solid var(--sc-accent, #ff5500); }
+#hoq-scan .sc-frame i:nth-child(1) { left: -2px; top: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 24px; }
+#hoq-scan .sc-frame i:nth-child(2) { right: -2px; top: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 24px; }
+#hoq-scan .sc-frame i:nth-child(3) { left: -2px; bottom: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 24px; }
+#hoq-scan .sc-frame i:nth-child(4) { right: -2px; bottom: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 24px; }
+#hoq-scan .sc-top, #hoq-scan .sc-bottom { position: absolute; left: 0; right: 0; text-align: center; box-sizing: border-box;
+  padding-left: max(22px, env(safe-area-inset-left)); padding-right: max(22px, env(safe-area-inset-right)); }
+#hoq-scan .sc-top { top: 0; padding-top: calc(env(safe-area-inset-top, 0px) + 24px); }
+#hoq-scan .sc-top b { display: block; margin-bottom: 6px; font-size: 20px; }
+#hoq-scan .sc-top span { display: block; color: rgba(255,255,255,.78); font-size: 13.5px; }
+#hoq-scan .sc-bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); }
+#hoq-scan .sc-msg { min-height: 20px; margin: 0 auto 14px; max-width: 420px; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+#hoq-scan .sc-cancel {
+  width: 100%; max-width: 420px; min-height: 52px; border-radius: 14px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.28); background: rgba(18,18,22,.72);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  color: #fff; font: 700 16px -apple-system, Inter, Arial, sans-serif; touch-action: manipulation;
 }
 #hoq-signin-sheet h3 { margin: 0 0 4px; color: #fff; font-size: 19px; }
 #hoq-signin-sheet .sh-sub { margin: 0 0 14px; color: #9a9aa4; font-size: 13px; }

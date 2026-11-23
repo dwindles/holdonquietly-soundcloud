@@ -186,6 +186,10 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
 - **Last.fm scrobbling:** done by the host, so the login never touches the page.
 - **Several SoundCloud accounts:** save logins and switch without logging out. Saved
   logins are DPAPI-sealed (`accounts\<name>.acct`), like the Last.fm and holdonquietly ones.
+- **Changes** (a tab in Social/Settings, desktop and phone): what changed, newest
+  first, each line tagged New or Fix and Phone or PC. A dot on the tab (and on the
+  Social/Settings button) until you've opened it since the last update. The list is
+  `HOQ_CHANGES` in `preload.js`.
 
 ### Desktop
 
@@ -210,7 +214,12 @@ Three ways to get the theme on a phone, all built from the same `preload.js` by
 `tools/build-userscript.js`. Details in MOBILE.md.
 
 - **sc.holdonquietly.com (proxy):** SoundCloud served through your own domain with
-  the theme injected. No install. Your PC can pair to sign it in. It has its own
+  the theme injected. No install. Your PC signs it in: **Sign in → Scan the code**
+  scans the app's Settings → Phone → Show code with the phone's own camera, in the
+  same Safari tab or Home Screen web app (no new tab, nothing to paste). The login
+  is then set by the proxy's server, so iOS keeps it for a year instead of a week.
+  Added to the Home Screen it's its own app (holdonquietly name and icon, dark,
+  standalone). It has its own
   phone layout, laid out like a phone app:
   - **Top bar:** logo, search, and (signed in) notifications, messages and you.
   - **Tab bar at the bottom:** Home, Feed, Library, Social (signed out: Home,
@@ -247,6 +256,8 @@ Three ways to get the theme on a phone, all built from the same `preload.js` by
 | `tools/mobile.css` | the phone layout (top bar, tab bar, players, every page at phone width) |
 | `tools/mobile-ui.js` | the phone UI: tab bar, floating player, full-screen player, queue |
 | `tools/mobile-frame.css` | phone rules inside SoundCloud's newer-app frames (signed-in Home modules, track pages) |
+| `tools/mobile-signin.js` | the phone's signed-out Sign in sheet and its QR scanner (camera + jsQR, pinned by hash) |
+| `proxy/app/` | the phone web app's manifest and icons, served at `/__hoq/app/` |
 | `tools/phone-preview.js` | headless Chrome at iPhone size on sc.holdonquietly.com with your local build swapped in (§6) |
 | `tools/cdp.js`, `tools/shot.js` | inspect / screenshot a running app over the debug port |
 | `proxy/` | nginx config + the friends server (`friends-server.js`) for sc.holdonquietly.com |
@@ -368,12 +379,16 @@ presence, jams and posts must be soundcloud.com links (`scProfile`, `scUrl`).
 ### Desktop release
 
 1. Bump `<Version>` in `SoundCloudWV2.csproj`.
-2. Commit and push (authored as **dwindles**). First check incoming commits
+2. Add an entry at the top of `HOQ_CHANGES` in `preload.js` (the Changes tab) in
+   plain words. A new top `id` puts the dot back on the tab for everyone, so give a
+   release its own entry rather than adding lines to the last one. Phone-only
+   updates get an entry too.
+3. Commit and push (authored as **dwindles**). First check incoming commits
    (`git fetch` then `git log HEAD..origin/master`) and scrub any messages that
    shouldn't be in the repo before building on them.
-3. `dotnet publish SoundCloudWV2.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o <out>`
-4. Check the exe's FileVersion, then `gh release create vX.Y.Z <out>\holdonquietly.exe --notes-file notes.md`.
-5. Everyone's app picks it up on its next launch.
+4. `dotnet publish SoundCloudWV2.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o <out>`
+5. Check the exe's FileVersion, then `gh release create vX.Y.Z <out>\holdonquietly.exe --notes-file notes.md`.
+6. Everyone's app picks it up on its next launch.
 
 ### Phone (proxy)
 
@@ -381,6 +396,14 @@ presence, jams and posts must be soundcloud.com links (`scProfile`, `scUrl`).
 as `/var/www/hoq/holdonquietly.proxy.js` (keep a dated `.bak` of the old one).
 nginx serves it as `/hoq.js` with revalidation, so reloading the page picks it up.
 `dist/holdonquietly.user.js` updates through the repo (GitHub raw).
+
+The rest of the phone side on the server:
+- `proxy/app/*` → `/var/www/hoq/app/` (manifest + icons, nginx `/__hoq/app/`).
+- `proxy/pair-server.js` → `/opt/hoq-pair/pair-server.js`, then `pm2 restart hoq-pair`
+  (one-time sign-in links, `POST /__hoq/pair/login` which sets the phone's login
+  cookies, the phone → PC now-playing and stats relays). `PORT=13097` runs a test copy.
+- `proxy/hoq-proxy.conf` → nginx (`nginx -t` before `systemctl reload nginx`, and keep
+  the old file). Diff it against the live one first: the server's copy is the truth.
 
 ### Friends server
 
@@ -474,6 +497,18 @@ as a script file (PowerShell mangles quotes on the way to ssh).
   in the app, the rest go to the browser, and the server keeps SoundCloud links only.
 - **The updater swaps into the running exe's own name.** A browser saves a second
   download as `holdonquietly (1).exe`; a fixed name updated a file nobody launched.
+- **Safari keeps a cookie set from script for 7 days at most**, Home Screen web
+  apps included, which signed phones out every week. The phone's login is set by
+  the server (`POST /__hoq/pair/login`, a Set-Cookie on the site's own address),
+  and a phone renews it about once a day. Never set a login with `document.cookie`.
+- **Effect switches are stored as `scFx_<name>`** (`effectOn()`). The shim turned
+  the mouse-only ones off on touch screens under the wrong names for years.
+- **iOS has no BarcodeDetector** (switched off in Safari). The scanner decodes with
+  jsQR; on a page with an AMD `define()` it would register there instead of on
+  `window`, so the loader hides `define` while it loads.
+- **The proxy hides SoundCloud's frame headers** (they'd block our own `/n/`
+  frames), so it sends its own `frame-ancestors 'self'`: without one, any site
+  could frame the signed-in proxy.
 - **Frames inherit our classes**, including `sc-coverbg`. Any `body::before` effect
   draws twice unless it's turned off under `html.hoq-webi`.
 - **Hashed class names** (`mui-xxxx`) change every SoundCloud deploy. Target `Mui*`

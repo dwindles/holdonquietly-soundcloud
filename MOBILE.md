@@ -22,6 +22,7 @@ The phone layout itself lives in three files the build reads:
 | `tools/mobile.css` | the layout: a 56px top bar, a tab bar at the bottom, the floating and full-screen players, and every page reflowed for a phone |
 | `tools/mobile-ui.js` | the phone UI: tab bar (Home / Feed / Library / Social), floating player (play with a progress ring, previous, next, like, Discord, swipe to skip), full-screen player (seek, shuffle, repeat, like, Discord, Share, Queue) |
 | `tools/mobile-frame.css` | the same inside SoundCloud's newer-app frames (signed-in Home modules, track pages) |
+| `tools/mobile-signin.js` | signed out (proxy): the Sign in sheet, with a QR scanner that reads the app's Show code using this page's own camera |
 
 Every button in the phone UI presses SoundCloud's own control, which stays in the
 page, invisible, so playback state is always SoundCloud's. `node tools/phone-preview.js`
@@ -162,6 +163,22 @@ artwork CDN: that is a CORS wall, and getting past it is the whole reason
 
 The build fails loudly if `scPost()` in `preload.js` stops matching, rather than
 silently shipping a stale bridge.
+
+## Signing in on the phone (proxy)
+
+SoundCloud's own sign-in can't finish through the proxy, so the desktop app hands
+its session over: Settings → Phone → **Show code**. On the phone, **Sign in → Scan
+the code** reads it with the page's own camera (getUserMedia, then jsQR from
+jsDelivr, pinned with an integrity hash; the native BarcodeDetector where a
+browser has one). It signs in the same Safari tab or Home Screen web app you're
+in: the iPhone camera app would open Safari instead, which is not where a web app
+keeps its sign-in. **Copy link** and paste still works for a phone without a camera.
+
+The login cookies are then set by the proxy's pair service (`POST /__hoq/pair/login`
+answers with Set-Cookie), not by the page: iOS keeps a cookie a page sets from
+script for 7 days at most, even in a Home Screen web app, and that is what kept
+signing phones out. Phones signed in the old way are moved over by themselves:
+once a day the page hands its login to the same endpoint.
 
 ## Status
 

@@ -513,8 +513,57 @@
       });
     };
 
+    // ---- <head>: what Safari and a Home Screen web app read ----------------
+    // SoundCloud's own say #333 for the browser bars (grey over our near-black),
+    // "SoundCloud" for the app's name and an orange splash. Kept asserted: its
+    // React rewrites head tags as you move around.
+    const HEAD = [
+      ['theme-color', '#0d0d10'],                        // Safari's bars match the top bar
+      ['color-scheme', 'dark'],
+      ['format-detection', 'telephone=no'],              // a long play count isn't a phone number
+      ['apple-mobile-web-app-title', 'holdonquietly'],
+      ['apple-mobile-web-app-capable', 'yes'],           // older iOS: open from the Home Screen as an app
+      ['mobile-web-app-capable', 'yes'],
+      ['apple-mobile-web-app-status-bar-style', 'black-translucent'],   // the top bar runs under the clock
+    ];
+    // The proxy serves the web app's own manifest and icons (proxy/app/).
+    const APP = window.__hoqProxyBuild ? '/__hoq/app/' : '';
+    const headTags = () => {
+      const head = document.head;
+      if (!head) return;
+      HEAD.forEach(([name, content]) => {
+        let m = head.querySelector('meta[name="' + name + '"]');
+        if (!m) { m = document.createElement('meta'); m.name = name; head.appendChild(m); }
+        if (m.content !== content) m.content = content;
+      });
+      if (!APP) return;
+      const link = (rel, href) => {
+        let l = head.querySelector('link[rel="' + rel + '"]');
+        if (!l) { l = document.createElement('link'); l.rel = rel; head.appendChild(l); }
+        if (l.getAttribute('href') !== href) l.setAttribute('href', href);
+        return l;
+      };
+      const man = link('manifest', APP + 'manifest.webmanifest');
+      if (man.hasAttribute('crossorigin')) man.removeAttribute('crossorigin');
+      link('apple-touch-icon', APP + 'apple-touch-icon.png');
+    };
+
+    // ---- the on-screen keyboard -------------------------------------------
+    // iOS keeps the page's size and slides the keyboard over it: --hoq-kb is
+    // how much of the bottom it covers, so a sheet with a field can lift.
+    const vv = window.visualViewport;
+    if (vv) {
+      const kb = () => {
+        const h = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+        H.style.setProperty('--hoq-kb', (h > 80 ? h : 0) + 'px');   // ignore the toolbar sliding
+      };
+      vv.addEventListener('resize', kb);
+      vv.addEventListener('scroll', kb);
+    }
+
     const mount = () => {
       if (!document.body) { setTimeout(mount, 150); return; }
+      headTags();
       document.body.appendChild(tabs);
       document.body.appendChild(pill);
       document.body.appendChild(qdim);
@@ -526,7 +575,7 @@
         if (document.hidden) return;
         sync();
         routeCheck();
-        if (++tick % 4 === 0) styleFrames();
+        if (++tick % 4 === 0) { styleFrames(); headTags(); }
       }, 250);
       document.addEventListener('visibilitychange', () => { if (!document.hidden) sync(); });
     };

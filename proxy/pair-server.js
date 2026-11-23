@@ -18,7 +18,7 @@
 const http = require('http');
 const crypto = require('crypto');
 
-const PORT = 3097;
+const PORT = +process.env.PORT || 3097;   // PORT=13097 for a local test copy
 const TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING = 50;
 // Same rule the page applies: RFC 6265 cookie-octet (printable ASCII minus
@@ -221,8 +221,49 @@ async function statsCollect(req, res) {
   send(res, 200, '{"at":' + (s.statsAt || 0) + ',"stats":' + (s.stats || 'null') + '}');
 }
 
+// ---------------------------------------------------------------------------
+// The phone's sign-in, as cookies this server sets. Safari caps a cookie a page
+// writes from script (document.cookie) at 7 days, Home Screen web apps included,
+// so a phone signed in by the page itself was signed out a week later. A cookie
+// from a Set-Cookie header on the site's own address keeps its year.
+// POST /__hoq/pair/login {o, s, h} -> 204 with the cookies. The login only
+// passes through (the proxy carries it on every request anyway): nothing is
+// kept and nothing is logged.
+const HOST_OK = /^(?:[a-z0-9-]+\.)*holdonquietly\.com$/i;
+const YEAR = 365 * 24 * 3600;
+function loginCookies(req, res) {
+  // Only the page itself: a form on another site can't send JSON, and the
+  // browser marks a cross-site request (Sec-Fetch-Site), so nobody else can
+  // push a login of theirs onto this phone.
+  const site = String(req.headers['sec-fetch-site'] || '');
+  if (!/^application\/json\b/i.test(String(req.headers['content-type'] || '')) || (site && site !== 'same-origin')) {
+    return send(res, 403, '{"error":"same-origin JSON only"}');
+  }
+  readBody(req, (body) => {
+    let d;
+    try { d = JSON.parse(body); } catch (e) { return send(res, 400, '{"error":"bad json"}'); }
+    if (!d || typeof d !== 'object' || !SAFE.test(d.o || '') || (d.s && !SAFE.test(d.s))) return send(res, 400, '{"error":"bad payload"}');
+    const host = String(d.h || '');
+    if (!HOST_OK.test(host)) return send(res, 400, '{"error":"bad host"}');
+    const tail = '; Path=/; Max-Age=' + YEAR + '; Secure; SameSite=Lax';
+    const dom = '; Domain=.' + host;
+    // oauth_token host-only, as SoundCloud sets it; the other two on the domain,
+    // as the page used to set them (the hint now lasts too: a session cookie
+    // went when iOS closed the web app).
+    const cookies = ['oauth_token=' + d.o + tail, 'soundcloud_session_hint=1' + tail + dom];
+    if (d.s) cookies.push('sc_session=' + d.s + tail + dom);
+    res.writeHead(204, { 'Set-Cookie': cookies, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    res.end();
+  });
+}
+
 http.createServer((req, res) => {
   const path = new URL(req.url, 'http://x').pathname;
+
+  if (path === '/__hoq/pair/login') {
+    if (req.method === 'POST') return loginCookies(req, res);
+    return send(res, 405, '{"error":"POST only"}');
+  }
 
   if (path === '/__hoq/stats') {
     if (req.method === 'POST') return statsReport(req, res);

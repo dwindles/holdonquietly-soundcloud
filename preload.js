@@ -39,10 +39,18 @@ function scPost(cmd) {
       document.cookie = n + '=; path=/; max-age=0';
       document.cookie = n + '=; path=/; max-age=0' + dom;
     });
-    document.cookie = 'oauth_token=' + d.o + tail;            // host-only, as SoundCloud sets it
-    if (ok(d.s)) document.cookie = 'sc_session=' + d.s + tail + dom;
-    document.cookie = 'soundcloud_session_hint=1; path=/; secure; samesite=lax' + dom;
-    location.reload();
+    // The proxy's pair service sets the login (proxy/pair-server.js): Safari caps
+    // a cookie set from script at 7 days, Home Screen web apps included, which
+    // signed phones out every week. Set from here only if that fails.
+    const here = () => {
+      document.cookie = 'oauth_token=' + d.o + tail;            // host-only, as SoundCloud sets it
+      if (ok(d.s)) document.cookie = 'sc_session=' + d.s + tail + dom;
+      document.cookie = 'soundcloud_session_hint=1' + tail + dom;
+    };
+    fetch('/__hoq/pair/login', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ o: d.o, s: ok(d.s) ? d.s : '', h: location.hostname }),
+    }).then((r) => { if (!r.ok) here(); }, here).then(() => location.reload(), () => location.reload());
   } catch (e) {}
 })();
 
@@ -1082,6 +1090,14 @@ const BASE_CSS = `
   }
   .hoq-dc-tab { display: inline-flex !important; align-items: center !important; white-space: nowrap !important; cursor: pointer !important; }
   .hoq-dc-tab.hoq-active { color: #fff !important; font-weight: 700 !important; box-shadow: inset 0 -2px 0 #fff !important; }
+  /* Something new in Social/Settings -> Changes: a dot on the way in, until opened */
+  html.hoq-chg-new .hoq-dc-tab:not(.hoq-active) { position: relative !important; }
+  html.hoq-chg-new .hoq-dc-tab:not(.hoq-active)::before {
+    content: '' !important; position: absolute !important; top: 50% !important; right: -11px !important;
+    width: 7px !important; height: 7px !important; margin-top: -9px !important; border-radius: 50% !important;
+    background: var(--sc-accent, #ff5500) !important; box-shadow: 0 0 8px color-mix(in srgb, var(--sc-accent, #ff5500) 70%, transparent) !important;
+    pointer-events: none !important;
+  }
 
   /* Cleaner header that matches the titlebar tone (frosted variant in cover-bg) */
   .header {
@@ -4939,6 +4955,72 @@ function buildDiscordTab() {
   libLi.insertAdjacentElement('afterend', li);
 }
 
+// Social/Settings -> Changes: what changed, newest first. Same list on the PC
+// and the phone. When something ships, add it at the top (a new `id` puts the
+// dot on the tab for everyone who hasn't opened it since).
+// Each item: [kind, where, text]: kind 'new' | 'fix', where 'phone' | 'pc' | ''.
+const HOQ_CHANGES = [
+  { id: 'v1.6.42', title: 'v1.6.42: scan to sign in', when: 'Nov 22, 2026', items: [
+    ['new', 'phone', 'Sign in by scanning: tap Sign in, then Scan the code, and point your phone at the code from the app on your PC (Settings → Phone → Show code). It signs you in right there, in the same tab or Home Screen app.'],
+    ['fix', 'phone', 'Your phone stays signed in. iPhone was signing you out every week; the sign-in now lasts a year, and a phone that\'s already signed in moves over by itself.'],
+    ['new', 'phone', 'Added to your Home Screen it\'s its own app: holdonquietly name and icon, dark, full screen. Add it again to get the new icon.'],
+    ['new', 'phone', 'Bigger buttons, room for the notch in landscape, sheets that move above the keyboard, and Reduce Motion is respected.'],
+    ['fix', 'phone', 'The 3D tilt, interactive wave and speaker pulse effects are really off on phones now, and a tapped row no longer stays highlighted.'],
+    ['fix', '', 'On an iPad or a computer\'s browser, the "You\'re not signed in" banner no longer hides under the top bar.'],
+    ['fix', '', 'Other websites can no longer show sc.holdonquietly.com inside their own page.'],
+    ['fix', 'pc', 'Last.fm scrobbles are signed exactly the way Last.fm expects, whatever gets sent.'],
+    ['new', '', 'This Changes tab: what\'s new and what\'s fixed, newest first. The dot on it goes away once you\'ve looked.'],
+  ] },
+  { id: 'v1.6.41', title: 'v1.6.41: bug runs', when: 'Nov 22, 2026', items: [
+    ['fix', '', 'A link in a Feed post opens in your browser unless it\'s a SoundCloud link (before, any site could open inside the app).'],
+    ['fix', '', 'No more empty box under the Feed\'s post field.'],
+    ['fix', 'pc', 'Updates work even when the app isn\'t named holdonquietly.exe (a second download is saved as "holdonquietly (1).exe").'],
+    ['fix', 'phone', 'The Feed tab works on the phone (it was stuck on "Loading the feed…").'],
+    ['fix', 'phone', 'Search filters scroll to the last one, follower and like lists no longer pin a big header, and the grey strip above the tabs is gone.'],
+    ['fix', 'phone', 'Last.fm and Accounts (PC only) no longer show in Settings on the phone, and typing in a field doesn\'t zoom the page.'],
+    ['fix', 'phone', 'Smaller phone fixes: SoundCloud\'s full-screen pages, the page scrolling behind a track, its own player bar when ours can\'t show, and double taps zooming in.'],
+  ] },
+  { id: 'phone-layout', title: 'Phone: rebuilt layout', when: 'Nov 22, 2026', items: [
+    ['new', 'phone', 'Laid out like a phone app: a tab bar at the bottom (Home, Feed, Library, Social) and a compact top bar with search, notifications, messages and you.'],
+    ['new', 'phone', 'The floating player has previous and next next to like and Discord. Swipe it to skip.'],
+    ['new', 'phone', 'Full-screen player (tap the floating one): big cover, a seek bar you can drag, shuffle, repeat, like, Discord, Share and your queue. Swipe down to close.'],
+    ['new', 'phone', 'Compact track rows, search filters as chips, and artist pages and track pages fitted to the screen.'],
+    ['fix', 'phone', 'Seeking (from the player or the lock screen) no longer jumps back to 0:00.'],
+  ] },
+  { id: 'v1.6.40', title: 'v1.6.40: Go+ songs in full', when: 'Nov 22, 2026', items: [
+    ['new', 'pc', 'Go+ songs play in full: the app finds the same song on YouTube and plays it in a small player (Settings → Desktop to turn it off).'],
+    ['fix', 'pc', 'If a jam drops you (say your PC slept), the app gets you back in by itself.'],
+  ] },
+  { id: 'v1.6.39', title: 'v1.6.39: Jam and better search', when: 'Nov 21, 2026', items: [
+    ['new', 'pc', 'Jam, like Spotify\'s: start one and friends join with the code; everyone hears what you play and anyone in it can add songs.'],
+    ['new', 'pc', 'Search: Best match puts the song you typed first, and Lyrics finds a song from a line you remember.'],
+  ] },
+];
+
+// Something new since you last looked: a dot on the way in (CSS: hoq-chg-new).
+function hoqChangesLatest() { return (HOQ_CHANGES[0] && HOQ_CHANGES[0].id) || ''; }
+try {
+  if (window.top === window && localStorage.getItem('hoqChangesSeen') !== hoqChangesLatest()) {
+    document.documentElement.classList.add('hoq-chg-new');
+  }
+} catch (e) {}
+function hoqChangesSeen() {
+  try { localStorage.setItem('hoqChangesSeen', hoqChangesLatest()); } catch (e) {}
+  document.documentElement.classList.remove('hoq-chg-new');
+  const dot = document.querySelector('#hoq-discord .hoq-chg-dot');
+  if (dot) dot.hidden = true;
+}
+
+function hoqChangesHtml() {
+  const KIND = { new: 'New', fix: 'Fix' }, WHERE = { phone: 'Phone', pc: 'PC' };
+  return HOQ_CHANGES.map((c, i) => '<div class="hoq-chg' + (i === 0 ? ' is-latest' : '') + '">' +
+    '<div class="hoq-chg-head"><b>' + hoqEsc(c.title) + '</b><span>' + hoqEsc(c.when) + '</span></div>' +
+    '<ul>' + c.items.map(([k, w, t]) => '<li>' +
+      '<span class="hoq-chg-tags"><em class="hoq-chg-k is-' + k + '">' + KIND[k] + '</em>' +
+      (WHERE[w] ? '<em class="hoq-chg-w">' + WHERE[w] + '</em>' : '') + '</span>' +
+      '<span class="hoq-chg-t">' + hoqEsc(t) + '</span></li>').join('') + '</ul></div>').join('');
+}
+
 function ensureDiscordPanel() {
   let p = document.getElementById('hoq-discord');
   if (p) return p;
@@ -5376,9 +5458,36 @@ function ensureDiscordPanel() {
       }
       /* One pane at a time; sections are tagged in ensureDiscordPanel(). */
       #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-set,
-      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-feed { display: none !important; }
+      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-feed,
+      #hoq-discord[data-pane="social"] .hoq-dc-sec.hoq-pane-changes { display: none !important; }
       #hoq-discord[data-pane="settings"] .hoq-dc-sec:not(.hoq-pane-set) { display: none !important; }
       #hoq-discord[data-pane="feed"] .hoq-dc-sec:not(.hoq-pane-feed) { display: none !important; }
+      #hoq-discord[data-pane="changes"] .hoq-dc-sec:not(.hoq-pane-changes) { display: none !important; }
+      /* Changes: what's new, one card per update, newest first (HOQ_CHANGES) */
+      #hoq-discord .hoq-chg-tab { position: relative; }
+      #hoq-discord .hoq-chg-dot { position: absolute; top: 2px; right: -9px; width: 7px; height: 7px; border-radius: 50%;
+        background: var(--sc-accent, #ff5500); box-shadow: 0 0 8px color-mix(in srgb, var(--sc-accent,#ff5500) 70%, transparent); }
+      #hoq-discord .hoq-chg-dot[hidden] { display: none; }
+      #hoq-discord .hoq-pane-changes { background: none; border: 0; padding: 0; box-shadow: none; }
+      #hoq-discord .hoq-chg-list { display: flex; flex-direction: column; gap: 14px; }
+      #hoq-discord .hoq-chg { padding: 16px 18px 8px; border-radius: 14px; background: rgba(255,255,255,0.035);
+        border: 1px solid rgba(255,255,255,0.07); }
+      #hoq-discord .hoq-chg.is-latest { border-color: color-mix(in srgb, var(--sc-accent,#ff5500) 45%, transparent);
+        background: color-mix(in srgb, var(--sc-accent,#ff5500) 7%, rgba(255,255,255,0.03)); }
+      #hoq-discord .hoq-chg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+      #hoq-discord .hoq-chg-head b { color: #fff; font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+      #hoq-discord .hoq-chg-head span { color: #8e8e99; font-size: 12px; white-space: nowrap; }
+      #hoq-discord .hoq-chg ul { margin: 0; padding: 0; list-style: none; }
+      #hoq-discord .hoq-chg li { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0;
+        border-top: 1px solid rgba(255,255,255,0.05); color: #cfcfd6; font-size: 13px; line-height: 1.5; }
+      #hoq-discord .hoq-chg li:first-child { border-top: 0; }
+      #hoq-discord .hoq-chg-tags { flex: none; display: flex; gap: 4px; width: 96px; padding-top: 1px; }
+      #hoq-discord .hoq-chg-tags em { font-style: normal; font-size: 10.5px; font-weight: 800; letter-spacing: .05em;
+        text-transform: uppercase; padding: 2px 6px; border-radius: 6px; line-height: 1.45; }
+      #hoq-discord .hoq-chg-k.is-new { color: #fff; background: color-mix(in srgb, var(--sc-accent,#ff5500) 72%, transparent); }
+      #hoq-discord .hoq-chg-k.is-fix { color: #a7ebc0; background: rgba(60,190,110,0.17); }
+      #hoq-discord .hoq-chg-w { color: #c4c4cc; background: rgba(255,255,255,0.09); }
+      #hoq-discord .hoq-chg-t { flex: 1 1 auto; min-width: 0; }
       #hoq-discord .hoq-acct-new:hover { background: color-mix(in srgb, var(--sc-accent,#ff5500) 22%, rgba(12,12,14,0.6)); }
       #hoq-discord .hoq-jam-pitch { color: #b9b9bd; font-size: 12.5px; line-height: 1.45; margin-bottom: 10px; }
       #hoq-discord .hoq-jam-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -5424,6 +5533,7 @@ function ensureDiscordPanel() {
         <button class="hoq-subtab hoq-on" data-pane="social">Social</button>
         <button class="hoq-subtab" data-pane="feed">Feed</button>
         <button class="hoq-subtab" data-pane="settings">Settings</button>
+        <button class="hoq-subtab hoq-chg-tab" data-pane="changes">Changes<i class="hoq-chg-dot" hidden></i></button>
       </div>
       <div class="hoq-dc-body">
       <div class="hoq-dc-sec hoq-wide">
@@ -5613,6 +5723,7 @@ function ensureDiscordPanel() {
         </div>
         <button class="hoq-dc-open">Open Discord server</button>
       </div>
+      <div class="hoq-dc-sec hoq-wide hoq-pane-changes"><div class="hoq-chg-list"></div></div>
       </div>
     </div>`;
   // Configuration lives behind the Settings sub-tab; everything else is Social.
@@ -5687,11 +5798,18 @@ function ensureDiscordPanel() {
   const pairSec = p.querySelector('.hoq-pair-sec');
   if (pairSec) { if (hoqHasHost()) setupPairSettings(pairSec); else pairSec.remove(); }
   p.dataset.pane = 'social';
+  // Changes: the list, and a dot on its tab until you've opened it since the
+  // newest entry went in (hoqChangesSeen; html.hoq-chg-new also dots the way in).
+  const chgList = p.querySelector('.hoq-chg-list');
+  if (chgList) chgList.innerHTML = hoqChangesHtml();
+  const chgDot = p.querySelector('.hoq-chg-dot');
+  if (chgDot) chgDot.hidden = !document.documentElement.classList.contains('hoq-chg-new');
   p.querySelectorAll('.hoq-subtab').forEach((b) => {
     b.addEventListener('click', () => {
       p.dataset.pane = b.dataset.pane;
       p.querySelectorAll('.hoq-subtab').forEach((o) => o.classList.toggle('hoq-on', o === b));
       p.scrollTop = 0;
+      if (b.dataset.pane === 'changes') hoqChangesSeen();
     });
   });
   document.body.appendChild(p);

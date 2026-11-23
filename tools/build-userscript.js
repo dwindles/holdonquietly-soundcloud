@@ -61,9 +61,11 @@ const MOBILE_CSS = readTool('mobile.css');
 const MOBILE_FRAME_CSS = readTool('mobile-frame.css');
 // Tab bar, floating player, full-screen player, queue (styles: mobile.css).
 const MOBILE_UI = readTool('mobile-ui.js');
+// Signed out on the proxy: the Sign in sheet and its QR scanner.
+const MOBILE_SIGNIN = readTool('mobile-signin.js');
 
-/* Route tag, Library pill row, and (proxy only) the signed-out "How to sign in"
-   button. Raw template: it's plain page JS, kept free of backticks and ${. */
+/* Route tag and the Library pill row. Raw template: it's plain page JS, kept
+   free of backticks and ${. (The sign-in sheet is tools/mobile-signin.js.) */
 const ROUTE_SIGNIN = String.raw`
   // ---- route tag + Library pill row -----------------------------------
   // CSS that differs by page keys off html[data-hoq-route]: the Library
@@ -92,88 +94,6 @@ const ROUTE_SIGNIN = String.raw`
   window.addEventListener('popstate', () => setTimeout(tagRoute, 0));
   tagRoute();
   setInterval(() => { if (!document.hidden) tagRoute(); }, 1500);
-
-  // ---- signed out: how to sign in (proxy only) ------------------------
-  // SoundCloud's own Sign in can't finish through the proxy (hoq-anon hides
-  // it), so this is the way in: the desktop app hands its session over from
-  // Settings -> Phone. Shown only while signed out (CSS: html.hoq-anon).
-  if (window.__hoqProxyBuild) {
-    let cta = null, sheet = null;
-    // A full load to some other path, so the redeem block in preload runs
-    // (a hash-only change wouldn't reload the page).
-    const signInWith = (hash) => {
-      location.href = location.origin + (location.pathname === '/discover' ? '/' : '/discover') + hash;
-    };
-    const buildSheet = () => {
-      sheet = document.createElement('div');
-      sheet.id = 'hoq-signin-sheet';
-      sheet.hidden = true;
-      sheet.innerHTML =
-        '<div class="sh" role="dialog" aria-modal="true" aria-label="How to sign in">' +
-          '<h3>Sign in on your phone</h3>' +
-          '<p class="sh-sub">SoundCloud blocks signing in through this site, so your PC signs you in instead.</p>' +
-          '<ol>' +
-            '<li>On your PC, open the <b>holdonquietly</b> app (signed in to SoundCloud).</li>' +
-            '<li>Go to <b>Social/Settings</b> &rarr; <b>Settings</b> &rarr; <b>Phone</b>.</li>' +
-            '<li>Tap <b>Show code</b> and scan it with your iPhone camera &mdash; or tap <b>Copy link</b> and send it to yourself.</li>' +
-            '<li>Open it in <b>Safari</b>. You&rsquo;re in. A link works once, within 10 minutes.</li>' +
-          '</ol>' +
-          '<div class="sh-paste">' +
-            '<p>Using this from your <span class="sh-k">Home Screen</span>? It keeps its own sign-in, separate from Safari &mdash; paste the link here instead.</p>' +
-            '<div class="sh-row">' +
-              '<input type="url" placeholder="Paste your sign-in link" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
-              '<button class="sh-go" type="button">Sign in</button>' +
-            '</div>' +
-            '<div class="sh-msg" aria-live="polite"></div>' +
-          '</div>' +
-          '<button class="sh-close" type="button">Close</button>' +
-        '</div>';
-      document.body.appendChild(sheet);
-      const input = sheet.querySelector('input'), msg = sheet.querySelector('.sh-msg'), go = sheet.querySelector('.sh-go');
-      sheet.addEventListener('click', (e) => { if (e.target === sheet || e.target.closest('.sh-close')) sheet.hidden = true; });
-      const redeem = () => {
-        const v = (input.value || '').trim();
-        msg.textContent = '';
-        // The QR's link carries the login itself, after #hoq-login=.
-        const at = v.indexOf('#hoq-login=');
-        if (at >= 0) { signInWith(v.slice(at)); return; }
-        // A one-time link: claim it here, in this browser.
-        const m = v.match(/\/__hoq\/pair\/([A-Za-z0-9_-]{16,64})/) || v.match(/^([A-Za-z0-9_-]{16,64})$/);
-        if (!m) { msg.textContent = 'That doesn’t look like a sign-in link. Copy it again from the app on your PC.'; return; }
-        go.disabled = true; go.textContent = 'Signing in…';
-        fetch('/__hoq/pair/' + m[1], { method: 'POST' })
-          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-          .then((d) => signInWith('#hoq-login=' + d.frag))
-          .catch((s) => {
-            go.disabled = false; go.textContent = 'Sign in';
-            msg.textContent = s === 410
-              ? 'That link was already used or has expired. Make a new one on your PC.'
-              : 'Couldn’t sign in. Check your connection and try again.';
-          });
-      };
-      go.addEventListener('click', redeem);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') redeem(); });
-    };
-    const ensureCta = () => {
-      if (cta && cta.isConnected) return;
-      if (!document.body) return;
-      if (!cta) {
-        cta = document.createElement('div');
-        cta.id = 'hoq-signin-cta';
-        cta.innerHTML = '<div class="cta-txt"><b>You’re not signed in</b>Your PC can sign you in — it takes a few seconds.</div>' +
-          '<button type="button">How to sign in</button>';
-        cta.querySelector('button').addEventListener('click', () => {
-          if (!sheet) buildSheet();
-          sheet.hidden = false;
-        });
-      }
-      const hdr = document.querySelector('header.header, .header');
-      if (hdr && hdr.parentNode) hdr.insertAdjacentElement('afterend', cta);
-      else document.body.insertBefore(cta, document.body.firstChild);
-    };
-    ensureCta();
-    setInterval(() => { if (!document.hidden) ensureCta(); }, 1200);
-  }
 `;
 
 /* The community feed (Social -> Feed). On the desktop the C# host fetches and
@@ -259,10 +179,12 @@ const SHIM = [
   "  let vTicks = 0;",
   "  const vTimer = setInterval(() => { setViewport(); if (++vTicks > 20) clearInterval(vTimer); }, 500);",
   '',
-  '  // Touch has no hover, so these cost frame time and give nothing back.',
+  '  // Touch has no hover, so these cost frame time and give nothing back (and',
+  '  // a row hover highlight sticks after a tap). The keys are effectOn()\'s',
+  "  // 'scFx_' + name: this wrote 'scFxTilt' etc. for years, which nothing read.",
   '  try {',
   "    if (matchMedia('(hover: none)').matches) {",
-  "      ['scFxTilt', 'scFxWave', 'scFxPulse'].forEach((k) => localStorage.setItem(k, '0'));",
+  "      ['tilt', 'wave', 'pulse', 'hover'].forEach((k) => localStorage.setItem('scFx_' + k, '0'));",
   '    }',
   '  } catch (e) {}',
   '',
@@ -303,6 +225,7 @@ const SHIM = [
   "  anonTick();",
   "  setInterval(() => { if (!document.hidden) anonTick(); }, 1200);   // idle while the page is hidden (battery)",
   ROUTE_SIGNIN,
+  MOBILE_SIGNIN,
   FEED_NET,
   '  const HOQ_FRAME_CSS = ' + JSON.stringify(MOBILE_FRAME_CSS) + ';',
   MOBILE_UI,
@@ -794,6 +717,30 @@ const PROXY_EXTRA = [
   '  };',
   '  setTimeout(pull, 3000);',
   '  setInterval(pull, 60000);',
+  '})();',
+  '',
+  '/* -------- reverse-proxy build: keep the sign-in from running out -------- */',
+  '(() => {',
+  '  // Safari caps a cookie set from script at 7 days, Home Screen web apps',
+  '  // included, and phones signed in before this got theirs that way, so they',
+  '  // were signed out every week. About once a day, hand the same login to the',
+  '  // pair service, which sets it back as a server cookie good for a year (and',
+  '  // puts it right again if anything rewrites it from script).',
+  "  const KEY = 'hoqLoginRenewedAt';",
+  "  const get = (n) => { const m = document.cookie.match(new RegExp('(?:^|; )' + n + '=([^;]*)')); return m ? m[1] : ''; };",
+  '  const renew = () => {',
+  "    const o = get('oauth_token');",
+  '    if (!o) return;',
+  '    let last = 0;',
+  '    try { last = +localStorage.getItem(KEY) || 0; } catch (e) {}',
+  '    if (Date.now() - last < 20 * 3600 * 1000) return;',
+  "    fetch('/__hoq/pair/login', {",
+  "      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },",
+  "      body: JSON.stringify({ o, s: get('sc_session'), h: location.hostname }),",
+  '    }).then((r) => { if (r.ok) { try { localStorage.setItem(KEY, String(Date.now())); } catch (e) {} } }).catch(() => {});',
+  '  };',
+  '  setTimeout(renew, 8000);',
+  "  document.addEventListener('visibilitychange', () => { if (!document.hidden) renew(); });",
   '})();',
 ].join('\n');
 

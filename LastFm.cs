@@ -66,7 +66,10 @@ static class LastFm
     static string Sig(SortedDictionary<string, string> p)
     {
         var sb = new StringBuilder();
-        foreach (var kv in p) sb.Append(kv.Key).Append(kv.Value);
+        // Last.fm signs the parameters in plain byte order. A SortedDictionary sorts
+        // by the culture's rules, which agree for today's names but not in general
+        // (underscores, case): one new parameter could have failed every call.
+        foreach (var kv in p.OrderBy(kv => kv.Key, StringComparer.Ordinal)) sb.Append(kv.Key).Append(kv.Value);
         sb.Append(SECRET);
         using var md5 = MD5.Create();
         return string.Concat(md5.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString())).Select(b => b.ToString("x2")));

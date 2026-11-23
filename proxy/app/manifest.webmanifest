@@ -1,0 +1,15 @@
+{
+  "name": "holdonquietly",
+  "short_name": "holdonquietly",
+  "description": "SoundCloud with the holdonquietly theme",
+  "start_url": "/discover",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e0e11",
+  "theme_color": "#0d0d10",
+  "icons": [
+    { "src": "/__hoq/app/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/__hoq/app/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/__hoq/app/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
