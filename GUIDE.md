@@ -172,7 +172,8 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   track's action row, and in the player bar). See PLAY-IN-DISCORD.md.
 - **Share to Discord:** posts the current track to your webhook (kept locally in
   `webhook.txt`, never in the page or the repo).
-- **Community feed:** short posts + shared tracks from other app users.
+- **Community feed:** short posts + shared tracks from other app users. A post's
+  SoundCloud links open in the app; any other link opens in the browser.
 
 ### Stats and accounts
 
@@ -305,7 +306,10 @@ The app POSTs `/presence` and GETs `/friends` and `/feed`. People drop off after
 `now` (host only), `leave`, `end`, and GET `/jam/state?code&id&key&v`, which holds
 the request up to 20 s until something changes. The host app makes every call
 (page → `jam:req:` / `jam:watch:`), like presence and the feed. Test copies never
-post, unless `HOQ_BACKEND` points them at a local copy (§6).
+post, unless `HOQ_BACKEND` points them at a local copy (§6). The phone versions have
+no host: their page reads and posts the feed itself at `/__hoq/fb/feed` (the
+shim's `__hoqFeedNet`; the server sends CORS `*`). Profile and track links in
+presence, jams and posts must be soundcloud.com links (`scProfile`, `scUrl`).
 
 ### Go+ songs from YouTube
 
@@ -459,6 +463,17 @@ as a script file (PowerShell mangles quotes on the way to ssh).
   accent-coloured elements included, and the inline colour sticks (a tab stayed
   lit, a heart stayed filled). The phone UI's elements are on its skip list.
 - **Phone: inputs under 16px make iOS zoom the page** when you tap them.
+- **Phone: the Social/Settings page is built the first time it opens**, which can
+  be minutes after load. Anything the shim changes in it has to keep looking (the
+  desktop-only sections reappeared when the page opened late).
+- **A `display:` rule beats the `hidden` attribute.** An element styled
+  `display: flex` stays on screen with `hidden` set; give it a
+  `[hidden] { display: none }` rule (the Feed composer showed an empty box).
+- **Feed posts carry links from strangers.** Opening one in the app window could
+  show a look-alike sign-in page with no address bar: only SoundCloud links open
+  in the app, the rest go to the browser, and the server keeps SoundCloud links only.
+- **The updater swaps into the running exe's own name.** A browser saves a second
+  download as `holdonquietly (1).exe`; a fixed name updated a file nobody launched.
 - **Frames inherit our classes**, including `sc-coverbg`. Any `body::before` effect
   draws twice unless it's turned off under `html.hoq-webi`.
 - **Hashed class names** (`mui-xxxx`) change every SoundCloud deploy. Target `Mui*`

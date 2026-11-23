@@ -13,6 +13,9 @@ const presences = new Map(); // id -> {name, sc, title, artist, cover, url, pos,
 // Track link + position let friends "listen along" (v1.6.25+). A soundcloud.com
 // track link only (the app already drops secret links before sending).
 const scUrl = (v) => { const t = url(v, 300); return /^https:\/\/(www\.|m\.)?soundcloud\.com\/[^/]+\/[^/?#]+/i.test(t) ? t : ''; };
+// Someone's SoundCloud page. Profile and track links shown to everyone are
+// SoundCloud's only: any https link let a post send readers to a look-alike site.
+const scProfile = (v, n) => { const t = url(v, n || 300); return /^https:\/\/(www\.|m\.)?soundcloud\.com\/[^/?#]+/i.test(t) ? t : ''; };
 const num = (v, lo, hi, d) => { const n = +v; return isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
 
 const FEED_FILE = path.join(__dirname, 'feed.json');
@@ -189,7 +192,7 @@ function jamRoute(req, res, ip) {
     let d;
     try { d = JSON.parse(body); } catch (e) { return send(res, 400, { error: 'bad json' }); }
     if (!d || typeof d !== 'object') return send(res, 400, { error: 'bad json' });
-    const id = s(d.id, 64), name = s(d.name, 60).trim() || 'Someone', sc = url(d.sc, 200);
+    const id = s(d.id, 64), name = s(d.name, 60).trim() || 'Someone', sc = scProfile(d.sc, 200);
 
     if (op === 'start') {
       if (!id) return send(res, 400, { error: 'no id' });
@@ -285,7 +288,7 @@ const server = http.createServer((req, res) => {
             if (!presences.has(id) && presences.size >= MAX_PRESENCES) sweepPresences();
             if (!presences.has(id) && presences.size >= MAX_PRESENCES) code = 503;   // full: known ids still update
             else presences.set(id, {
-              name: s(d.name, 60), sc: url(d.sc, 200),
+              name: s(d.name, 60), sc: scProfile(d.sc, 200),
               title: s(d.title, 200), artist: s(d.artist, 120),
               cover: url(d.cover, 400), url: scUrl(d.url),
               pos: num(d.pos, 0, 86400, 0), dur: num(d.dur, 0, 86400, 0), paused: d.paused === true, rate: num(d.rate, 0.5, 1.5, 1),
@@ -327,12 +330,12 @@ const server = http.createServer((req, res) => {
       try { d = JSON.parse(body); } catch (e) { res.writeHead(400); return res.end('bad json'); }
       const text = s(d && d.text, 500).trim();
       const t = d && d.track && typeof d.track === 'object' ? d.track : null;
-      const track = t && t.title ? { title: s(t.title, 200), artist: s(t.artist, 120), cover: url(t.cover, 400), url: url(t.url, 300) } : null;
+      const track = t && t.title ? { title: s(t.title, 200), artist: s(t.artist, 120), cover: url(t.cover, 400), url: scUrl(t.url) } : null;
       if (!d || !d.id || (!text && !track)) { res.writeHead(400); return res.end('empty'); }
       if (!allowPost(ip)) { res.writeHead(429); return res.end('slow down'); }
       feed.unshift({
         id: s(d.id, 64), name: s(d.name, 60) || 'Someone', avatar: url(d.avatar, 400),
-        url: url(d.url, 300), text, track, ts: Date.now(),
+        url: scProfile(d.url), text, track, ts: Date.now(),
       });
       if (feed.length > FEED_MAX) feed.length = FEED_MAX;
       saveFeed();

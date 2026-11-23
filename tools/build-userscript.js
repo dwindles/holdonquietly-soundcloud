@@ -39,8 +39,14 @@ if (!src.includes(OLD_POST)) {
 const NEW_POST = [
   'function scPost(cmd) {',
   '  // No C# host on mobile. Window/native commands are dropped by the sandbox;',
-  '  // the rest are relayed to it, since it owns the GM_* APIs.',
-  '  try { window.postMessage({ __hoq: 1, cmd: String(cmd) }, location.origin); } catch (e) {}',
+  '  // the rest are relayed to it, since it owns the GM_* APIs. The community feed',
+  '  // goes from the page itself (the shim\'s __hoqFeedNet).',
+  '  try {',
+  '    cmd = String(cmd);',
+  "    if (cmd === 'feed:get' && window.__hoqFeedNet) { window.__hoqFeedNet.get(); return; }",
+  "    if (cmd.indexOf('feed:post:') === 0 && window.__hoqFeedNet) { window.__hoqFeedNet.post(cmd.slice(10)); return; }",
+  '    window.postMessage({ __hoq: 1, cmd: cmd }, location.origin);',
+  '  } catch (e) {}',
   '}',
 ].join('\n');
 
@@ -170,6 +176,31 @@ const ROUTE_SIGNIN = String.raw`
   }
 `;
 
+/* The community feed (Social -> Feed). On the desktop the C# host fetches and
+   posts it for the page (feed:get / feed:post:); a phone build has no host, and
+   the tab sat on "Loading the feed..." for good. The page talks to the friends
+   server itself, over the proxy's https route: same origin on the proxy, CORS *
+   from soundcloud.com (userscript, bookmarklet). Each build's scPost routes the
+   two commands here. Raw template: plain page JS. */
+const FEED_NET = String.raw`
+  // ---- community feed, straight from the page --------------------------
+  (() => {
+    const FB = window.__hoqProxyBuild ? '/__hoq/fb' : 'https://sc.holdonquietly.com/__hoq/fb';
+    const pull = () => fetch(FB + '/feed', { credentials: 'omit', cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((list) => { if (window.__hoqFeed) window.__hoqFeed(Array.isArray(list) ? list : []); })
+      .catch(() => { try { if (window.__hoqFeedOffline) window.__hoqFeedOffline(); } catch (e) {} });
+    window.__hoqFeedNet = {
+      get: pull,
+      post: (json) => fetch(FB + '/feed', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json, credentials: 'omit',
+      }).catch(() => {}).then(pull),
+    };
+    // fresh while the tab is open, the way the app polls it
+    setInterval(() => { if (!document.hidden && document.querySelector('#hoq-discord.open')) pull(); }, 30000);
+  })();
+`;
+
 /* ---- 2. Page-side shim, appended after preload ------------------------- */
 const SHIM = [
   '',
@@ -200,19 +231,21 @@ const SHIM = [
   '  // Keep the desktop layout legible instead of letting the browser scale it',
   '  // down. You still need the browser\'s "Request Desktop Website" — a',
   '  // userscript cannot change the UA of a request that already happened.',
-  "  let vCalls = 0;",
+  "  let vWrites = 0;",
   "  const setViewport = () => {",
   "    // Circuit breaker. A runaway viewport loop blocks the main thread and the",
   "    // page never finishes loading -- it took the whole site down once. No",
-  "    // legitimate reason to write this more than a handful of times.",
-  "    if (++vCalls > 60) return;",
+  "    // legitimate reason to write this more than a handful of times. It counts",
+  "    // writes, not calls: SoundCloud adds to <head> all the time, and counting",
+  "    // every one used up the guard within seconds of loading.",
+  "    if (vWrites > 60) return;",
   '    let m = document.querySelector(\'meta[name="viewport"]\');',
-  "    if (!m) { m = document.createElement('meta'); m.name = 'viewport'; (document.head || H).appendChild(m); }",
+  "    if (!m) { vWrites++; m = document.createElement('meta'); m.name = 'viewport'; (document.head || H).appendChild(m); }",
   "    const want = 'width=device-width, initial-scale=1, viewport-fit=cover';",
   "    // Only write when it actually differs. The observer below watches head",
   "    // attributes, so an unconditional setAttribute retriggers it forever and",
   "    // the page never finishes loading.",
-  "    if (m.getAttribute('content') !== want) m.setAttribute('content', want);",
+  "    if (m.getAttribute('content') !== want) { vWrites++; m.setAttribute('content', want); }",
   '  };',
   '  setViewport();',
   "  window.addEventListener('orientationchange', () => setTimeout(setViewport, 150));",
@@ -236,15 +269,18 @@ const SHIM = [
   '  // Features with no mobile equivalent. Hiding them beats showing a control',
   '  // that silently does nothing.',
   "  const DEAD = ['accounts', 'last.fm scrobbling'];",
-  '  let ticks = 0;',
+  '  // The Social/Settings page is only built the first time it opens, which can',
+  '  // be long after load: keep checking (each section once) rather than giving',
+  '  // up after a few seconds, which left these showing.',
   '  const prune = () => {',
-  "    document.querySelectorAll('#hoq-discord .hoq-dc-sec').forEach((sec) => {",
+  "    document.querySelectorAll('#hoq-discord .hoq-dc-sec:not([data-hoq-pruned])').forEach((sec) => {",
+  "      sec.dataset.hoqPruned = '1';",
   "      const l = sec.querySelector('.hoq-dc-label');",
   "      if (l && DEAD.indexOf(l.textContent.trim().toLowerCase()) !== -1) sec.style.display = 'none';",
   '    });',
-  '    if (++ticks < 20) setTimeout(prune, 700);',
   '  };',
   '  prune();',
+  '  setInterval(() => { if (!document.hidden) prune(); }, 700);',
   "",
   "  // Signed out? Then hide the account controls (see hoq-anon in the CSS).",
   "  // Detected from the DOM rather than a cookie, because the proxy forwards",
@@ -267,6 +303,7 @@ const SHIM = [
   "  anonTick();",
   "  setInterval(() => { if (!document.hidden) anonTick(); }, 1200);   // idle while the page is hidden (battery)",
   ROUTE_SIGNIN,
+  FEED_NET,
   '  const HOQ_FRAME_CSS = ' + JSON.stringify(MOBILE_FRAME_CSS) + ';',
   MOBILE_UI,
   "",
@@ -576,6 +613,8 @@ const BOOT_POST = [
   "    if (cmd.indexOf('webhook:') === 0) window.__hoqSend(cmd.slice(8), false);",
   "    else if (cmd.indexOf('playreq:') === 0) window.__hoqSend(cmd.slice(8), true);",
   "    else if (cmd.indexOf('open:') === 0) { if (/^https?:\\/\\//i.test(cmd.slice(5))) window.open(cmd.slice(5), '_blank', 'noopener'); }   // web links only",
+  "    else if (cmd === 'feed:get') window.__hoqFeedNet && window.__hoqFeedNet.get();   // the community feed (shim)",
+  "    else if (cmd.indexOf('feed:post:') === 0) window.__hoqFeedNet && window.__hoqFeedNet.post(cmd.slice(10));",
   '  } catch (e) {}',
   '}',
 ].join('\n');
@@ -694,6 +733,8 @@ const PROXY_POST = [
   "    else if (cmd.indexOf('playreq:') === 0) window.__hoqSend(cmd.slice(8), true);",
   "    else if (cmd.indexOf('open:') === 0) { if (/^https?:\\/\\//i.test(cmd.slice(5))) window.open(cmd.slice(5), '_blank', 'noopener'); }   // web links only",
   "    else if (cmd.indexOf('rpc:') === 0) window.__hoqNpRelay && window.__hoqNpRelay(cmd.slice(4));",
+  "    else if (cmd === 'feed:get') window.__hoqFeedNet && window.__hoqFeedNet.get();   // the community feed (shim)",
+  "    else if (cmd.indexOf('feed:post:') === 0) window.__hoqFeedNet && window.__hoqFeedNet.post(cmd.slice(10));",
   '  } catch (e) {}',
   '}',
 ].join('\n');

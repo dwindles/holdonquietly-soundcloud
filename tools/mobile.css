@@ -31,6 +31,8 @@
     --hoq-pad-b: calc(var(--hoq-tabs) + 18px);
   }
   html.hoq-mobile.hoq-pill-on { --hoq-pad-b: calc(var(--hoq-tabs) + var(--hoq-pill-h) + 26px); }
+  /* SoundCloud's own bar showing instead of the floating player (see 4.) */
+  html.hoq-mobile.hoq-bar-on { --hoq-pad-b: calc(var(--hoq-tabs) + 74px); }
 
   html.hoq-mobile, html.hoq-mobile body {
     overflow-x: hidden !important;
@@ -41,6 +43,12 @@
     padding-top: var(--hoq-top) !important;
     padding-bottom: var(--hoq-pad-b) !important;
     -webkit-tap-highlight-color: transparent;
+  }
+  /* With the newer-app frame up, SoundCloud makes body a 100vh grid with no
+     padding; ours would make the page ~170px taller than the screen, and it
+     scrolled under the (fixed) frame. */
+  html.hoq-mobile body:has(> .webiIframeV2Layout:not(.fullScreen):not(.sc-hidden)) {
+    padding-top: 0 !important; padding-bottom: 0 !important;
   }
   html.hoq-mobile .l-content, html.hoq-mobile #content { padding-top: 0 !important; margin-top: 0 !important; }
 
@@ -176,6 +184,7 @@
     -webkit-appearance: none; appearance: none; flex: 1 1 0; min-width: 0; height: 56px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
     margin: 0; padding: 0; border: 0; background: none; cursor: pointer; color: #8f8f99;
+    touch-action: manipulation;   /* a quick second tap is a tap, not iOS double-tap zoom */
     font: 600 10.5px/1 -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; letter-spacing: .01em;
     -webkit-tap-highlight-color: transparent;
   }
@@ -221,6 +230,27 @@
   html.hoq-mobile.hoq-pill-on .playbackTimeline { width: 100% !important; }
   html.hoq-mobile.hoq-pill-on .playbackTimeline__progressWrapper { flex: 1 1 auto !important; min-width: 100px !important; }
   html.hoq-mobile.hoq-pill-on .playControls__soundBadge { flex: 0 1 auto !important; min-width: 0 !important; max-width: 30% !important; overflow: hidden !important; }
+  /* If the floating player can't go live, SoundCloud's bar is what shows: fit
+     it (transport, timeline, title), it ran to 445px wide at 390px. */
+  html.hoq-mobile:not(.hoq-pill-on) .playControls__inner { padding: 0 8px !important; }
+  /* Nothing loaded: SoundCloud slides the empty bar away by 48px, and the rest
+     peeked out above the tab bar as a grey strip. */
+  html.hoq-mobile .playControls:not(.m-visible) { opacity: 0 !important; }
+  html.hoq-mobile .playControls:not(.m-visible),
+  html.hoq-mobile .playControls:not(.m-visible) * { pointer-events: none !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playControls__elements { width: 100% !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .volume,
+  html.hoq-mobile:not(.hoq-pill-on) .playControls__shuffle,
+  html.hoq-mobile:not(.hoq-pill-on) .playControls__repeat,
+  html.hoq-mobile:not(.hoq-pill-on) .playbackSoundBadge__follow,
+  html.hoq-mobile:not(.hoq-pill-on) .playbackSoundBadge__showQueue,
+  html.hoq-mobile:not(.hoq-pill-on) .playbackSoundBadge__like { display: none !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playbackTimeline { flex: 1 1 auto !important; min-width: 0 !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playbackSoundBadge__titleContextContainer { min-width: 0 !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playControls__soundBadge { margin-left: 2px !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playbackSoundBadge__actions { margin-left: 4px !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playControls__timeline { margin-left: 8px !important; margin-right: 4px !important; }
+  html.hoq-mobile:not(.hoq-pill-on) .playbackSoundBadge__avatar { margin-right: 6px !important; }
 
   #hoq-pill button {
     -webkit-appearance: none; appearance: none; border: 0; background: none; margin: 0; padding: 0;
@@ -287,7 +317,8 @@
     -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
   }
   html.hoq-mobile #hoq-mnp.on { transform: none; visibility: visible; transition: transform .34s cubic-bezier(.2,.8,.2,1); }
-  html.hoq-mnp-open body { overflow: hidden !important; }
+  /* (outranks html.hoq-anon body { overflow: auto } below) */
+  html.hoq-mobile.hoq-mnp-open body { overflow: hidden !important; }
   #hoq-mnp .mnp-bg {
     position: absolute; inset: -60px; background: #222 center / cover no-repeat;
     filter: blur(44px) saturate(1.5) brightness(.6); transform: scale(1.15); opacity: .95;
@@ -305,7 +336,7 @@
   #hoq-mnp button {
     -webkit-appearance: none; appearance: none; border: 0; background: none; margin: 0; padding: 0;
     color: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center;
-    font: inherit; -webkit-tap-highlight-color: transparent;
+    font: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
   }
   #hoq-mnp svg { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
   #hoq-mnp svg .f { fill: currentColor; stroke: none; }
@@ -443,7 +474,7 @@
   #hoq-acts button {
     -webkit-appearance: none; appearance: none; display: block; width: 100%; margin: 0; padding: 16px;
     border: 0; background: none; color: #fff; font: 600 16.5px -apple-system, Inter, Arial, sans-serif;
-    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
   }
   #hoq-acts .ac-list button + button { border-top: 1px solid rgba(255,255,255,.07); }
   #hoq-acts .ac-list button:active { background: rgba(255,255,255,.08); }
@@ -478,7 +509,12 @@
   html.hoq-mobile #sc-palette > .row,
   html.hoq-mobile #sc-palette > .bgurl,
   html.hoq-mobile #sc-palette > .btn-2up { max-width: 100% !important; }
-  html.hoq-mobile #sc-palette input[type='text'] { font-size: 16px !important; }
+  /* Anything you type into: under 16px, iOS zooms the page in when you tap it
+     (the Feed composer was 13px). */
+  html.hoq-mobile input:not([type='checkbox']):not([type='radio']):not([type='color']):not([type='range']):not([type='button']):not([type='submit']),
+  html.hoq-mobile textarea, html.hoq-mobile select { font-size: 16px !important; }
+  /* the Feed composer's placeholder takes two lines at this width */
+  html.hoq-mobile #hoq-discord .hoq-feed-input { min-height: 64px !important; }
   /* Mouse-only effects. The shim switches them off on touch screens at every
      load, so their switches would only ever lie. */
   html.hoq-mobile #sc-palette label.row:has(#sc-fx-wave),
@@ -554,9 +590,13 @@
      8. Track rows (Feed, artist pages, search, playlists): cover with the
      play button on it, artist and title beside it, one row of actions.
      ====================================================================== */
-  html.hoq-mobile .soundList__item, html.hoq-mobile .searchList__item {
+  html.hoq-mobile .soundList__item,
+  html.hoq-mobile .searchList__item .searchItem {
     margin: 0 !important; padding: 12px 0 !important; border-bottom: 1px solid rgba(255,255,255,.06) !important;
   }
+  /* The divider sits on the result, not the row: SoundCloud leaves some rows
+     empty (ad slots), and those now draw nothing. */
+  html.hoq-mobile .searchList__item { margin: 0 !important; padding: 0 !important; border: 0 !important; }
   html.hoq-mobile .sound, html.hoq-mobile .activity { padding: 0 !important; margin: 0 !important; }
   html.hoq-mobile .soundContext {
     display: flex !important; align-items: center !important; gap: 8px !important;
@@ -689,14 +729,15 @@
     width: auto !important; height: auto !important; background: none !important; border: 0 !important;
     box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   }
+  /* display: block, not SoundCloud's inline-block: shrink-wrapped to the chips
+     (779px) the row never had to scroll, and the last filters sat off screen. */
   html.hoq-mobile .searchOptions__scrollable {
+    display: block !important;
     position: static !important; width: auto !important; height: auto !important; max-height: none !important;
     margin: 6px -14px 4px !important; padding: 0 !important; overflow: visible !important;
     background: none !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
     -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
   }
-  /* Rows SoundCloud leaves empty (ad slots) would only draw a stray divider. */
-  html.hoq-mobile .searchList__item:not(:has(.searchItem)) { display: none !important; }
   html.hoq-mobile .searchOptions__navigation {
     display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 8px !important;
     overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; scrollbar-width: none !important;
@@ -939,6 +980,14 @@
   html.hoq-mobile .profileTabs .g-tabs-link { padding: 12px 10px !important; margin: 0 !important; white-space: nowrap !important; font-size: 15px !important; }
   /* The name bar that drops in when you scroll: a desktop 960px strip. */
   html.hoq-mobile .dropbar { display: none !important; }
+  /* Followers / Following / Likes / Reposts lists: the person and the tabs were
+     pinned under the old header (fixed, 182px of a 844px screen, 14px off the
+     edge) over 112px of padding kept free for them. They scroll with the page. */
+  html.hoq-mobile .l-top {
+    position: static !important; top: auto !important; left: auto !important; right: auto !important;
+    width: auto !important; height: auto !important; z-index: auto !important; margin: 0 0 6px !important;
+  }
+  html.hoq-mobile .l-fixed-top-one-column { padding-top: 0 !important; }
   html.hoq-mobile .userMain__content { padding: 0 !important; }
   html.hoq-mobile .userStream__header, html.hoq-mobile .userMain .sectionHead { margin: 16px 0 4px !important; }
 
@@ -1054,8 +1103,10 @@
      edge instead of stopping 28px short of it. */
   html.hoq-mobile .webiEmbeddedModuleContainer { margin-left: -14px !important; margin-right: -14px !important; }
   /* An iframe doesn't stretch between top and bottom (it falls back to 150px
-     tall), so it gets an explicit height. dvh where iOS has it (15.4+). */
-  html.hoq-mobile body > .webiIframe:not(.sc-hidden) {
+     tall), so it gets an explicit height. dvh where iOS has it (15.4+).
+     Only SoundCloud's in-page frame (what its own CSS lays out as a page):
+     its .fullScreen pages (Upload ...) keep covering everything. */
+  html.hoq-mobile body > .webiIframeV2Layout:not(.fullScreen):not(.sc-hidden) {
     position: fixed !important; top: var(--hoq-top) !important; left: 0 !important; right: auto !important; bottom: auto !important;
     width: 100% !important; margin: 0 !important; z-index: 1 !important;
     height: calc(100vh - var(--hoq-top) - var(--hoq-tabs)) !important;

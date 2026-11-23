@@ -166,12 +166,23 @@ static class Updater
         catch { }
     }
 
+    // The exe as it's actually named. A browser saves a second download as
+    // "holdonquietly (1).exe": swapping into the fixed name left that copy on the
+    // old version for good (and it fetched the same update again every launch).
+    static string ExeName()
+    {
+        string n = Path.GetFileName(Environment.ProcessPath ?? "");
+        return !string.IsNullOrEmpty(n) && n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            && !n.Equals(NEW_EXE, StringComparison.OrdinalIgnoreCase) ? n : EXE;
+    }
+
     static void WriteSwapCmd()
     {
         // Waits for THIS process to exit (its file lock releases), swaps in the new
         // exe, relaunches, then deletes itself. By PID, not image name: the desktop
         // widget is also holdonquietly.exe, and while it ran the swap waited forever.
         int pid = Environment.ProcessId;
+        string exe = ExeName().Replace("%", "%%");   // a % in a .cmd would read as a variable
         string c =
             "@echo off\r\n" +
             "cd /d \"%~dp0\"\r\n" +
@@ -181,8 +192,8 @@ static class Updater
             "  ping -n 2 127.0.0.1 >nul\r\n" +
             "  goto wait\r\n" +
             ")\r\n" +
-            "move /y \"" + NEW_EXE + "\" \"" + EXE + "\" >nul\r\n" +
-            "start \"\" \"" + EXE + "\"\r\n" +
+            "move /y \"" + NEW_EXE + "\" \"" + exe + "\" >nul\r\n" +
+            "start \"\" \"" + exe + "\"\r\n" +
             "del \"%~f0\"\r\n";
         File.WriteAllText(Path.Combine(exeDir, CMD), c);
     }

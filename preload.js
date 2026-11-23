@@ -4879,7 +4879,18 @@ function setupFeed(p) {
   const render = () => {
     if (!pending.length && !feedItems.length) { list.innerHTML = '<div class="hoq-feed-empty">Nothing here yet.<br>Be the first to say something or share a track.</div>'; return; }
     list.innerHTML = pending.map((f) => itemHtml(f, true)).join('') + feedItems.map((f) => itemHtml(f, false)).join('');
-    list.querySelectorAll('.hoq-fi-track[href], a.hoq-fi-name[href]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); const h = hoqSafeUrl(a.getAttribute('href')); if (h) location.href = h; }));
+    // Posts carry their own links, and the server only checks they're https. A
+    // SoundCloud link opens here (on this site: the phone's proxy stays the
+    // proxy); anything else goes to the browser, never into this window, where
+    // a look-alike sign-in page would show no address.
+    list.querySelectorAll('.hoq-fi-track[href], a.hoq-fi-name[href]').forEach((a) => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const h = hoqSafeUrl(a.getAttribute('href'));
+      if (!h) return;
+      const sc = h.match(/^https:\/\/(?:www\.|m\.)?soundcloud\.com(\/[^?#]*)?/i);
+      if (sc) location.href = location.origin + (sc[1] || '/');
+      else scPost('open:' + h);
+    }));
   };
 
   window.__hoqFeed = function (arr) {
@@ -5132,6 +5143,8 @@ function ensureDiscordPanel() {
       #hoq-discord .hoq-feed-input::placeholder { color: #8a8a90; }
       #hoq-discord .hoq-feed-attached { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 7px 9px;
         background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; position: relative; }
+      /* display: flex beat the hidden attribute: an empty box sat under the composer */
+      #hoq-discord .hoq-feed-attached[hidden] { display: none; }
       #hoq-discord .hoq-feed-attached img { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; flex: none; }
       #hoq-discord .hoq-feed-attached .fa-t { color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #hoq-discord .hoq-feed-attached .fa-a { color: #b0b0b6; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

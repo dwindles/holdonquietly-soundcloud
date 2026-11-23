@@ -137,9 +137,9 @@ http.createServer(async (req, res) => {
       fs.writeFileSync(f, Buffer.from(r.data, 'base64'));
       out({ ok: true, file: f });
     } else if (u.pathname === '/eval') {
-      let body = '';
-      for await (const c of req) body += c;
-      out(await evalJS(body));
+      const parts = [];   // whole bytes first: a character split across chunks would break
+      for await (const c of req) parts.push(c);
+      out(await evalJS(Buffer.concat(parts).toString('utf8')));
     } else if (u.pathname === '/tap') {
       const pt = [{ x: +q.x, y: +q.y, radiusX: 4, radiusY: 4, force: 1, id: 1 }];
       await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt });
@@ -160,4 +160,7 @@ http.createServer(async (req, res) => {
     } else { res.writeHead(404); res.end(); }
   } catch (e) { res.writeHead(500); res.end(String((e && e.stack) || e)); }
 }).listen(CTL, '127.0.0.1');
-process.on('SIGINT', () => { try { chrome.kill(); } catch (e) {} process.exit(0); });
+// However this process ends, take the browser with it: a leftover one keeps the
+// profile and the debug port, and the next start can't attach.
+process.on('exit', () => { try { chrome.kill(); } catch (e) {} });
+['SIGINT', 'SIGTERM', 'SIGHUP'].forEach((s) => process.on(s, () => process.exit(0)));

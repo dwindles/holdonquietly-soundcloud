@@ -44,7 +44,7 @@
       return 'https://soundcloud.com' + h.replace(/^https?:\/\/[^/]+/i, '').split(/[?#]/)[0];
     };
     const big = (u) => (u || '').replace(/-t\d+x\d+\./, '-t500x500.').replace(/-(large|crop)\./, '-t500x500.');
-    const safeImg = (u) => (/^https:\/\/[^\s"'()]+$/.test(u || '') ? u : '');
+    const safeImg = (u) => (typeof hoqSafeUrl === 'function' ? hoqSafeUrl(u) : '');   // preload's https-only guard
 
     // ---- toast + action sheet ----------------------------------------------
     let toastEl = null, toastT = 0;
@@ -159,11 +159,16 @@
     };
     let tabKey = '';
     const syncTabs = () => {
-      const c = curTab(), anon = H.classList.contains('hoq-anon'), key = c + '|' + anon;
+      // Account-only tabs wait for the header to show you're signed in (the
+      // shim's hoq-anon only appears once it has rendered), and signed-out ones
+      // for hoq-anon, so a signed-out phone never flashes Feed and Library.
+      const anon = H.classList.contains('hoq-anon');
+      const signed = !anon && !!q(".header__userNavUsernameButton, .header__userNav a[href^='/you']");
+      const c = curTab(), key = c + '|' + anon + '|' + signed;
       if (key === tabKey) return;
       tabKey = key;
       tabs.querySelectorAll('button').forEach((b) => {
-        b.hidden = (b.hasAttribute('data-auth') && anon) || (b.hasAttribute('data-anon') && !anon);
+        b.hidden = (b.hasAttribute('data-auth') && !signed) || (b.hasAttribute('data-anon') && !anon);
         const on = b.dataset.k === c;
         b.classList.toggle('on', on);
         if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -318,6 +323,9 @@
         const live = !!n.title && typeof playerProgress === 'function';
         H.classList.toggle('hoq-pill-on', live);
         H.classList.toggle('hoq-q-open', live && queueOpen());
+        // SoundCloud's own bar on screen instead (the floating player isn't up):
+        // the page keeps room for it (mobile.css: hoq-bar-on).
+        H.classList.toggle('hoq-bar-on', !live && !!q('.playControls.m-visible'));
         syncTabs();
         if (!live) { if (isOpen()) closeSheet(); return; }
         const pr = prog();
