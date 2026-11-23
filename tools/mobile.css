@@ -16,7 +16,16 @@
 /* Our own elements stay out of the way unless the phone layout is on. */
 #hoq-pill, #hoq-tabs, #hoq-mnp, #hoq-qdim { display: none; }
 
-@media (max-width: 820px) {
+/* SoundCloud's newer-app frames (Home's sections, the new track page) are made
+   see-through so the theme's background shows behind them; for that preload
+   sets their root to color-scheme: normal (html.hoq-webi). This page declares
+   color-scheme: dark (the meta tag in tools/mobile-ui.js), and when a frame's
+   root and its iframe element differ, the browser paints an opaque canvas under
+   the frame: white. Light on the element matches the frame, so it stays
+   see-through. (The desktop app declares no scheme, so it never hit this.) */
+iframe.webiEmbeddedModuleIframe, iframe[class*="webiIframe"], .webiIframeV2Layout iframe { color-scheme: light !important; }
+
+@media (max-width: 820px), (pointer: coarse) and (max-height: 500px) {
 
   /* ======================================================================
      1. Shell
@@ -1215,7 +1224,8 @@ html.hoq-anon #hoq-signin-cta { display: flex; }
 /* Wider than a phone (an iPad, a computer's browser) SoundCloud's own fixed
    47px header is back and the page below keeps a 46px gap for it: the banner
    clears the header, lines up with the 1240px page, and takes that gap back. */
-@media (min-width: 821px) {
+/* (the exact opposite of the phone layout's query: not a phone turned sideways) */
+@media (min-width: 821px) and (min-height: 501px), (min-width: 821px) and (pointer: fine), (min-width: 821px) and (pointer: none) {
   html.hoq-anon #hoq-signin-cta { width: calc(100% - 28px); max-width: 1240px; margin: 59px auto -34px; }
 }
 #hoq-signin-cta .cta-txt { flex: 1 1 auto; min-width: 0; }

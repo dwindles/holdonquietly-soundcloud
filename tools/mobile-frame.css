@@ -5,7 +5,9 @@
    phone UI (tools/mobile-ui.js) puts it in each frame as
    <style id="hoq-mobile-frame-css">; the frame's <html> carries our classes
    (preload's themeFrames copies them across). */
-@media (max-width: 820px) {
+/* Put in only while the page around it is in its phone layout (tools/mobile-ui.js,
+   styleFrames): a media query here would measure the frame, not the screen. */
+@media all {
   /* The track page scrolls inside this box: leave room under the last comment
      for the floating player. */
   html.hoq-webi #navigation-shell-right-side-container { padding-bottom: 104px !important; box-sizing: border-box !important; }

@@ -238,6 +238,29 @@ signed in) in a sandbox, with the payload decoded exactly as the redeem block
 decodes it; the sheet and the Settings button in `tools/phone-preview.js` (the
 pair POST stubbed). Not tested: a real iPhone run with a real SoundCloud sign-in.
 
+## iPhone notes (v1.6.44)
+
+- **Lock screen.** Previous/next and seekto are kept registered (preload, "Lock
+  screen / Now Playing"): SoundCloud resets its handlers on every track, and the
+  ±10 pair is refused so iOS shows track skip. The position goes to
+  `navigator.mediaSession.setPositionState` (SoundCloud never sets it).
+- **Which `<audio>`.** On iPhone the proxy plays through Safari's own HLS with no
+  Web Audio (`__hoqNativeHls`), so `__hoqMediaEl` is taken from `play()`.
+- **Locked, between songs.** iOS freezes a locked page once audio stops, so the
+  next song never started. From 3 s before a song ends until the next one plays
+  (25 s at most), a Web Audio constant of 0.0001 keeps the page counted as
+  playing. `localStorage.hoqKeepAlive = "0"` turns it off. Untested on a real
+  locked phone when written.
+- **soundcloud.com links.** On the proxy, a link (or `window.open`) to
+  soundcloud.com, in the page or a same-origin frame, is routed through the page's
+  own router: from the Home Screen app iOS would hand it to the SoundCloud app.
+- **Layout.** The phone layout also applies to a phone turned sideways
+  (`(pointer: coarse) and (max-height: 500px)`). The frame CSS is put in only while
+  the page is in its phone layout (a media query in a frame measures the frame).
+- **Frames turned white** at desktop widths: the page declares `color-scheme: dark`
+  and the frame root is `normal`, so the browser painted an opaque canvas.
+  `color-scheme: light` on the iframe elements matches them again.
+
 ## Status
 
 **The bookmarklet build has been run for real** — loaded from jsDelivr into a

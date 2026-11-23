@@ -13,6 +13,7 @@
       next: SV('<rect class="f" x="16.8" y="5.5" width="2.4" height="13" rx="1"/><path class="f" d="M5 6.8v10.4c0 .9 1 1.4 1.7.9l7.4-5.2a1.1 1.1 0 0 0 0-1.8L6.7 5.9C6 5.4 5 5.9 5 6.8z"/>'),
       heart: SV('<path d="M12 20.3s-7.3-4.4-9.2-8.9C1.4 8 3.5 4.6 7.1 4.6c2.1 0 3.6 1.1 4.9 2.8 1.3-1.7 2.8-2.8 4.9-2.8 3.6 0 5.7 3.4 4.3 6.8-1.9 4.5-9.2 8.9-9.2 8.9z"/>'),
       send: SV('<path d="M21 3 10.2 13.8"/><path d="M21 3 14.4 21l-4.2-7.2L3 9.6z"/>'),
+      discord: SV('<path class="f" d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>'),   // the Discord logo
       shuffle: SV('<path d="M16 4h4v4"/><path d="M4 20 20 4"/><path d="M20 16v4h-4"/><path d="m14.5 14.5 5.5 5.5"/><path d="m4 4 5 5"/>'),
       repeat: SV('<path d="m17 2 3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="m7 22-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/>'),
       queue: SV('<path d="M4 6h12M4 11h12M4 16h7"/><path class="f" d="M15 14.2v5.6c0 .5.5.8.9.5l4.3-2.8a.6.6 0 0 0 0-1l-4.3-2.8c-.4-.3-.9 0-.9.5z"/>'),
@@ -22,6 +23,7 @@
       feed: SV('<rect x="4" y="3.8" width="16" height="7" rx="2"/><rect x="4" y="13.2" width="16" height="7" rx="2"/>'),
       library: SV('<path d="M5 4v16M9.8 4v16"/><path d="m14 4.6 5.2 15"/>'),
       search: SV('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/>'),
+      settings: SV('<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
       social: SV('<circle cx="9" cy="8" r="3.4"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M15.6 4.9a3.3 3.3 0 0 1 0 6.2"/><path d="M18.2 14.3A6 6 0 0 1 21 20"/>'),
     };
 
@@ -132,6 +134,7 @@
       { k: 'library', label: 'Library', icon: IC.library, auth: 1 },
       { k: 'search', label: 'Search', icon: IC.search, anon: 1 },
       { k: 'social', label: 'Social', icon: IC.social },
+      { k: 'settings', label: 'Settings', icon: IC.settings },
     ];
     const tabs = document.createElement('nav');
     tabs.id = 'hoq-tabs';
@@ -149,7 +152,7 @@
       return null;
     };
     const curTab = () => {
-      if (H.classList.contains('hoq-tab')) return 'social';
+      if (H.classList.contains('hoq-tab')) { const dp = document.getElementById('hoq-discord'); return dp && dp.dataset.pane === 'settings' ? 'settings' : 'social'; }
       const p = location.pathname;
       if (/^\/(discover|home)?\/?$/.test(p)) return 'home';
       if (/^\/(feed|stream)(\/|$)/.test(p)) return 'feed';
@@ -178,9 +181,22 @@
       const b = e.target.closest('button[data-k]');
       if (!b) return;
       const k = b.dataset.k, was = curTab();
-      if (k === 'social') {
-        if (typeof toggleDiscord === 'function') toggleDiscord();
-        if (H.classList.contains('hoq-tab')) { const p = document.getElementById('hoq-discord'); if (p) p.scrollTop = 0; }
+      if (k === 'social' || k === 'settings') {
+        // Social/Settings is one page with sub-tabs: Settings opens it on its
+        // Settings tab, Social on the rest. The tab you're on again closes it.
+        if (was === k) { if (typeof toggleDiscord === 'function') toggleDiscord(); }
+        else {
+          if (!H.classList.contains('hoq-tab') && typeof toggleDiscord === 'function') toggleDiscord();
+          const p = document.getElementById('hoq-discord');
+          if (p) {
+            const want = k === 'settings' ? 'settings' : 'social';
+            if (k === 'settings' || p.dataset.pane === 'settings') {
+              const st = p.querySelector('.hoq-subtab[data-pane="' + want + '"]');
+              if (st) st.click();
+            }
+            p.scrollTop = 0;
+          }
+        }
       } else {
         if (H.classList.contains('hoq-tab') && typeof closeDiscord === 'function') closeDiscord();
         if (k === 'search') {
@@ -213,7 +229,7 @@
         '<button class="pl-prev" type="button" aria-label="Previous">' + IC.prev + '</button>' +
         '<button class="pl-next" type="button" aria-label="Next">' + IC.next + '</button>' +
         '<button class="pl-like" type="button" aria-label="Like">' + IC.heart + '</button>' +
-        '<button class="pl-dc" type="button" aria-label="Discord" aria-haspopup="menu">' + IC.send + '</button>' +
+        '<button class="pl-dc" type="button" aria-label="Discord" aria-haspopup="menu">' + IC.discord + '</button>' +
       '</div>';
     const P = (s) => q(s, pill);
     const playBtn = P('.pl-play'), disc = P('.pl-disc'), ring = P('.pl-prog'), meta = P('.pl-meta'),
@@ -254,7 +270,7 @@
           '<button class="mnp-rep" type="button" aria-label="Repeat: off">' + IC.repeat + '<i>1</i></button>' +
         '</div>' +
         '<div class="mnp-foot">' +
-          '<button class="mnp-dc" type="button">' + IC.send + '<span>Discord</span></button>' +
+          '<button class="mnp-dc" type="button">' + IC.discord + '<span>Discord</span></button>' +
           '<button class="mnp-share" type="button">' + IC.share + '<span>Share</span></button>' +
           '<button class="mnp-q" type="button">' + IC.queue + '<span>Queue</span></button>' +
         '</div>' +
@@ -317,10 +333,19 @@
       mSeek.setAttribute('aria-valuenow', String(Math.round(pos)));
       mSeek.setAttribute('aria-valuetext', fmt(pos) + ' of ' + fmt(dur));
     };
+    let deadSince = 0;
     const sync = () => {
       try {
         const n = now();
-        const live = !!n.title && typeof playerProgress === 'function';
+        let live = !!n.title && typeof playerProgress === 'function';
+        // Between songs (Next, or one ending) SoundCloud's bar is blank for a
+        // moment: that blink closed the full player. Only a bar that stays empty
+        // for 3 s counts as nothing playing.
+        if (live) deadSince = 0;
+        else if (H.classList.contains('hoq-pill-on')) {
+          if (!deadSince) deadSince = Date.now();
+          if (Date.now() - deadSince < 3000) return;
+        }
         H.classList.toggle('hoq-pill-on', live);
         H.classList.toggle('hoq-q-open', live && queueOpen());
         // SoundCloud's own bar on screen instead (the floating player isn't up):
@@ -499,11 +524,20 @@
     // Signed in, Home's modules and the track page are SoundCloud's new app in
     // same-origin frames; the theme already styles them (themeFrames), this adds
     // the phone layout (tools/mobile-frame.css).
+    // Only while this page is in its phone layout: a media query inside a frame
+    // measures the frame, and Home's section frames are under 820px wide on any
+    // screen, so the frame rules would land in the desktop layout too. Same
+    // query as tools/mobile.css (a phone turned sideways keeps the phone layout).
+    const PHONE_MQ = window.matchMedia ? matchMedia('(max-width: 820px), (pointer: coarse) and (max-height: 500px)') : null;
     const styleFrames = () => {
+      const phone = !PHONE_MQ || PHONE_MQ.matches;
       document.querySelectorAll('iframe').forEach((f) => {
         let d = null;
         try { d = f.contentDocument; } catch (e) { return; }   // cross-origin: not ours
-        if (!d || !d.documentElement || d.getElementById('hoq-mobile-frame-css')) return;
+        if (!d || !d.documentElement) return;
+        const had = d.getElementById('hoq-mobile-frame-css');
+        if (!phone) { if (had) had.remove(); return; }
+        if (had) return;
         try {
           const st = d.createElement('style');
           st.id = 'hoq-mobile-frame-css';
@@ -512,6 +546,7 @@
         } catch (e) {}
       });
     };
+    if (PHONE_MQ) try { PHONE_MQ.addEventListener('change', styleFrames); } catch (e) {}
 
     // ---- <head>: what Safari and a Home Screen web app read ----------------
     // SoundCloud's own say #333 for the browser bars (grey over our near-black),

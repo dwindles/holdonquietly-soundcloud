@@ -145,24 +145,93 @@ function scPost(cmd) {
 })();
 // </hoq-webi-bridge>
 
+// --- iPhone (phone site): which <audio> is playing -----------------------------
+// There the phone site plays through Safari's own HLS on a plain <audio>, with no
+// Web Audio in the path (window.__hoqNativeHls, set by the proxy build), so
+// createMediaElementSource below never runs and __hoqMediaEl was never set: the
+// lock screen's position, the gap keep-alive and the players had no element.
+// Taken from play() instead.
+(() => {
+  try {
+    if (!window.__hoqNativeHls) return;
+    const P = HTMLMediaElement.prototype, play0 = P.play;
+    P.play = function () {
+      if (this instanceof HTMLAudioElement) window.__hoqMediaEl = this;
+      return play0.apply(this, arguments);
+    };
+  } catch (e) {}
+})();
+
+// --- iPhone, locked: keep the page awake between songs -------------------------
+// iOS freezes a locked page's scripts once it stops playing audio, and between
+// songs nothing plays: SoundCloud's own code never got to start the next one
+// until the phone was unlocked. For those few seconds (from just before a song
+// ends until the next one plays, at most 25 s) a Web Audio source plays a
+// constant 0.0001: inaudible, but not silence, so the page counts as playing.
+// Its context is unlocked by your first tap and kept suspended otherwise.
+// localStorage hoqKeepAlive = "0" turns it off.
+(() => {
+  try {
+    if (!window.__hoqNativeHls) return;
+    let off = false;
+    try { off = localStorage.getItem('hoqKeepAlive') === '0'; } catch (e) {}
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (off || !AC) return;
+    let ac = null, src = null, stopT = 0;
+    const unlock = () => {
+      if (ac) return;
+      try { ac = new AC(); } catch (e) { ac = null; return; }
+      ac.resume().then(() => { if (!src) ac.suspend().catch(() => {}); }, () => {});
+    };
+    ['touchend', 'click'].forEach((ev) => document.addEventListener(ev, unlock, { capture: true, passive: true }));
+    const stop = () => {
+      clearTimeout(stopT);
+      if (src) { try { src.stop(); src.disconnect(); } catch (e) {} src = null; }
+      if (ac && ac.state === 'running') ac.suspend().catch(() => {});
+    };
+    const start = () => {
+      if (src || !ac) return;
+      try {
+        src = ac.createConstantSource();
+        src.offset.value = 0.0001;
+        src.connect(ac.destination);
+        src.start();
+      } catch (e) { src = null; return; }
+      ac.resume().catch(() => {});
+      clearTimeout(stopT);
+      stopT = setTimeout(stop, 25000);
+    };
+    let bound = null;
+    setInterval(() => {
+      const el = window.__hoqMediaEl;
+      if (!el || el === bound) return;
+      bound = el;
+      el.addEventListener('timeupdate', () => {
+        const left = (el.duration - el.currentTime) / (el.playbackRate || 1);
+        if (document.hidden && isFinite(left) && left > 0 && left < 3) start();
+      });
+      el.addEventListener('ended', () => { if (document.hidden) start(); });
+      el.addEventListener('playing', () => { if (src) setTimeout(stop, 1500); });
+    }, 1000);
+  } catch (e) {}
+})();
+
 // --- Lock screen / Now Playing controls ---------------------------------------
 // SoundCloud's player registers seekforward/seekbackward for every track, and
 // iOS shows that pair as ±10 buttons IN PLACE OF previous/next whenever both
 // exist. Refusing the pair gives the lock screen track skip, like SoundCloud's
 // own app; seekto makes its scrubber draggable. (The app's ★ is a native-only
 // control — the Media Session API has no like action, so no site can show it.)
+// Kept in place, not set once: iOS greyed out next and the scrubber on the
+// phone. Previous/next and seekto are put back whenever anything clears them,
+// re-applied as tracks change, and the position is reported (SoundCloud never
+// calls setPositionState, and iOS wants it for a draggable scrubber).
 (() => {
   try {
     const MS = window.MediaSession;
     if (!MS || !navigator.mediaSession || MS.prototype.__hoqLock) return;
     MS.prototype.__hoqLock = true;
     const orig = MS.prototype.setActionHandler;
-    const has = {};
-    MS.prototype.setActionHandler = function (action, handler) {
-      if (action === 'seekforward' || action === 'seekbackward') handler = null;
-      has[action] = !!handler;
-      return orig.call(this, action, handler);
-    };
     const click = (sel) => { const b = document.querySelector(sel); if (b) b.click(); };
     const seekTo = (sec) => {
       const wrap = document.querySelector('.playbackTimeline__progressWrapper');
@@ -173,13 +242,51 @@ function scPost(cmd) {
       wrap.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
       wrap.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
     };
+    // Ours, for when SoundCloud has none (it sets previous/next once; its own
+    // play-next goes through its queue, so it's kept when it's there).
+    const mine = {
+      nexttrack: () => click('.skipControl__next'),
+      previoustrack: () => click('.skipControl__previous'),
+      seekto: (d) => { if (d && isFinite(d.seekTime)) seekTo(d.seekTime); },
+    };
+    const sc = {};
+    const pick = (action, handler) => {
+      if (action === 'seekforward' || action === 'seekbackward') return null;
+      if (action === 'seekto') return mine.seekto;
+      return handler || mine[action] || null;
+    };
+    MS.prototype.setActionHandler = function (action, handler) {
+      if (action in mine) sc[action] = handler || null;
+      return orig.call(this, action, pick(action, handler));
+    };
+    const ms = navigator.mediaSession;
     const install = () => {
-      try { orig.call(navigator.mediaSession, 'seekto', (d) => { if (d && isFinite(d.seekTime)) seekTo(d.seekTime); }); } catch (e) {}
-      // SoundCloud registers previous/next itself; only fill in if it hasn't.
-      if (!has.nexttrack) try { orig.call(navigator.mediaSession, 'nexttrack', () => click('.skipControl__next')); } catch (e) {}
-      if (!has.previoustrack) try { orig.call(navigator.mediaSession, 'previoustrack', () => click('.skipControl__previous')); } catch (e) {}
+      ['nexttrack', 'previoustrack', 'seekto'].forEach((a) => {
+        try { orig.call(ms, a, pick(a, sc[a])); } catch (e) {}
+      });
+      ['seekforward', 'seekbackward'].forEach((a) => { try { orig.call(ms, a, null); } catch (e) {} });
+    };
+    let lastKey = '', boundEl = null;
+    const tick = () => {
+      const el = window.__hoqMediaEl;
+      if (el && el !== boundEl) {
+        boundEl = el;   // its own events: SoundCloud's <audio> isn't in the page, so they never reach document
+        ['play', 'pause', 'seeked', 'loadedmetadata', 'ratechange'].forEach((ev) => el.addEventListener(ev, () => setTimeout(tick, 0)));
+      }
+      const key = (el && (el.currentSrc || el.src)) || '';
+      if (key !== lastKey) { lastKey = key; install(); }   // a new track: put ours back
+      if (el && ms.setPositionState) {
+        const dur = el.duration;
+        if (isFinite(dur) && dur > 0) {
+          try { ms.setPositionState({ duration: dur, position: Math.max(0, Math.min(el.currentTime || 0, dur)), playbackRate: el.playbackRate || 1 }); } catch (e) {}
+        }
+      }
     };
     setTimeout(install, 4000);
+    setInterval(tick, 2000);
+    // a seek, a pause or a new song: tell iOS right away rather than at the next tick
+    ['play', 'pause', 'seeked', 'loadedmetadata', 'ratechange'].forEach((ev) =>
+      document.addEventListener(ev, () => setTimeout(tick, 0), true));
   } catch (e) {}
 })();
 
@@ -2889,7 +2996,12 @@ const BASE_CSS = `
   .header__right { display: flex !important; align-items: center !important; gap: 2px !important; }
   .header__userNav { display: contents !important; }
   .header__soundInput, .header__upload { order: 1; margin-right: 10px !important; }
-  #hoq-out-btn { order: 2; } #hoq-eq-btn { order: 3; } #hoq-mini-btn { order: 4; }
+  #hoq-out-btn { order: 2; } #hoq-eq-btn { order: 3; } #hoq-mini-btn, #hoq-upd-btn { order: 4; }
+  /* Check for updates: spins while it looks, dotted once an update is ready */
+  @keyframes hoq-upd-spin { to { transform: rotate(360deg); } }
+  .header #hoq-upd-btn.is-busy svg { animation: hoq-upd-spin .9s linear infinite; }
+  .header #hoq-upd-btn.has-upd::after { content: ''; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px;
+    border-radius: 50%; background: var(--sc-accent, #ff5500); box-shadow: 0 0 0 2px rgba(13,13,16,.9); }
   .header__loginMenu { order: 5; margin-left: 8px !important; }
   .header__userNavActivitiesButton { order: 6; } .header__userNavMessagesButton { order: 7; }
   .header__right > .header__navMenu { order: 8; margin: 0 !important; }
@@ -3689,6 +3801,7 @@ function themeFrames() {
       addJamButtons(d);
       attachFrameContextMenu(d, f);
       attachGoPress(d);   // a play press in the new app's pages that opens the Go+ page
+      attachScLinkGuard(d);   // phone site: its soundcloud.com links stay in the app
       // only while that frame is actually on screen (it stays loaded, hidden, on other pages)
       const fr = f.getBoundingClientRect();
       if (tagFullPage(d) && fr.width > 0 && fr.height > 0 && getComputedStyle(f).visibility !== 'hidden' && getComputedStyle(f).opacity !== '0') fullPage = true;
@@ -4244,14 +4357,14 @@ function pageCoverUrl() {
   return null;
 }
 
-function currentCoverUrl() {
+function currentCoverUrl(raw) {
   const scope = document.querySelector('.playbackSoundBadge, .playControls');
   if (!scope) return null;
   const els = scope.querySelectorAll('span, div, a, .sc-artwork, .image');
   for (const el of els) {
     const bg = getComputedStyle(el).backgroundImage || '';
     const m = bg.match(/url\(["']?(https?:[^"')]+)["']?\)/);
-    if (m) return m[1].replace(/-t\d+x\d+\./, '-t200x200.').replace(/-large\./, '-t200x200.');
+    if (m) return raw ? m[1] : m[1].replace(/-t\d+x\d+\./, '-t200x200.').replace(/-large\./, '-t200x200.');
   }
   return null;
 }
@@ -4312,7 +4425,11 @@ function matchTick() {
   }
   // Always sample the cover: drives the waveform hue, and the accent too when
   // match-cover mode is on. (CORS-tainted → C# host samples + calls __scCoverColors.)
-  coverColors(url, (cols) => {
+  // The colours come from the copy the player bar already shows (cached, and
+  // 28px is all the sampler needs): fetching the 200px one first made the
+  // accent trail the song by seconds on the phone, where it loads via the proxy.
+  const sample = (currentCoverUrl() === url && currentCoverUrl(true)) || url;
+  coverColors(sample, (cols) => {
     if (cols) {
       setBgBrightness(cols.avg || cols.c1);   // whole-image average when we have it
       const n = normalizeCoverColors(cols.c1, cols.c2);
@@ -4960,6 +5077,17 @@ function buildDiscordTab() {
 // dot on the tab for everyone who hasn't opened it since).
 // Each item: [kind, where, text]: kind 'new' | 'fix', where 'phone' | 'pc' | ''.
 const HOQ_CHANGES = [
+  { id: 'v1.6.44', title: 'v1.6.44: check for updates, and phone fixes', when: 'Nov 23, 2026', items: [
+    ['new', 'pc', 'A Check for updates button in the header, next to the compact player. It finds, downloads and offers the update right then.'],
+    ['fix', 'phone', 'Tapping a song stays in holdonquietly instead of opening the SoundCloud app.'],
+    ['fix', 'phone', 'Next and the scrubber work on the lock screen.'],
+    ['fix', 'phone', 'A song ending while your phone is locked moves on to the next one, instead of waiting until you unlock.'],
+    ['fix', 'phone', 'Pressing Next in the full-screen player no longer closes it.'],
+    ['new', 'phone', 'Settings has its own button in the bottom bar.'],
+    ['fix', 'phone', 'Turned sideways, your phone keeps the phone layout, and Home\'s sections are no longer white boxes on an iPad or a computer.'],
+    ['fix', '', 'Match song cover changes the colours as soon as the song does.'],
+    ['fix', 'phone', 'The Discord buttons show the real Discord logo.'],
+  ] },
   { id: 'v1.6.43', title: 'v1.6.43: sign in with no PC', when: 'Nov 22, 2026', items: [
     ['new', 'phone', 'No PC? Sign in on soundcloud.com and a bookmark brings you back here signed in. Sign in → No PC? has every step. It\'s a stand-in until there\'s a direct way in.'],
     ['new', 'phone', 'Signed in in Safari but not the Home Screen app (or the other way round)? Settings → Home Screen app → Copy link, then paste it into the other one\'s Sign in sheet.'],
@@ -5968,6 +6096,15 @@ window.__hoqUpdate = function (state, ver) {
         '<span>Restart to finish installing.</span></div>' +
         '<button class="go">Restart</button><button class="x">×</button>';
       el.querySelector('.go').onclick = () => scPost('update:apply');
+      const ub = document.getElementById('hoq-upd-btn');
+      if (ub) { ub.classList.remove('is-busy'); ub.classList.add('has-upd'); ub.title = 'Update ' + v + ' ready: restart to install'; }
+    } else if (state === 'downloading') {   // the header button found one
+      el.innerHTML = '<div class="ic">↓</div><div class="tx"><b>Downloading ' + v + '…</b>' +
+        '<span>It’ll ask to restart when it’s ready.</span></div><button class="x">×</button>';
+    } else if (state === 'latest') {
+      el.innerHTML = '<div class="ic">✓</div><div class="tx"><b>You’re up to date</b>' +
+        '<span>' + v + ' is the latest version.</span></div><button class="x">×</button>';
+      setTimeout(() => { try { el.classList.remove('show'); setTimeout(() => el.remove(), 400); } catch (e) {} }, 5000);
     } else if (state === 'notice') {   // (state, title, detail): a short heads-up
       el.innerHTML = '<div class="ic">!</div><div class="tx"><b>' + hoqEsc(ver) + '</b>' +
         '<span>' + hoqEsc(arguments[2] || '') + '</span></div><button class="x">×</button>';
@@ -5982,6 +6119,40 @@ window.__hoqUpdate = function (state, ver) {
     requestAnimationFrame(() => el.classList.add('show'));
   } catch (e) {}
 };
+
+// What the header's "Check for updates" found (Updater.cs CheckAsync).
+window.__hoqUpdCheck = function (state, ver) {
+  try {
+    const btn = document.getElementById('hoq-upd-btn');
+    if (btn) btn.classList.toggle('is-busy', state === 'checking' || state === 'downloading');
+    if (state === 'checking') return;
+    if (state === 'downloading' || state === 'ready' || state === 'latest') window.__hoqUpdate(state, ver);
+    else if (state === 'dev') window.__hoqUpdate('notice', 'This copy doesn’t update itself', 'It’s a test build. The released app gets its updates from GitHub.');
+    else window.__hoqUpdate('notice', 'Couldn’t check for updates', 'Check your connection and try again.');
+  } catch (e) {}
+};
+
+// Header button: check for an update now (it also checks by itself on launch).
+// Desktop app only: the phone site is always the latest copy anyway.
+function setupUpdateBtn() {
+  if (document.documentElement.classList.contains('hoq-mobile') || !hoqHasHost()) return;
+  if (document.getElementById('hoq-upd-btn')) return;
+  if (!document.querySelector('.header__userNav') && !document.querySelector('.header__right')) return;
+  hoqHdrIconCss();
+  const btn = document.createElement('button');
+  btn.id = 'hoq-upd-btn'; btn.type = 'button'; btn.className = 'hoq-hdr-icon';
+  btn.title = 'Check for updates'; btn.setAttribute('aria-label', 'Check for updates');
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v5h-5"/></svg>';
+  const mini = document.getElementById('hoq-mini-btn');
+  if (mini && mini.parentElement) mini.insertAdjacentElement('afterend', btn);
+  else if (!hoqPlaceHdrIcon(btn)) return;
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('is-busy')) return;
+    btn.classList.add('is-busy');
+    scPost('update:check');
+    setTimeout(() => btn.classList.remove('is-busy'), 120000);   // a download that never reports back
+  });
+}
 
 // The C# host delivers the Discord server widget (name + online count) here.
 window.__hoqDcWidget = function (data) {
@@ -8010,6 +8181,7 @@ function removeClutter() {
   try { setupOutputPicker(); } catch (e) {}
   try { setupEqPicker(); } catch (e) {}
   try { setupMiniMode(); } catch (e) {}
+  try { setupUpdateBtn(); } catch (e) {}
   try { setupProfileExtras(); } catch (e) {}
   try { buildVolume(); } catch (e) {}
   try { moveFans(); } catch (e) {}
@@ -9994,6 +10166,59 @@ function hoqGoTick() {
   hoqYtStart(path, info.want);
 }
 
+// ---- Phone site: soundcloud.com links stay in the app -------------------------
+// On sc.holdonquietly.com a link to soundcloud.com itself (the new app's frames
+// build some from SoundCloud's own data, and our own rows link the public page)
+// left the site, and from the Home Screen app iOS hands soundcloud.com to the
+// SoundCloud app. On the proxy such a link goes through this page's own router
+// instead: a relative link clicked in the top page, which SoundCloud's app
+// navigates to without a reload, so the music keeps playing.
+const HOQ_SC_HOST = /^(www\.|m\.)?soundcloud\.com$/i;
+const hoqOnProxy = () => /(^|\.)holdonquietly\.com$/i.test(location.hostname);
+function hoqScPath(href) {
+  try {
+    const u = new URL(href, location.href);
+    return HOQ_SC_HOST.test(u.hostname) ? (u.pathname + u.search + u.hash) || '/' : null;
+  } catch (e) { return null; }
+}
+function hoqSoftNav(path) {
+  try {
+    const d = window.top.document;
+    const a = d.createElement('a');
+    a.href = path;
+    a.style.display = 'none';
+    d.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) { try { window.top.location.assign(path); } catch (er) {} }
+}
+function attachScLinkGuard(doc) {
+  if (!hoqOnProxy() || !doc || doc.__hoqScGuard) return;
+  doc.__hoqScGuard = true;
+  const w = doc.defaultView || window;
+  w.addEventListener('click', (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    const p = hoqScPath(a.getAttribute('href'));
+    if (p == null) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    hoqSoftNav(p);
+  }, true);
+  if (typeof w.open === 'function' && !w.open.__hoq) {
+    const open0 = w.open;
+    const open1 = function (u) {
+      const p = hoqScPath(String(u || ''));
+      if (p != null) { hoqSoftNav(p); return null; }
+      return open0.apply(this, arguments);
+    };
+    open1.__hoq = true;
+    w.open = open1;
+  }
+}
+if (window.top === window) attachScLinkGuard(document);
+
 // ---- A play press that SoundCloud answers with its Go+ sales page ----------------
 // A track only Go+ can play doesn't even get a 30-second preview: pressing play
 // opens SoundCloud's Go+ checkout instead (the host stops that page loading and
@@ -11014,7 +11239,7 @@ function boot() {
     setTimeout(() => { try { removeClutter(); } catch (e) {} }, ms);
   });
   // Watch the now-playing cover for the "Match song cover" theme mode.
-  setInterval(matchTick, 1500);
+  setInterval(matchTick, 500);   // cheap when nothing changed: it stops at the same URL
   // Keep the webi V2 track-page iframe themed: it mounts late and re-navigates
   // on every track, so a one-shot push at boot would miss it.
   themeFrames();

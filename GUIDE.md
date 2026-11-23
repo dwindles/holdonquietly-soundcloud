@@ -40,6 +40,9 @@ PlayReady) are built in, so tracks that won't play in other SoundCloud apps play
   ready, Restart" note. The new version only swaps in when you click Restart or
   Quit from the tray, so playback is never cut off. Closing the window only hides it
   to the tray.
+  The header's **Check for updates** button (the circular arrow next to the compact
+  player) checks right then and says what it found; a dot stays on it while an
+  update is ready (Updater.cs CheckAsync, preload __hoqUpdCheck).
 
 ---
 

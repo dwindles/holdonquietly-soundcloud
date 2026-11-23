@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,6 +37,13 @@ static class Updater
     static string readyVer;                       // the staged update's version
 
     public static bool IsPending => pending;
+    static int busy;                              // a check or download is running
+    static volatile bool reportNext;              // the button was pressed while a check ran: report its outcome
+
+    // The dev build has holdonquietly.dll beside the exe (the published
+    // single-file exe doesn't): it never updates itself.
+    static bool IsDevBuild => File.Exists(Path.Combine(AppContext.BaseDirectory, "holdonquietly.dll"));
+    static Version Current => Norm(Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0));
 
     // Kick off from Init(). Never throws into the caller.
     public static void Start(string userData)
@@ -101,16 +109,45 @@ static class Updater
             try { var sc = Path.Combine(exeDir, CMD); if (File.Exists(sc)) File.Delete(sc); } catch { }
 
             await Task.Delay(6000); // let the app finish booting first
+            await CheckAsync(false);
+        }
+        catch { /* offline / rate-limited / no release yet — silently skip */ }
+    }
 
-            if (!http.DefaultRequestHeaders.UserAgent.TryParseAdd("holdonquietly-updater"))
-                http.DefaultRequestHeaders.UserAgent.Clear();
-            http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    // The header's "Check for updates" button (preload: update:check). Says what it
+    // found in the page (__hoqUpdCheck): checking, latest, downloading, ready,
+    // error, or dev (this build doesn't update itself).
+    public static void CheckNow()
+    {
+        try { _ = CheckAsync(true); } catch { }
+    }
 
-            string json = await http.GetStringAsync("https://api.github.com/repos/" + REPO + "/releases/latest");
-            var root = JsonDocument.Parse(json).RootElement;
+    static void Page(string state, string ver) =>
+        RunJs?.Invoke("window.__hoqUpdCheck && window.__hoqUpdCheck(" + JsStr(state) + "," + JsStr(ver) + ")");
+
+    // Ask GitHub for the latest release; if it's newer, download it and stage the
+    // swap. manual: the button asked, so every outcome is reported to the page.
+    static async Task CheckAsync(bool manual)
+    {
+        if (pending && readyVer != null) { if (manual) Page("ready", readyVer); return; }
+        if (IsDevBuild) { if (manual) Page("dev", VerStr(Current)); return; }
+        if (Interlocked.Exchange(ref busy, 1) == 1) { if (manual) { reportNext = true; Page("checking", ""); } return; }
+        try
+        {
+            exeDir ??= AppContext.BaseDirectory;
+            var cur = Current;
+            if (manual || reportNext) Page("checking", "");
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/" + REPO + "/releases/latest");
+            req.Headers.UserAgent.ParseAdd("holdonquietly-updater");
+            req.Headers.Accept.ParseAdd("application/vnd.github+json");
+            using var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) { Program.Log("update: GitHub answered " + (int)resp.StatusCode); if (manual || reportNext) Page("error", ""); return; }
+            var root = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
 
             Version remote = ParseVer(root.TryGetProperty("tag_name", out var t) ? t.GetString() : null);
-            if (remote == null || remote <= cur) return;
+            if (remote == null) { if (manual || reportNext) Page("error", ""); return; }
+            if (remote <= cur) { if (manual || reportNext) Page("latest", VerStr(cur)); return; }
 
             // Find the .exe asset on the release.
             string url = null;
@@ -126,11 +163,12 @@ static class Updater
                     }
                 }
             }
-            if (string.IsNullOrEmpty(url)) return;
+            if (string.IsNullOrEmpty(url)) { if (manual || reportNext) Page("error", ""); return; }
 
+            if (manual || reportNext) Page("downloading", VerStr(remote));
             // Download the new exe to a temp file, then move into place beside us.
             byte[] bytes = await http.GetByteArrayAsync(url);
-            if (bytes == null || bytes.Length < 1_000_000) return; // sanity: a real exe is big
+            if (bytes == null || bytes.Length < 1_000_000) { if (manual || reportNext) Page("error", ""); return; } // sanity: a real exe is big
             string tmp = Path.Combine(exeDir, NEW_EXE + ".part");
             File.WriteAllBytes(tmp, bytes);
             string newPath = Path.Combine(exeDir, NEW_EXE);
@@ -141,9 +179,12 @@ static class Updater
             pending = true;
             readyVer = VerStr(remote);
 
-            RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('ready'," + JsStr(readyVer) + ")");
+            Program.Log("update: v" + readyVer + " staged" + (manual || reportNext ? " (checked by hand)" : ""));
+            if (manual || reportNext) Page("ready", readyVer);
+            else RunJs?.Invoke("window.__hoqUpdate && window.__hoqUpdate('ready'," + JsStr(readyVer) + ")");
         }
-        catch { /* offline / rate-limited / no release yet — silently skip */ }
+        catch (Exception ex) { Program.Log("update check failed: " + ex.GetType().Name); if (manual || reportNext) Page("error", ""); }
+        finally { reportNext = false; Interlocked.Exchange(ref busy, 0); }
     }
 
     // Launch the swap cmd (waits for exit, replaces exe, relaunches). Called by

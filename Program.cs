@@ -1811,6 +1811,7 @@ class Program
         if (m == "hoqacct:signout") { _ = HoqAccount.SignOut(); return; }
         if (m == "dcwidget") { _ = DcWidget(); return; }
         if (m == "update:apply") { Updater.ApplyAndRestart?.Invoke(); return; }
+        if (m == "update:check") { Updater.CheckNow(); return; }   // the header's "Check for updates"
         if (m == "update:status") { Updater.PageReady(); return; }   // the page has loaded: its update toasts can show now
         if (m != null && m.StartsWith("jam:req:")) { _ = JamRequest(m.Substring(8)); return; }
         if (m != null && m.StartsWith("jam:watch:")) { JamWatch(m.Substring(10)); return; }
